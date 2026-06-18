@@ -11,5 +11,7 @@ repos:
         language: golang
         additional_dependencies:
           - github.com/google/addlicense@v1.2.0
-        # C/C++ source only; expand extensions as the codebase grows.
-        files: \.(c|cc|cxx|cpp|h|hh|hpp)$
+        # C/C++ sources + inline/template headers, plus shell and Python
+        # tooling scripts. Keep this list in sync with the CI check in
+        # .github/workflows/license-check.yml. (No CUDA — CPU-only project.)
+        files: \.(c|cc|cxx|cpp|h|hh|hpp|hxx|inl|ipp|tpp|py|sh)$

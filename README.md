@@ -16,12 +16,15 @@ license is available.
 
 ## Dependencies
 
-Third-party C++ dependencies (e.g. LibRaw, Eigen, FFTW, Halide, Catch2) are
-managed **project-locally** via a pinned manifest (Conan 2 / vcpkg) — no
-system-wide installs — and are wrapped behind thin interfaces so any one can be
-swapped. The build configuration is added once the C++ project is scaffolded.
-License obligations and the closed-app permissive-clean split are tracked in
-[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+_No third-party dependencies are linked yet._
+
+> **Note to self (planning, from curriculum phase P4 onward):** Third-party C++
+> dependencies will be managed **project-locally** via a pinned manifest
+> (Conan 2 / vcpkg) — no system-wide installs — and wrapped behind thin
+> interfaces so any one can be swapped. Candidate libraries under consideration
+> include LibRaw, Eigen, Halide, FFTW, and Catch2 — none is committed to yet.
+> License obligations and the closed-app permissive-clean split are tracked in
+> [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
 ## Contributing
 

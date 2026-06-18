@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+# Least privilege: this workflow only reads the repo.
+permissions:
+  contents: read
+
 jobs:
   addlicense:
     runs-on: ubuntu-latest
@@ -14,11 +18,17 @@ jobs:
           go-version: stable
       - run: go install github.com/google/addlicense@v1.2.0
       # Verify every source file carries the header in tools/license-header.txt.
-      # Non-source files (docs, configs, the LICENSE text) are ignored.
+      # The extension list MUST match the pre-commit hook in
+      # .pre-commit-config.yaml so local and CI enforce the identical set —
+      # otherwise a contributor's file could pass locally and fail here.
       - run: |
-          addlicense -check \
-            -f tools/license-header.txt \
-            -ignore '.github/**' \
-            -ignore '**/*.yml' \
-            -ignore '**/*.yaml' \
-            .
+          files=$(git ls-files \
+            '*.c' '*.cc' '*.cxx' '*.cpp' \
+            '*.h' '*.hh' '*.hpp' '*.hxx' \
+            '*.inl' '*.ipp' '*.tpp' \
+            '*.py' '*.sh')
+          if [ -n "$files" ]; then
+            addlicense -check -f tools/license-header.txt $files
+          else
+            echo "No source files require license headers yet."
+          fi
