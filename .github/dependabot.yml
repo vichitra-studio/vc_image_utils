@@ -1,0 +1,18 @@
+# Keeps dependencies patched automatically via PRs.
+# Docs: https://docs.github.com/code-security/dependabot/dependabot-version-updates
+version: 2
+updates:
+  # GitHub Actions used in workflows (e.g. checkout, setup-go).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+
+  # C++ dependency manifests (Conan / vcpkg) are added at curriculum phase P4.
+  # When the manifest lands, add the matching ecosystem here, e.g.:
+  #   - package-ecosystem: "vcpkg"   # or a custom workflow for Conan
+  #     directory: "/"
+  #     schedule:
+  #       interval: "weekly"

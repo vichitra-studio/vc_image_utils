@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/vichitra-studio/vc_image_utils/security/advisories/new
+    about: Please report security issues privately, not as public issues. See SECURITY.md.
+  - name: Commercial licensing
+    url: mailto:studio@vichitracollective.com
+    about: To use this code under terms other than the AGPL-3.0 (e.g. in a closed-source product).

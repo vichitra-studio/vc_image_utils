@@ -1,0 +1,7 @@
+# Code owners for vc_image_utils.
+# Owners are automatically requested for review on any matching PR.
+# Combined with branch protection, their review is required before merge.
+# Docs: https://docs.github.com/articles/about-code-owners
+
+# Default owner for everything in the repo.
+* @vichitra-studio
