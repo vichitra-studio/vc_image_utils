@@ -1,0 +1,42 @@
+# Build output
+build/
+cmake-build-*/
+out/
+*.o
+*.a
+*.so
+*.dylib
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+compile_commands.json
+
+# Dependency managers (generated files; refined when Conan/vcpkg wired at P4)
+conan_toolchain.cmake
+conan_*.cmake
+conandeps*.cmake
+conanbuild.*
+conanrun.*
+vcpkg_installed/
+
+# IDEs / editors
+.idea/
+.vscode/
+*.swp
+*~
+
+# Android / Gradle (post-MVP app)
+.gradle/
+local.properties
+*.apk
+*.aab
+
+# macOS
+.DS_Store
+
+# Test image dumps / scratch
+*.png.tmp
+/dumps/
+/scratch/

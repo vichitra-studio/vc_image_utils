@@ -1,0 +1,24 @@
+name: license-check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  addlicense:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go install github.com/google/addlicense@v1.2.0
+      # Verify every source file carries the header in tools/license-header.txt.
+      # Non-source files (docs, configs, the LICENSE text) are ignored.
+      - run: |
+          addlicense -check \
+            -f tools/license-header.txt \
+            -ignore '.github/**' \
+            -ignore '**/*.yml' \
+            -ignore '**/*.yaml' \
+            .

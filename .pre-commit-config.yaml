@@ -1,0 +1,15 @@
+# pre-commit builds addlicense in its own isolated, per-repo environment
+# (under ~/.cache/pre-commit) — no global install, version pinned below.
+# pre-commit (>=3.0.0) bootstraps Go automatically if absent.
+# Install the hook once with:  pre-commit install
+repos:
+  - repo: local
+    hooks:
+      - id: addlicense
+        name: addlicense (insert SPDX/copyright header)
+        entry: addlicense -f tools/license-header.txt
+        language: golang
+        additional_dependencies:
+          - github.com/google/addlicense@v1.2.0
+        # C/C++ source only; expand extensions as the codebase grows.
+        files: \.(c|cc|cxx|cpp|h|hh|hpp)$
