@@ -12,4 +12,5 @@ UseTab:            Never
 ColumnLimit:       100
 PointerAlignment:  Right             # int *p
 BreakBeforeBraces: Attach            # opening brace on the same line (K&R)
+AllowShortFunctionsOnASingleLine: None  # always expand function bodies to multiple lines
 ...
