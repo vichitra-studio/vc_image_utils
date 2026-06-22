@@ -1,0 +1,47 @@
+# Normalize line endings: store text as LF in the repo; check out native.
+# Eliminates CRLF/LF diff churn when contributors are on different OSes.
+* text=auto
+
+# Source and text files (stored LF).
+*.c              text
+*.cc             text
+*.cpp            text
+*.cxx            text
+*.h              text
+*.hh             text
+*.hpp            text
+*.hxx            text
+*.inl            text
+*.ipp            text
+*.tpp            text
+*.py             text
+*.sh             text eol=lf
+*.md             text
+*.txt            text
+*.yml            text
+*.yaml           text
+*.cmake          text
+CMakeLists.txt   text
+
+# Binary assets — never diff, merge, or line-normalize these.
+# Image / HDR / RAW formats expected by this project's tests and samples.
+*.png            binary
+*.jpg            binary
+*.jpeg           binary
+*.bmp            binary
+*.gif            binary
+*.ico            binary
+*.tif            binary
+*.tiff           binary
+*.exr            binary
+*.hdr            binary
+*.dng            binary
+*.raw            binary
+*.cr2            binary
+*.cr3            binary
+*.nef            binary
+*.arw            binary
+*.raf            binary
+*.orf            binary
+*.rw2            binary
+*.pdf            binary

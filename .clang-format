@@ -1,0 +1,15 @@
+# clang-format — C++ code style for vc_image_utils.
+# Apply with:  clang-format -i <files>   (or your editor's format-on-save).
+# Editor-level whitespace equivalents live in .editorconfig.
+---
+Language:          Cpp
+BasedOnStyle:      LLVM
+
+# House overrides (chosen explicitly):
+IndentWidth:       4
+TabWidth:          4
+UseTab:            AlignWithSpaces   # tabs for indentation, spaces for alignment
+ColumnLimit:       100
+PointerAlignment:  Right             # int *p
+BreakBeforeBraces: Attach            # opening brace on the same line (K&R)
+...

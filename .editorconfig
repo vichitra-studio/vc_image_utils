@@ -1,0 +1,26 @@
+# EditorConfig — consistent editor behaviour across the project.
+# https://editorconfig.org  (most editors support it natively or via a plugin)
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = tab
+indent_size = 4
+tab_width = 4
+
+# YAML syntax forbids tab indentation — must use spaces.
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+
+# Python convention (PEP 8) is 4 spaces, not tabs.
+[*.py]
+indent_style = space
+indent_size = 4
+
+# Markdown uses trailing whitespace for hard line breaks.
+[*.md]
+trim_trailing_whitespace = false
