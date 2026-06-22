@@ -1,0 +1,13 @@
+{
+  // Use clangd for C++ intelligence (disable the built-in IntelliSense to avoid conflicts)
+  "C_Cpp.intelliSenseEngine": "disabled",
+
+  // clangd reads compile_commands.json location from .clangd in the project root
+  "clangd.arguments": [
+    "--background-index",
+    "--clang-tidy"
+  ],
+
+  // CMake Tools: use Ninja for faster incremental builds
+  "cmake.generator": "Ninja"
+}

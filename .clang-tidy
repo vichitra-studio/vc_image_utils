@@ -1,0 +1,35 @@
+---
+# Report diagnostics only for project-owned headers; suppresses third_party/ noise.
+# Uses a path suffix so the regex is not sensitive to the clone directory name.
+HeaderFilterRegex: '/(include|src)/.*'
+
+# Use .clang-format for any formatting suggestions
+FormatStyle: file
+
+# WarningsAsErrors: enable in CI at P4; empty = warnings only during development
+WarningsAsErrors: ''
+
+Checks: >
+  bugprone-*,
+  clang-analyzer-core.*,
+  clang-analyzer-cplusplus.*,
+  modernize-*,
+  performance-*,
+  readability-const-return-type,
+  readability-container-size-empty,
+  readability-make-member-function-const,
+  readability-qualified-auto,
+  readability-redundant-member-init,
+  cppcoreguidelines-avoid-non-const-global-variables,
+  cppcoreguidelines-pro-type-member-init,
+  -modernize-use-trailing-return-type,
+  -readability-magic-numbers,
+  -bugprone-easily-swappable-parameters,
+  -modernize-use-nodiscard,
+  -cppcoreguidelines-avoid-magic-numbers
+
+# Check options for specific checks
+CheckOptions:
+  - key: performance-move-const-arg.CheckTriviallyCopyableMove
+    value: true
+...

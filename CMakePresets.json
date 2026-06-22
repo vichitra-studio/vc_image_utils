@@ -1,0 +1,108 @@
+{
+  "version": 2,
+  "cmakeMinimumRequired": { "major": 3, "minor": 20, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "relwithdebinfo",
+      "displayName": "Release with Debug Info",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    },
+    {
+      "name": "debug-sanitizers",
+      "displayName": "Debug + Sanitizers (ASan/UBSan)",
+      "inherits": "debug",
+      "cacheVariables": {
+        "ENABLE_SANITIZERS": "ON"
+      }
+    },
+    {
+      "name": "debug-tsan",
+      "displayName": "Debug + ThreadSanitizer + UBSan",
+      "inherits": "debug",
+      "cacheVariables": {
+        "ENABLE_TSAN": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "displayName": "Debug",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "release",
+      "displayName": "Release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "relwithdebinfo",
+      "displayName": "Release with Debug Info",
+      "configurePreset": "relwithdebinfo"
+    },
+    {
+      "name": "debug-sanitizers",
+      "displayName": "Debug + Sanitizers (ASan/UBSan)",
+      "configurePreset": "debug-sanitizers"
+    },
+    {
+      "name": "debug-tsan",
+      "displayName": "Debug + ThreadSanitizer + UBSan",
+      "configurePreset": "debug-tsan"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "debug",
+      "displayName": "Debug",
+      "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "debug-sanitizers",
+      "displayName": "Debug + Sanitizers (ASan/UBSan)",
+      "configurePreset": "debug-sanitizers",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "debug-tsan",
+      "displayName": "Debug + ThreadSanitizer + UBSan",
+      "configurePreset": "debug-tsan",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

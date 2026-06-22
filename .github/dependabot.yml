@@ -10,6 +10,18 @@ updates:
     commit-message:
       prefix: "ci"
 
+  # addlicense and other Go-based CLI tools declared in tools/go.mod.
+  # When Dependabot bumps the version here, also update:
+  #   .pre-commit-config.yaml  (additional_dependencies)
+  #   .github/workflows/license-check.yml  (go install @vX.Y.Z)
+  # then run `go mod tidy` in tools/ to regenerate go.sum.
+  - package-ecosystem: "gomod"
+    directory: "/tools"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "tools"
+
   # C++ dependency manifests (Conan / vcpkg) are added at curriculum phase P4.
   # When the manifest lands, add the matching ecosystem here, e.g.:
   #   - package-ecosystem: "vcpkg"   # or a custom workflow for Conan

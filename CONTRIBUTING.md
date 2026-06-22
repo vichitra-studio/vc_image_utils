@@ -21,7 +21,8 @@ in full control of your own work. The full terms are in [`CLA.md`](CLA.md).
    before you spend time on it.
 2. Fork, branch, and open a pull request against `main`.
 3. Keep changes focused; one logical change per PR.
-4. Make sure the build and tests pass.
+4. Make sure the build and tests pass (see [BUILDING.md](BUILDING.md) for
+   prerequisites and build commands).
 
 ## Signing the CLA
 

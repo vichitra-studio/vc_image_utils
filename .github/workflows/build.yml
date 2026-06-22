@@ -1,0 +1,31 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+# Least privilege: this workflow only reads the repo.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # Ninja is required by the base CMake preset (enforces compile_commands.json).
+      - run: sudo apt-get update -y && sudo apt-get install -y ninja-build
+      - run: cmake --version && ninja --version
+      - run: cmake --preset debug
+      - run: cmake --build --preset debug
+      - run: ctest --preset debug
+
+  build-sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - run: sudo apt-get update -y && sudo apt-get install -y ninja-build
+      - run: cmake --version && ninja --version
+      - run: cmake --preset debug-sanitizers
+      - run: cmake --build --preset debug-sanitizers
+      - run: ctest --preset debug-sanitizers

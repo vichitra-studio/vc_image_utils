@@ -1,7 +1,8 @@
-# pre-commit builds addlicense in its own isolated, per-repo environment
-# (under ~/.cache/pre-commit) — no global install, version pinned below.
-# pre-commit (>=3.0.0) bootstraps Go automatically if absent.
-# Install the hook once with:  pre-commit install
+# pre-commit builds addlicense in its own isolated environment (~/.cache/pre-commit).
+# addlicense itself does not need a global install, but `language: golang` hooks
+# require Go to already be on the system PATH — pre-commit does not install Go.
+# See BUILDING.md (Contributing prerequisites) for Go and pre-commit install instructions.
+# Install the hooks once with:  pre-commit install
 repos:
   - repo: local
     hooks:
@@ -15,3 +16,14 @@ repos:
         # tooling scripts. Keep this list in sync with the CI check in
         # .github/workflows/license-check.yml. (No CUDA — CPU-only project.)
         files: \.(c|cc|cxx|cpp|h|hh|hpp|hxx|inl|ipp|tpp|py|sh)$
+        # Vendored third-party code keeps its own license — never inject ours.
+        exclude: ^third_party/
+
+      - id: clang-format
+        name: clang-format (C/C++ formatting)
+        entry: clang-format -i
+        language: system
+        # Matches the same extension set as addlicense (minus .py/.sh — clang-format is C/C++ only).
+        files: \.(c|cc|cxx|cpp|h|hh|hpp|hxx|inl|ipp|tpp)$
+        # Never auto-format vendored headers — preserves upstream diff-ability.
+        exclude: ^third_party/

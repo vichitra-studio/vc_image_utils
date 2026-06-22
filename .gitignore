@@ -23,7 +23,9 @@ vcpkg_installed/
 
 # IDEs / editors
 .idea/
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 *.swp
 *~
 

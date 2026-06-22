@@ -1,0 +1,31 @@
+name: clang-format
+
+on:
+  push:
+  pull_request:
+
+# Least privilege: this workflow only reads the repo.
+permissions:
+  contents: read
+
+jobs:
+  clang-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - run: sudo apt-get update -y && sudo apt-get install -y clang-format
+      - run: clang-format --version
+      # --dry-run prints what would change; --Werror makes any change a failure.
+      # The extension list MUST match the pre-commit hook in .pre-commit-config.yaml.
+      - run: |
+          # :!third_party/** excludes vendored headers — never auto-format upstream code.
+          files=$(git ls-files \
+            '*.c' '*.cc' '*.cxx' '*.cpp' \
+            '*.h' '*.hh' '*.hpp' '*.hxx' \
+            '*.inl' '*.ipp' '*.tpp' \
+            ':!third_party/**')
+          if [ -n "$files" ]; then
+            clang-format --dry-run --Werror $files
+          else
+            echo "No C/C++ files to check yet."
+          fi

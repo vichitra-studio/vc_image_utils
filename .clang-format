@@ -8,7 +8,7 @@ BasedOnStyle:      LLVM
 # House overrides (chosen explicitly):
 IndentWidth:       4
 TabWidth:          4
-UseTab:            AlignWithSpaces   # tabs for indentation, spaces for alignment
+UseTab:            Never
 ColumnLimit:       100
 PointerAlignment:  Right             # int *p
 BreakBeforeBraces: Attach            # opening brace on the same line (K&R)
