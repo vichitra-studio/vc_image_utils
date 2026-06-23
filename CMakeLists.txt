@@ -77,12 +77,11 @@ endif()
 # ---------- library ----------
 add_library(vc_image_utils_lib STATIC
     src/placeholder.cpp
+    src/stb_impl.cpp
 )
 
-target_include_directories(vc_image_utils_lib
-    PUBLIC  include        # public API headers — visible to lib consumers
-    PRIVATE third_party   # vendored impl deps — not part of the public interface
-)
+target_include_directories(vc_image_utils_lib PUBLIC include)
+target_include_directories(vc_image_utils_lib SYSTEM PRIVATE third_party)
 
 target_link_libraries(vc_image_utils_lib PRIVATE
     vc_warnings
@@ -109,7 +108,7 @@ add_executable(vc_image_utils_tests
     tests/test_placeholder.cpp
 )
 
-target_include_directories(vc_image_utils_tests PRIVATE third_party)
+target_include_directories(vc_image_utils_tests SYSTEM PRIVATE third_party)
 
 target_link_libraries(vc_image_utils_tests PRIVATE
     vc_image_utils_lib
