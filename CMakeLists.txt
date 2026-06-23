@@ -109,6 +109,8 @@ add_executable(vc_image_utils_tests
     tests/test_placeholder.cpp
 )
 
+target_include_directories(vc_image_utils_tests PRIVATE third_party)
+
 target_link_libraries(vc_image_utils_tests PRIVATE
     vc_image_utils_lib
     vc_warnings
