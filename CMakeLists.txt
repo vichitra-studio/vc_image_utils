@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(vc_image_utils LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -76,7 +76,10 @@ endif()
 
 # ---------- library ----------
 add_library(vc_image_utils_lib STATIC
-    src/placeholder.cpp
+    src/vc_exception.cpp
+    src/vc_error_code.cpp
+    src/vc_image.cpp
+    src/io/vc_io_stb.cpp
     src/stb_impl.cpp
 )
 
@@ -105,10 +108,15 @@ target_link_libraries(vc_image_utils_app PRIVATE
 enable_testing()
 
 add_executable(vc_image_utils_tests
-    tests/test_placeholder.cpp
+    tests/test_vc_image.cpp
 )
 
 target_include_directories(vc_image_utils_tests SYSTEM PRIVATE third_party)
+
+target_compile_definitions(vc_image_utils_tests PRIVATE
+    VC_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/data"
+    VC_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+)
 
 target_link_libraries(vc_image_utils_tests PRIVATE
     vc_image_utils_lib

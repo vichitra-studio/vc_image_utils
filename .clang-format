@@ -10,7 +10,16 @@ IndentWidth:       4
 TabWidth:          4
 UseTab:            Never
 ColumnLimit:       100
-PointerAlignment:  Right             # int *p
+PointerAlignment:  Left              # int* p
 BreakBeforeBraces: Attach            # opening brace on the same line (K&R)
 AllowShortFunctionsOnASingleLine: None  # always expand function bodies to multiple lines
+BinPackParameters: false             # one parameter per line when a signature wraps
+                                      # (AlignAfterOpenBracket: Align is the LLVM default —
+                                      # continuation params align under the first one)
+
+# Align trailing '//' comments to a common column across consecutive lines
+# (tab-stop look) instead of a single space gap that varies per line length.
+AlignTrailingComments:
+  Kind: Always
+  OverEmptyLines: 0
 ...
