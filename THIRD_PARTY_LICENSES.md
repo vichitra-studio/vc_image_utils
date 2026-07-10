@@ -46,7 +46,7 @@ be reproduced on distribution — paste the required notice text in the entry.
 ### stb_image v2.30
 - License: Public Domain (Unlicense) / MIT — dual; we elect public domain
 - Used in: desktop library, app
-- Link type: header-only (implementation compiled via `src/stb_impl.cpp`)
+- Link type: header-only (implementation compiled via `src/io/vc_io_stb.cpp`)
 - Notice required on distribution: no under public domain election; MIT fallback text
   retained below for jurisdictions that do not recognise public-domain dedication
 - Source: https://github.com/nothings/stb
@@ -74,7 +74,7 @@ be reproduced on distribution — paste the required notice text in the entry.
 ### stb_image_write v1.16
 - License: Public Domain (Unlicense) / MIT — dual; we elect public domain
 - Used in: desktop library, app
-- Link type: header-only (implementation compiled via `src/stb_impl.cpp`)
+- Link type: header-only (implementation compiled via `src/io/vc_io_stb.cpp`)
 - Notice required on distribution: no under public domain election; MIT fallback text
   retained below for jurisdictions that do not recognise public-domain dedication
 - Source: https://github.com/nothings/stb

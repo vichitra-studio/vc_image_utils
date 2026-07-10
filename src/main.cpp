@@ -7,10 +7,7 @@
 #include "vc/io/vc_io.h"
 #include "vc/vc_exception.h"
 
-// clang-format off
-int main(int argc,
-         char** argv) {
-    // clang-format on
+int main(int argc, char** argv) {
     if (argc != 3) {
         std::cerr << "usage: " << argv[0] << " <input-image> <output.png>\n";
         return EXIT_FAILURE;

@@ -11,6 +11,7 @@
 #include "vc/vc_error_code.h"
 #include "vc/vc_exception.h"
 #include "vc/vc_image.h"
+#include "vc/vc_pixel_buffer.h"
 
 #ifndef VC_TEST_DATA_DIR
 #error "VC_TEST_DATA_DIR must be defined by CMake (see CMakeLists.txt)"
@@ -45,8 +46,10 @@ TEST_CASE("stb round-trip: JPEG in, PNG out, dimensions and pixels match") {
     vc::io::stb_image_reader reader;
     vc::io::stb_image_writer writer;
 
-    const vc::io::path input = std::string(VC_TEST_DATA_DIR) + "/test_1_jpeg_3ch.jpg";
-    const vc::io::path output = std::string(VC_TEST_OUTPUT_DIR) + "/roundtrip_test_output.png";
+    const vc::io::path input =
+        std::string(VC_TEST_DATA_DIR) + "/test_1_jpeg_3ch.jpg";
+    const vc::io::path output =
+        std::string(VC_TEST_OUTPUT_DIR) + "/roundtrip_test_output.png";
 
     vc::vc_image img = reader.read(input);
     CHECK(img.channels() == 3);
@@ -66,12 +69,16 @@ TEST_CASE("stb round-trip: JPEG in, PNG out, dimensions and pixels match") {
     const auto& reconstructed = *roundtripped.pixels();
     REQUIRE(original.size() == reconstructed.size());
 
+    const auto original_pixels = original.as<vc::buf_f32>();
+    const auto reconstructed_pixels = reconstructed.as<vc::buf_f32>();
+
     // PNG is lossless, so JPEG-decoded values written to PNG and read back
     // should match the original decode almost exactly — a 1/255 tolerance
     // accounts for float rounding, not any re-compression loss.
     bool all_close = true;
-    for (std::size_t i = 0; i < original.size(); ++i) {
-        if (std::fabs(original[i] - reconstructed[i]) > (1.0f / 255.0f)) {
+    for (std::size_t i = 0; i < original_pixels.size(); ++i) {
+        if (std::fabs(original_pixels[i] - reconstructed_pixels[i]) >
+            (1.0f / 255.0f)) {
             all_close = false;
             break;
         }

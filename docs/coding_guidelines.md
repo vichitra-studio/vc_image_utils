@@ -18,10 +18,15 @@ Reasons this was revisited:
 - The original C++17 note in the curriculum was not backed by a technical constraint
 
 C++20 features are adopted **only when they solve a concrete problem**, not for their own
-sake — e.g. `std::span` is the intended fix for the pixel-buffer mutation-surface problem
-(see §4.2) once it's actually needed. Advanced C++20 features not yet needed for this
-project's problems (Concepts, Modules) are not used just because the standard allows them —
-that decision is orthogonal to which `-std=` flag the build uses.
+sake. The pixel-buffer mutation-surface problem (see §4.2) is solved by `vc_pixel_buffer`'s
+fixed-size design, not by `std::span` alone — but `vc_pixel_buffer` is dtype-tagged (a
+runtime property, decided when a file is decoded — see §3.1), so its typed accessor
+(`as<T>()`) needs a return type that doesn't hard-code one element type. `std::span<T>` fills
+that role: element access without the capacity-mutating surface a `vector<T>&` would reopen.
+`std::concepts` is used for the same reason — `vc_pixel_element` constrains `as<T>()`/the
+constructor to the two types the variant actually holds, turning a request for an unsupported
+type into a compile error instead of a runtime throw. Modules remain unused — no concrete
+problem in this project needs them yet.
 
 ---
 
@@ -38,7 +43,7 @@ All identifiers use `snake_case`. No `PascalCase`, no `camelCase`, no `SCREAMING
 | Interfaces (abstract) | `i_` prefix + snake_case | `i_image_reader`, `i_image_writer` |
 | Enums (scoped) | snake_case | `vc_error_code`, `vc_image_format` |
 | Enum values | snake_case | `vc_error_code::file_not_found` |
-| Typedefs / aliases | snake_case | `pixel_buffer`, `image_dim` |
+| Typedefs / aliases | snake_case | `pixel_buffer_ptr`, `image_dim` |
 | Functions / methods | snake_case | `to_string()`, `mutable_pixels()` |
 | Variables | snake_case | `pixel_count`, `output_path` |
 | Private members | snake_case + trailing `_` | `width_`, `channels_`, `pixels_` |
@@ -58,8 +63,8 @@ Every user-defined type exported from this library carries the `vc_` prefix:
 We do not use the `_t` convention (a C/POSIX pattern). Aliases read like stdlib types:
 
 ```cpp
-using pixel_value  = float;          // not pixel_value_t
-using image_dim    = std::uint32_t;  // not image_dim_t
+using pixel_buffer_ptr = std::shared_ptr<vc_pixel_buffer>; // not pixel_buffer_ptr_t
+using image_dim        = std::uint32_t;                    // not image_dim_t
 ```
 
 ### 1.4 Interface prefix
@@ -112,14 +117,24 @@ public API signatures. Every primitive has a named alias that encodes its semant
 
 ```cpp
 namespace vc {
-    using pixel_value            = float;                        // normalised [0.0, 1.0]
-    using pixel_buffer           = std::vector<pixel_value>;
-    using pixel_buffer_ptr       = std::shared_ptr<pixel_buffer>;
-    using const_pixel_buffer_ptr = std::shared_ptr<const pixel_buffer>;
+    enum class pixel_dtype { f32, u8 };                          // which concrete type is stored
+    class  vc_pixel_buffer        { /* fixed-size, dtype-tagged — see Sec 4.2 */ };
+    using pixel_buffer_ptr       = std::shared_ptr<vc_pixel_buffer>;
+    using const_pixel_buffer_ptr = std::shared_ptr<const vc_pixel_buffer>;
     using image_dim              = std::uint32_t;                // width or height in pixels
     using channel_count          = std::uint32_t;                // 1=grey 2=greyA 3=RGB 4=RGBA
 }
 ```
+
+`pixel_dtype` and `vc_pixel_buffer` are declared in `vc_pixel_buffer.h`; `vc_types.h` includes
+it and adds the `shared_ptr` aliases plus `image_dim`/`channel_count`.
+
+`vc_pixel_buffer` stores one of a closed set of element types (currently `float`, `uint8_t`)
+in a `std::variant`, not a single fixed type — dtype is discovered at load time (a JPEG
+decodes to `uint8`, an EXR to `float`), so it's a runtime property of one concrete class, not
+a compile-time template parameter that would cascade into `vc_image` and everything that
+touches it. `as<T>()` is the typed accessor: state the dtype an algorithm requires, get a
+`std::span<T>` back, or a `vc::vc_exception` if the buffer actually holds something else.
 
 ### 3.2 String types (namespace `vc::utils`)
 
@@ -154,25 +169,47 @@ namespace vc::io {
 
 ### 4.1 Pixel buffer — shared ownership
 
-`vc_image` holds a `pixel_buffer_ptr` (`shared_ptr<vector<pixel_value>>`).
+`vc_image` holds a `pixel_buffer_ptr` (`shared_ptr<vc_pixel_buffer>`).
 
 Copying a `vc_image` is **cheap** (reference count bump) but **aliases** — both copies point
 to the same pixel data. Mutating through one copy mutates all. This is intentional: the
 library passes images around as lightweight handles.
 
-### 4.2 Pixel access — const truly prevents mutation
+Returning the `shared_ptr` (rather than an iterator or `span`) from `pixels()`/
+`mutable_pixels()` is also what lets a caller extend the buffer's lifetime past the owning
+`vc_image` — e.g. handing pixel data to an async writer or a cache that outlives the image
+object that produced it. A non-owning view type cannot do this; it dangles the moment the
+`vc_image` is destroyed. This is a real, recurring need (not just Week 0.2 scope), so
+`pixels()`/`mutable_pixels()` stay as the one paradigm for buffer access — see §4.2 for how
+the resize/clear risk that would normally come with sharing a mutable container is designed
+out instead of routed around with a second accessor type.
+
+### 4.2 Pixel access — const truly prevents mutation, size truly cannot change
 
 ```cpp
-// Returns shared_ptr<const pixel_buffer> — data is read-only through this ptr
+// Returns shared_ptr<const vc_pixel_buffer> by value — data is read-only through this ptr
 vc::const_pixel_buffer_ptr pixels() const noexcept;
 
-// Returns shared_ptr<pixel_buffer>& — explicit mutation path, name signals intent
-vc::pixel_buffer_ptr& mutable_pixels() noexcept;
+// Returns shared_ptr<vc_pixel_buffer> by value — explicit mutation path, name signals intent
+vc::pixel_buffer_ptr mutable_pixels() noexcept;
 ```
 
 `pixels()` returns `const_pixel_buffer_ptr` by value (cheap — refcount bump, no data copy).
-The pointed-to `vector` is `const`, so the compiler prevents any write through it.
-`mutable_pixels()` forces the caller to explicitly opt into mutation.
+The pointed-to `vc_pixel_buffer` is `const`, so the compiler prevents any write through it.
+`mutable_pixels()` forces the caller to explicitly opt into mutation — but even then, the
+`width*height*channels == size()` invariant cannot be broken, because `vc_pixel_buffer`
+(§3.1) exposes no `resize()`/`clear()`/`push_back()` at all. This isn't caller discipline —
+the invariant is enforced by construction. The same holds one layer in: `as<T>()` returns
+`std::span<T>`, not the backing `std::vector<T>&`, so typed element access doesn't reopen the
+capacity-mutating surface either. A caller can still write wrong pixel *values* through
+`mutable_pixels()`/`as<T>()` (inherent to any mutation access), and calling a C-interop
+raw-pointer accessor and holding it past the `shared_ptr`'s lifetime is still a dangle —
+that's deliberately stepping outside ownership, not something a wrapper type can prevent.
+
+Do not return `shared_ptr<T>&` from either accessor: converting `shared_ptr<T>` to
+`shared_ptr<const T>` constructs a temporary, and binding a reference to it is a
+`-Wreturn-stack-address` bug (dangling reference to a local temporary) — verified directly
+with `clang++ -std=c++20 -Wall -Wextra -fsyntax-only`. Always return by value.
 
 ### 4.3 Passing function parameters
 
@@ -249,7 +286,7 @@ vc_image(vc::image_dim w, vc::image_dim h, vc::channel_count c) {
         throw vc_exception(vc_error_code::invalid_argument, "invalid dimensions");
     // cast the FIRST operand to size_t before multiplying — keeps the rest of the
     // chain in 64-bit and avoids uint32_t overflow for large-but-valid images
-    pixels_ = std::make_shared<vc::pixel_buffer>(
+    pixels_ = std::make_shared<vc::vc_pixel_buffer>(
         static_cast<std::size_t>(w) * h * c, 0.0f);
     width_ = w; height_ = h; channels_ = c;
 }
@@ -317,7 +354,8 @@ Mandatory exceptions:
 ## 9. File layout
 
 ```
-include/vc/vc_types.h         — all vc:: typedefs (pixel_value, image_dim, etc.)
+include/vc/vc_pixel_buffer.h  — pixel_dtype enum + vc_pixel_element concept + vc_pixel_buffer class
+include/vc/vc_types.h         — remaining vc:: typedefs (pixel_buffer_ptr, image_dim, etc.)
 include/vc/vc_error_code.h    — vc_error_code enum + to_int/to_error_code/to_string
 include/vc/vc_exception.h     — vc_exception class
 include/vc/vc_image.h         — vc_image class
@@ -328,8 +366,8 @@ include/vc/io/vc_io.h         — vc::io interfaces + stb adapter declarations
 src/vc_error_code.cpp         — vc_error_code utilities implementation
 src/vc_exception.cpp          — vc_exception implementation
 src/vc_image.cpp              — vc_image implementation
-src/io/vc_io_stb.cpp          — stb adapter implementations
-src/stb_impl.cpp              — vendor glue: compiles stb implementation bodies
+src/io/vc_io_stb.cpp          — stb adapter implementations; also the sole TU that defines
+                                 the stb `_IMPLEMENTATION` macros (see §10)
 src/main.cpp                  — application entry point
 
 tests/data/                   — bundled test fixtures (committed to repo)
@@ -337,13 +375,16 @@ docs/                         — project documentation
 ```
 
 One class / one interface per header. No omnibus headers.
-`src/` mirrors `include/vc/` for implementation files.
+`src/` mirrors `include/vc/` for implementation files — except `vc_pixel_buffer.h`, which has
+no `.cpp`: its constructor and `as<T>()` are templates (must be defined where instantiated),
+and `dtype()`/`size()` are one-liners (§6.1) — nothing non-template is left to put in a `.cpp`.
 
 ### 9.1 Week 0.2 scaffold — suggested implementation order
 
 `vc_error_code.cpp` and `vc_exception.cpp` are fully implemented (low-value plumbing —
-everything else needs working error signalling to give useful feedback). Everything else
-is a `TODO(you)` stub that compiles and runs, but fails its tests until implemented:
+everything else needs working error signalling to give useful feedback). `vc_pixel_buffer` is
+likewise fully implemented, header-only (see §9). Everything else is a `TODO(you)` stub that
+compiles and runs, but fails its tests until implemented:
 
 1. `src/vc_image.cpp` — the constructor (validate + overflow-safe allocate), `pixel_count()`,
    `pixels()`, `mutable_pixels()`. Run `ctest --preset debug` — the first two `vc_image` test
@@ -364,4 +405,5 @@ fail until each piece lands.
 - Never run clang-format on `third_party/` files
 - `third_party/` is a `SYSTEM PRIVATE` include path — suppresses vendored-header warnings
 - Every vendored dependency has an entry in `THIRD_PARTY_LICENSES.md` with pinned commit SHA
-- stb is compiled in exactly one translation unit (`src/stb_impl.cpp`) via `_IMPLEMENTATION` defines
+- stb is compiled in exactly one translation unit (`src/io/vc_io_stb.cpp`, the only file that
+  includes the stb headers) via `_IMPLEMENTATION` defines

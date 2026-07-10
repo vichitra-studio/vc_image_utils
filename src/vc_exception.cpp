@@ -7,10 +7,8 @@
 
 namespace vc {
 
-// clang-format off
-vc_exception::vc_exception(vc_error_code code,
-                           vc::utils::message message)
-    : code_(code), message_(std::move(message)) {}
-// clang-format on
+vc_exception::vc_exception(vc_error_code code, vc::utils::message message)
+    : code_(code), message_(std::move(message)) {
+}
 
 } // namespace vc

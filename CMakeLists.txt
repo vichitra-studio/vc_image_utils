@@ -80,7 +80,6 @@ add_library(vc_image_utils_lib STATIC
     src/vc_error_code.cpp
     src/vc_image.cpp
     src/io/vc_io_stb.cpp
-    src/stb_impl.cpp
 )
 
 target_include_directories(vc_image_utils_lib PUBLIC include)
@@ -109,6 +108,7 @@ enable_testing()
 
 add_executable(vc_image_utils_tests
     tests/test_vc_image.cpp
+    tests/test_vc_pixel_buffer.cpp
 )
 
 target_include_directories(vc_image_utils_tests SYSTEM PRIVATE third_party)

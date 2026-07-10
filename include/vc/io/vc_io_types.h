@@ -8,7 +8,8 @@
 
 namespace vc::io {
 
-using path = std::string; // filesystem path — upgrade to std::filesystem::path at P4
+using path =
+    std::string; // filesystem path — upgrade to std::filesystem::path at P4
 
 enum class vc_image_format : std::uint8_t {
     png,  // PNG (lossless, supports all channel counts)

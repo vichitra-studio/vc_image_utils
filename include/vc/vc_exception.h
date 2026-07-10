@@ -12,10 +12,7 @@ namespace vc {
 
 class vc_exception : public std::exception {
   public:
-    // clang-format off
-    vc_exception(vc_error_code code,
-                 vc::utils::message message);
-    // clang-format on
+    vc_exception(vc_error_code code, vc::utils::message message);
 
     vc_error_code code() const noexcept {
         return code_;

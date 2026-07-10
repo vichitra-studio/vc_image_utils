@@ -17,13 +17,17 @@ namespace vc {
 enum class vc_error_code : std::uint8_t {
     file_not_found,   // path does not exist or process lacks read permission
     invalid_format,   // file header is not a recognised image format
-    decode_error,     // format recognised but data is corrupt or unsupported variant
-    encode_error,     // output could not be written (bad path, disk full, permissions)
-    invalid_argument, // caller passed logically invalid data (zero dimensions, null buffer)
+    decode_error,     // format recognised but data is corrupt or unsupported
+                      // variant
+    encode_error,     // output could not be written (bad path, disk full,
+                      // permissions)
+    invalid_argument, // caller passed logically invalid data (zero dimensions,
+                      // null buffer)
 };
 
 int to_int(vc_error_code code) noexcept;
-vc_error_code to_error_code(int value); // throws vc_exception if value is out of range
+vc_error_code
+to_error_code(int value); // throws vc_exception if value is out of range
 
 vc::utils::string to_string(vc_error_code code) noexcept;
 
