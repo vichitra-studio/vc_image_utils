@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>*{box-sizing:border-box}img{max-width:100%}</style>
+</head>
+<body>
+<title>vc::pipe — system schematic</title>
+<style>
+  :root {
+    --paper: #f5f6f8;
+    --surface: #ffffff;
+    --surface-2: #eef1f5;
+    --ink: #14181f;
+    --muted: #59626e;
+    --line: #d9dee5;
+    --line-strong: #c2cad4;
+    --accent: #4457d8;   /* structure / wiring */
+    --signal: #0d7d74;   /* data / packets */
+    --assembly: #b45309; /* declare + validate phase */
+    --run: #15803d;      /* run phase */
+    --danger: #c62a2a;
+
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --maxw: 1080px;
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0d1015;
+      --surface: #151a21;
+      --surface-2: #1b222b;
+      --ink: #e7eaef;
+      --muted: #98a2af;
+      --line: #262e39;
+      --line-strong: #35404d;
+      --accent: #8f9dff;
+      --signal: #2fd0c0;
+      --assembly: #f0a25c;
+      --run: #56d97e;
+      --danger: #f0716f;
+    }
+  }
+  :root[data-theme="light"] {
+    --paper: #f5f6f8; --surface: #ffffff; --surface-2: #eef1f5;
+    --ink: #14181f; --muted: #59626e; --line: #d9dee5; --line-strong: #c2cad4;
+    --accent: #4457d8; --signal: #0d7d74; --assembly: #b45309; --run: #15803d; --danger: #c62a2a;
+  }
+  :root[data-theme="dark"] {
+    --paper: #0d1015; --surface: #151a21; --surface-2: #1b222b;
+    --ink: #e7eaef; --muted: #98a2af; --line: #262e39; --line-strong: #35404d;
+    --accent: #8f9dff; --signal: #2fd0c0; --assembly: #f0a25c; --run: #56d97e; --danger: #f0716f;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--sans); line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: clamp(1.2rem, 4vw, 3rem) clamp(1rem, 4vw, 2rem) 4rem; }
+
+  /* ---- header ---- */
+  header { border-bottom: 1px solid var(--line); padding-bottom: 1.6rem; margin-bottom: 2.2rem; }
+  .kicker {
+    font-family: var(--mono); font-size: .72rem; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--accent); margin: 0 0 .6rem;
+  }
+  h1 {
+    font-family: var(--mono); font-weight: 600; font-size: clamp(1.7rem, 5vw, 2.5rem);
+    letter-spacing: -.01em; margin: 0 0 .5rem; text-wrap: balance;
+  }
+  .lede { color: var(--muted); font-size: 1.02rem; max-width: 62ch; margin: 0; }
+  .legend { display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; margin-top: 1.3rem; font-family: var(--mono); font-size: .76rem; }
+  .legend span { display: inline-flex; align-items: center; gap: .45rem; color: var(--muted); }
+  .dot { width: .7rem; height: .7rem; border-radius: 3px; flex: none; }
+
+  h2 {
+    font-family: var(--mono); font-size: .8rem; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--muted); font-weight: 600;
+    margin: 3rem 0 1.2rem; display: flex; align-items: center; gap: .8rem;
+  }
+  h2::before { content: ""; width: 1.6rem; height: 2px; background: var(--accent); flex: none; }
+
+  /* ---- class cards ---- */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; }
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+    overflow: hidden; display: flex; flex-direction: column;
+  }
+  .card.span2 { grid-column: 1 / -1; }
+  .card-head {
+    padding: .8rem 1rem; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; justify-content: space-between; gap: .6rem; flex-wrap: wrap;
+    border-left: 3px solid var(--tone, var(--accent));
+  }
+  .card-head .name { font-family: var(--mono); font-weight: 600; font-size: .98rem; color: var(--ink); }
+  .stereotype {
+    font-family: var(--mono); font-size: .66rem; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--tone, var(--accent)); border: 1px solid currentColor; border-radius: 100px; padding: .12rem .5rem; white-space: nowrap;
+  }
+  .members { margin: 0; padding: .6rem .5rem; list-style: none; display: flex; flex-direction: column; gap: .1rem; }
+  .members li {
+    font-family: var(--mono); font-size: .8rem; color: var(--ink);
+    padding: .28rem .55rem; border-radius: 6px; white-space: nowrap; overflow-x: auto;
+  }
+  .members li.sub { color: var(--muted); }
+  .members li .k { color: var(--accent); }
+  .members li .c { color: var(--muted); }
+  .members li.done { background: color-mix(in srgb, var(--run) 12%, transparent); }
+  .members li.todo { background: color-mix(in srgb, var(--assembly) 13%, transparent); }
+  .tag { font-family: var(--mono); font-size: .62rem; letter-spacing: .05em; padding: .05rem .35rem; border-radius: 4px; margin-left: .4rem; vertical-align: middle; }
+  .tag.live { color: var(--run); border: 1px solid var(--run); }
+  .tag.later { color: var(--assembly); border: 1px solid var(--assembly); }
+  .card-note {
+    margin-top: auto; padding: .7rem 1rem; border-top: 1px dashed var(--line);
+    font-size: .82rem; color: var(--muted);
+  }
+  .card-note b { color: var(--ink); font-weight: 600; }
+
+  /* ---- relationships ---- */
+  .rels { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: .55rem; }
+  .rel {
+    display: flex; align-items: center; gap: .6rem; font-family: var(--mono); font-size: .8rem;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: .55rem .75rem;
+  }
+  .rel .a, .rel .b { font-weight: 600; color: var(--ink); }
+  .rel .verb { color: var(--signal); font-size: .72rem; letter-spacing: .03em; white-space: nowrap; }
+  .rel .arw { color: var(--line-strong); flex: none; }
+
+  /* ---- flow ---- */
+  .phase { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
+  .phase + .phase { margin-top: 1.4rem; }
+  .phase-head { padding: .7rem 1.1rem; display: flex; align-items: center; gap: .7rem; border-bottom: 1px solid var(--line); border-left: 3px solid var(--tone); }
+  .phase-head .n { font-family: var(--mono); font-size: .72rem; color: var(--surface); background: var(--tone); border-radius: 5px; padding: .15rem .45rem; font-weight: 600; }
+  .phase-head .t { font-family: var(--mono); font-weight: 600; font-size: .92rem; }
+  .phase-head .t small { color: var(--muted); font-weight: 400; margin-left: .5rem; }
+  .phase-body { padding: 1.1rem; display: flex; flex-direction: column; gap: .85rem; }
+
+  .step { display: grid; grid-template-columns: 1.7rem 1fr; gap: .3rem 0; align-items: start; }
+  .step .idx { font-family: var(--mono); font-size: .75rem; color: var(--tone); font-weight: 600; padding-top: .15rem; }
+  .step .body { min-width: 0; }
+  .step code, code.inline {
+    font-family: var(--mono); font-size: .8rem; background: var(--surface-2);
+    padding: .08rem .34rem; border-radius: 5px; color: var(--ink);
+  }
+  .step p { margin: .1rem 0 0; font-size: .86rem; color: var(--muted); }
+
+  .check { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; font-family: var(--mono); font-size: .8rem; margin-top: .5rem; padding: .5rem .65rem; border-radius: 7px; }
+  .check.ok { background: color-mix(in srgb, var(--run) 12%, transparent); color: var(--ink); }
+  .check.bad { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--ink); }
+  .check .res { margin-left: auto; font-weight: 600; }
+  .check.ok .res { color: var(--run); }
+  .check.bad .res { color: var(--danger); }
+  .slotref { color: var(--accent); }
+  .ty { color: var(--signal); }
+  .arrow-h { color: var(--line-strong); }
+
+  /* packet trays */
+  .tray { border: 1px dashed var(--line-strong); border-radius: 9px; padding: .7rem .8rem; background: var(--surface-2); }
+  .tray-t { font-family: var(--mono); font-size: .72rem; color: var(--muted); margin-bottom: .5rem; letter-spacing: .04em; }
+  .tray-t b { color: var(--ink); }
+  .slots { display: flex; flex-wrap: wrap; gap: .5rem; }
+  .packet {
+    font-family: var(--mono); font-size: .76rem; border: 1px solid var(--signal); border-radius: 7px;
+    padding: .3rem .55rem; display: inline-flex; gap: .45rem; align-items: center; background: var(--surface);
+  }
+  .packet .slot { color: var(--muted); }
+  .packet .pay { color: var(--signal); font-weight: 600; }
+  .flowline { display: flex; justify-content: center; color: var(--tone); text-align: center; }
+
+  .files { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: .8rem; }
+  .files th, .files td { text-align: left; padding: .5rem .7rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .files th { color: var(--muted); font-weight: 600; font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; }
+  .files td .f { color: var(--accent); }
+  .files-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+  .files tr:last-child td { border-bottom: none; }
+
+  .foot { margin-top: 3rem; padding-top: 1.2rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .82rem; }
+  a { color: var(--accent); }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="kicker">vc_image_utils · design schematic</p>
+    <h1>The vc::pipe system</h1>
+    <p class="lede">One assembly line for image processing. Stations do the work, parcels carry the data, and a foreman checks every connection <em>before</em> a single pixel moves. Typed slots at the authoring edge, erased names inside — the one boundary the whole design turns on.</p>
+    <div class="legend">
+      <span><i class="dot" style="background:var(--accent)"></i>structure / wiring</span>
+      <span><i class="dot" style="background:var(--signal)"></i>data / packets</span>
+      <span><i class="dot" style="background:var(--assembly)"></i>assembly time — declare &amp; validate</span>
+      <span><i class="dot" style="background:var(--run)"></i>run time — data flows</span>
+    </div>
+  </header>
+
+  <!-- ============ THE PARTS ============ -->
+  <h2>The parts</h2>
+  <div class="grid">
+
+    <div class="card" style="--tone:var(--accent)">
+      <div class="card-head"><span class="name">i_pipe</span><span class="stereotype">abstract base</span></div>
+      <ul class="members">
+        <li><span class="k">const</span> stage_name&amp; name() <span class="c">const // per-instance</span></li>
+        <li><span class="k">virtual const char*</span> kind() <span class="c">const = 0 // per-type</span></li>
+        <li><span class="k">virtual void</span> declare(vc_pipe_contract&amp;) <span class="c">const = 0</span></li>
+        <li><span class="k">virtual void</span> process(vc_pipe_context&amp;) <span class="c">const = 0</span></li>
+        <li class="sub"><span class="c">protected:</span> i_pipe(stage_name)</li>
+      </ul>
+      <div class="card-note">One processing <b>station</b>. <b>name()</b> is its address in a graph; <b>kind()</b> is its type. <b>declare()</b> posts its contract; <b>process()</b> does the work. Both <code class="inline">const</code> — a pipe is stateless per run.</div>
+    </div>
+
+    <div class="card" style="--tone:var(--accent)">
+      <div class="card-head"><span class="name">slot&lt;T&gt;</span><span class="stereotype">authoring · compile-time</span></div>
+      <ul class="members">
+        <li><span class="k">template</span>&lt;T&gt; <span class="k">struct</span> slot { string_view name; }</li>
+        <li class="sub"><span class="c">// declared once per stage:</span></li>
+        <li><span class="k">static constexpr</span> slot&lt;<span class="ty">vc_image</span>&gt; rgb{<span class="ty">"rgb"</span>}</li>
+      </ul>
+      <div class="card-note">The <b>label</b> a stage prints on a chute: a name bonded to its payload <em>type</em>. Lives only at the authoring edge — the instant it crosses into the framework it is <b>lowered</b> (name kept, T erased). Never stored.</div>
+    </div>
+
+    <div class="card" style="--tone:var(--accent)">
+      <div class="card-head"><span class="name">stage_port</span><span class="stereotype">wiring currency</span></div>
+      <ul class="members">
+        <li>stage_name stage;&nbsp; slot_name slot</li>
+        <li>stage_port(stage, <span class="ty">slot&lt;T&gt;</span>) <span class="c">// lowers T</span></li>
+        <li>stage_port(stage, slot_name) <span class="c">// from a name</span></li>
+        <li><span class="k">bool</span> operator==(…);&nbsp; <span class="k">size_t</span> hash()</li>
+      </ul>
+      <div class="card-note">A <b>graph coordinate</b>: which slot on which stage. THE single currency — <code class="inline">connect()</code> takes a pair, and <code class="inline">run()</code> keys its maps by it. Built from a typed <code class="inline">slot&lt;T&gt;</code> <em>or</em> a plain name (the config path).</div>
+    </div>
+
+    <div class="card" style="--tone:var(--signal)">
+      <div class="card-head"><span class="name">vc_pipe_packet</span><span class="stereotype">value · type-erased</span></div>
+      <ul class="members">
+        <li><span class="k">template</span>&lt;T&gt; <span class="k">explicit</span> vc_pipe_packet(T) <span class="c">// sink</span></li>
+        <li><span class="k">template</span>&lt;T&gt; <span class="k">const</span> T&amp; get() <span class="c">const // throws on mismatch</span></li>
+        <li><span class="k">bool</span> has_value() <span class="c">const</span></li>
+        <li><span class="k">const</span> type_info&amp; type() <span class="c">const</span></li>
+        <li class="sub"><span class="c">private:</span> std::any value_</li>
+      </ul>
+      <div class="card-note">A sealed <b>parcel</b>. Holds <em>any one</em> payload — image, matrix, a plain <code class="inline">double</code> — and remembers its type so a stage can unbox it safely.</div>
+    </div>
+
+    <div class="card" style="--tone:var(--assembly)">
+      <div class="card-head"><span class="name">vc_pipe_contract</span><span class="stereotype">framework</span></div>
+      <ul class="members">
+        <li><span class="k">template</span>&lt;T&gt; <span class="k">void</span> add_input_slot(<span class="ty">slot&lt;T&gt;</span>)</li>
+        <li><span class="k">template</span>&lt;T&gt; <span class="k">void</span> add_output_slot(<span class="ty">slot&lt;T&gt;</span>)</li>
+        <li>type_index input_slot_type(name) <span class="c">// throws</span></li>
+        <li>type_index output_slot_type(name) <span class="c">// throws</span></li>
+        <li>vector&lt;slot_name&gt; input_slot_names() / output_slot_names()</li>
+        <li class="sub"><span class="c">private struct</span> slot_decl { name; <span class="ty">type</span> }</li>
+      </ul>
+      <div class="card-note">The <b>signs</b> a stage posts: which slot carries which type. Type lookups <b>throw</b> on an undeclared slot (exceptions-only) — so <code class="inline">validate()</code> never branches on not-found. Type layer <span class="tag live">live</span> · data layer (image spec) <span class="tag later">later</span></div>
+    </div>
+
+    <div class="card" style="--tone:var(--signal)">
+      <div class="card-head"><span class="name">vc_pipe_context</span><span class="stereotype">per-run tray</span></div>
+      <ul class="members">
+        <li class="sub"><span class="c">// author-facing (typed slot&lt;T&gt;)</span></li>
+        <li><span class="k">template</span>&lt;T&gt; <span class="k">const</span> T&amp; get_input(<span class="ty">slot&lt;T&gt;</span>) <span class="c">const</span></li>
+        <li><span class="k">void</span> set_output(<span class="ty">slot&lt;T&gt;</span>, vc_pipe_packet)</li>
+        <li class="sub"><span class="c">// runner-facing (by name)</span></li>
+        <li><span class="k">void</span> set_input(name, vc_pipe_packet)</li>
+        <li><span class="k">const</span> vc_pipe_packet&amp; get_output(name) <span class="c">const</span></li>
+        <li class="sub"><span class="c">private:</span> unordered_map inputs_, outputs_</li>
+      </ul>
+      <div class="card-note">The <b>tray</b> for one run of one stage. The API splits by audience: the <em>author</em> reads inputs / writes outputs through typed slots; the <em>runner</em> injects / harvests by name. Input &amp; output are <b>separate namespaces</b>.</div>
+    </div>
+
+    <div class="card span2" style="--tone:var(--accent)">
+      <div class="card-head"><span class="name">vc_pipeline</span><span class="stereotype">orchestrator · the belt + foreman</span></div>
+      <ul class="members">
+        <li>stage_name add(unique_ptr&lt;i_pipe&gt;) <span class="c">// takes ownership; returns the stage's own name()</span></li>
+        <li><span class="k">void</span> connect(<span class="ty">stage_port</span> from, <span class="ty">stage_port</span> to) <span class="c">// wire output port → input port</span></li>
+        <li><span class="k">void</span> validate() <span class="c">const</span> <span class="tag later">TODO(you)</span> <span class="c">— assembly-time type check</span></li>
+        <li>unordered_map&lt;<span class="ty">stage_port</span>, vc_pipe_packet&gt; run(unordered_map&lt;<span class="ty">stage_port</span>, vc_pipe_packet&gt;) <span class="c">const</span> <span class="tag later">TODO(you)</span></li>
+        <li class="sub"><span class="c">private struct</span> connection { <span class="ty">stage_port</span> from; <span class="ty">stage_port</span> to }</li>
+        <li class="sub"><span class="c">private:</span> vector&lt;unique_ptr&lt;i_pipe&gt;&gt; stages_;&nbsp; vector&lt;connection&gt; connections_</li>
+      </ul>
+      <div class="card-note"><b>Assemble → validate → run.</b> Holds pipes generically as <code class="inline">i_pipe</code> and wires them by <em>string</em> slot names carried in a <code class="inline">stage_port</code> — which is exactly what lets a CLI or config file compose a pipeline at runtime. <code class="inline">run()</code> is the <b>map variant</b>: inject the open inputs, execute in order, harvest the open outputs.</div>
+    </div>
+
+    <div class="card" style="--tone:var(--run)">
+      <div class="card-head"><span class="name">vc_passthrough_stage</span><span class="stereotype">stage</span></div>
+      <ul class="members">
+        <li class="done">in <span class="slot">"in"</span> : <span class="ty">vc_image</span> <span class="arrow-h">→</span> out <span class="slot">"out"</span> : <span class="ty">vc_image</span></li>
+      </ul>
+      <div class="card-note"><b>Worked reference</b> — fully implemented. Copies its input through unchanged. The template every other stage follows. <code class="inline">kind() == "passthrough"</code>.</div>
+    </div>
+
+    <div class="card" style="--tone:var(--assembly)">
+      <div class="card-head"><span class="name">vc_grayscale_stage</span><span class="stereotype">stage · TODO</span></div>
+      <ul class="members">
+        <li class="todo">in <span class="slot">"rgb"</span> : <span class="ty">vc_image</span> <span class="arrow-h">→</span> out <span class="slot">"grey"</span> : <span class="ty">vc_image</span></li>
+      </ul>
+      <div class="card-note">image → image. A plain Transform. <code class="inline">declare()</code> / <code class="inline">process()</code> are yours to write.</div>
+    </div>
+
+    <div class="card" style="--tone:var(--assembly)">
+      <div class="card-head"><span class="name">vc_mean_brightness_stage</span><span class="stereotype">stage · TODO</span></div>
+      <ul class="members">
+        <li class="todo">in <span class="slot">"image"</span> : <span class="ty">vc_image</span> <span class="arrow-h">→</span> out <span class="slot">"mean"</span> : <span class="ty">double</span></li>
+      </ul>
+      <div class="card-note">image → <b>scalar</b>. The output is <em>not</em> an image — the exact case a plain <code class="inline">apply(image)→image</code> can't express. <b>This is why the whole design exists.</b></div>
+    </div>
+
+  </div>
+
+  <!-- ============ RELATIONSHIPS ============ -->
+  <h2>How the parts relate</h2>
+  <div class="rels">
+    <div class="rel"><span class="a">vc_pipeline</span><span class="arw">──</span><span class="verb">owns ▸ many</span><span class="arw">──▶</span><span class="b">i_pipe</span></div>
+    <div class="rel"><span class="a">vc_pipeline</span><span class="arw">──</span><span class="verb">stores ▸ many</span><span class="arw">──▶</span><span class="b">connection</span></div>
+    <div class="rel"><span class="a">stages</span><span class="arw">──</span><span class="verb">implement</span><span class="arw">──▷</span><span class="b">i_pipe</span></div>
+    <div class="rel"><span class="a">connection</span><span class="arw">──</span><span class="verb">joins ▸ two</span><span class="arw">──▶</span><span class="b">stage_port</span></div>
+    <div class="rel"><span class="a">stage_port</span><span class="arw">──</span><span class="verb">lowers</span><span class="arw">──▷</span><span class="b">slot&lt;T&gt;</span></div>
+    <div class="rel"><span class="a">i_pipe::declare</span><span class="arw">──</span><span class="verb">fills</span><span class="arw">──▶</span><span class="b">vc_pipe_contract</span></div>
+    <div class="rel"><span class="a">vc_pipe_contract</span><span class="arw">──</span><span class="verb">holds ▸ many</span><span class="arw">──▶</span><span class="b">slot_decl</span></div>
+    <div class="rel"><span class="a">slot_decl</span><span class="arw">──</span><span class="verb">is lowered</span><span class="arw">──▷</span><span class="b">slot&lt;T&gt;</span></div>
+    <div class="rel"><span class="a">i_pipe::process</span><span class="arw">──</span><span class="verb">reads / writes</span><span class="arw">──▶</span><span class="b">vc_pipe_context</span></div>
+    <div class="rel"><span class="a">vc_pipe_context</span><span class="arw">──</span><span class="verb">holds ▸ by slot</span><span class="arw">──▶</span><span class="b">vc_pipe_packet</span></div>
+    <div class="rel"><span class="a">vc_pipe_packet</span><span class="arw">──</span><span class="verb">wraps</span><span class="arw">──▶</span><span class="b">std::any</span></div>
+  </div>
+
+  <!-- ============ WIRING: TWO PHASES ============ -->
+  <h2>The wiring, in two phases</h2>
+  <p class="lede" style="margin-bottom:1.4rem">Worked on a real chain — <code class="inline">grayscale → mean_brightness</code> (image → image → a single number).</p>
+
+  <!-- PHASE 1 -->
+  <div class="phase" style="--tone:var(--assembly)">
+    <div class="phase-head"><span class="n">1</span><span class="t">Assembly &amp; validation<small>no pixels move — declarations only</small></span></div>
+    <div class="phase-body">
+      <div class="step"><div class="idx">1</div><div class="body">
+        <code>const auto grey = pipe.add(make_unique&lt;vc_grayscale_stage&gt;("grey"));</code>
+        <p>Stations mounted on the belt. Each stage carries its <em>own</em> name; <code class="inline">add()</code> returns it for typo-safe wiring. (Same for <code class="inline">"mean"</code>.)</p>
+      </div></div>
+      <div class="step"><div class="idx">2</div><div class="body">
+        <code>pipe.connect({grey, grayscale::slots::grey}, {mean, mean::slots::image});</code>
+        <p>Wire grayscale's <span class="slotref">"grey"</span> output port to mean's <span class="slotref">"image"</span> input port. Each <code class="inline">{stage, slot&lt;T&gt;}</code> is a <span class="slotref">stage_port</span> — the slot lowers to its name right here.</p>
+      </div></div>
+      <div class="step"><div class="idx">3</div><div class="body">
+        <code>pipe.validate();</code>
+        <p>Foreman calls every stage's <code class="inline">declare()</code>, then checks each connection by comparing the two <em>declared types</em> — no packet exists yet.</p>
+        <div class="check ok">
+          <span><span class="slotref">grey.grey</span> : <span class="ty">vc_image</span></span>
+          <span class="arrow-h">──▶</span>
+          <span><span class="slotref">mean.image</span> : <span class="ty">vc_image</span></span>
+          <span class="res">✓ match</span>
+        </div>
+        <div class="check bad">
+          <span>if instead <span class="slotref">mean.mean</span> : <span class="ty">double</span></span>
+          <span class="arrow-h">──▶</span>
+          <span><span class="slotref">grey.rgb</span> : <span class="ty">vc_image</span></span>
+          <span class="res">✗ throws — line stops</span>
+        </div>
+      </div></div>
+    </div>
+  </div>
+
+  <!-- PHASE 2 -->
+  <div class="phase" style="--tone:var(--run)">
+    <div class="phase-head"><span class="n">2</span><span class="t">Run<small>the map variant — inject, execute, harvest</small></span></div>
+    <div class="phase-body">
+      <div class="step"><div class="idx">1</div><div class="body">
+        <code>auto out = pipe.run({ {{grey, slots::rgb}, vc_pipe_packet{move(img)}} });</code>
+        <p>Feed the source onto the graph's <b>open input</b> — grey's <span class="slotref">"rgb"</span> (nothing wired feeds it). The map is a <em>sink</em>: <code class="inline">move</code> avoids a deep copy.</p>
+      </div></div>
+
+      <div class="tray">
+        <div class="tray-t">tray · <b>grayscale</b>.process(ctx)</div>
+        <div class="slots">
+          <span class="packet"><span class="slot">in "rgb"</span><span class="pay">vc_image</span></span>
+          <span class="arrow-h" style="align-self:center">reads ▸ writes</span>
+          <span class="packet"><span class="slot">out "grey"</span><span class="pay">vc_image</span></span>
+        </div>
+      </div>
+      <div class="flowline">▼ &nbsp; grey's <code class="inline">"grey"</code> output routes to mean's <code class="inline">"image"</code> input (per the connection)</div>
+      <div class="tray">
+        <div class="tray-t">tray · <b>mean_brightness</b>.process(ctx)</div>
+        <div class="slots">
+          <span class="packet"><span class="slot">in "image"</span><span class="pay">vc_image</span></span>
+          <span class="arrow-h" style="align-self:center">reads ▸ averages ▸ writes</span>
+          <span class="packet" style="border-color:var(--run)"><span class="slot">out "mean"</span><span class="pay" style="color:var(--run)">double</span></span>
+        </div>
+      </div>
+
+      <div class="step" style="margin-top:.3rem"><div class="idx">2</div><div class="body">
+        <code>const vc_image&amp; img = ctx.get_input(slots::image);</code>
+        <p>Inside <code class="inline">process()</code>, the typed slot deduces <code class="inline">vc_image</code> and unboxes the packet. In a validated graph this <code class="inline">any_cast</code> is guaranteed to succeed — the types were already checked in phase 1.</p>
+      </div></div>
+      <div class="step"><div class="idx">3</div><div class="body">
+        <code>double b = out.at({mean, slots::mean}).get&lt;double&gt;();</code>
+        <p>Harvest the graph's <b>open output</b> — mean's <span class="slotref">"mean"</span> slot, keyed by its <span class="slotref">stage_port</span> in the returned map. A non-image parcel rode the same belt end to end.</p>
+      </div></div>
+    </div>
+  </div>
+
+  <!-- ============ CODE MAP ============ -->
+  <h2>Where each part lives</h2>
+  <div class="files-scroll">
+    <table class="files">
+      <thead><tr><th>Concept</th><th>File</th><th>State</th></tr></thead>
+      <tbody>
+        <tr><td>slot&lt;T&gt;, stage_port, names</td><td><span class="f">include/vc/pipe/vc_pipe_types.h</span></td><td>done</td></tr>
+        <tr><td>type-erased parcel</td><td><span class="f">include/vc/pipe/vc_pipe_packet.h</span></td><td>done</td></tr>
+        <tr><td>the interface</td><td><span class="f">include/vc/pipe/i_pipe.h</span></td><td>done</td></tr>
+        <tr><td>contract (add_*_slot, type lookups)</td><td><span class="f">…/vc_pipe_contract.h · src/pipe/vc_pipe_contract.cpp</span></td><td>done</td></tr>
+        <tr><td>per-run tray</td><td><span class="f">…/vc_pipe_context.h · src/pipe/vc_pipe_context.cpp</span></td><td>done</td></tr>
+        <tr><td>belt + foreman</td><td><span class="f">…/vc_pipeline.h · src/pipe/vc_pipeline.cpp</span></td><td>add/connect done · validate/run <b>TODO</b></td></tr>
+        <tr><td>worked reference stage</td><td><span class="f">…/stages/vc_passthrough_stage.*</span></td><td>done</td></tr>
+        <tr><td>grayscale, mean-brightness</td><td><span class="f">…/stages/vc_grayscale_stage.* · vc_mean_brightness_stage.*</span></td><td><b>TODO(you)</b></td></tr>
+        <tr><td>tests (14 green + 6 red-spec)</td><td><span class="f">tests/test_vc_pipe.cpp</span></td><td>done</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="foot">The one rule that makes it all safe: <b>declare and check the wiring before any pixels move.</b> That assembly-time check is what buys back the safety we gave up by making the belt reconfigurable at runtime. · Design doc: <code class="inline">docs/pipe_design.md</code> §12</p>
+</div>
+</body>
+</html>
