@@ -83,6 +83,12 @@ add_library(vc_image_utils_lib STATIC
     src/utils/vc_log.cpp
     src/utils/vc_image_dumper.cpp
     src/utils/vc_perf.cpp
+    src/pipe/vc_pipe_contract.cpp
+    src/pipe/vc_pipe_context.cpp
+    src/pipe/vc_pipeline.cpp
+    src/pipe/stages/vc_passthrough_stage.cpp
+    src/pipe/stages/vc_grayscale_stage.cpp
+    src/pipe/stages/vc_mean_brightness_stage.cpp
 )
 
 target_include_directories(vc_image_utils_lib PUBLIC include)
@@ -115,6 +121,7 @@ add_executable(vc_image_utils_tests
     tests/test_vc_log.cpp
     tests/test_vc_image_dumper.cpp
     tests/test_vc_perf.cpp
+    tests/test_vc_pipe.cpp
 )
 
 target_include_directories(vc_image_utils_tests SYSTEM PRIVATE third_party)
