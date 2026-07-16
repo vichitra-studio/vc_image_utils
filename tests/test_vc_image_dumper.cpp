@@ -34,7 +34,7 @@ TEST_CASE("vc_image_dumper: dump() is a no-op when disabled") {
     vc::utils::debug::set_output_dir(dir);
     vc::utils::debug::set_enabled(false);
 
-    vc::vc_image img(4, 2, 3);
+    vc::vc_image img = vc::vc_image::zeros(4, 2, 3);
     CHECK_NOTHROW(vc::utils::debug::dump("test", img));
 
     CHECK(std::filesystem::exists(dir) == false);
@@ -47,7 +47,7 @@ TEST_CASE("vc_image_dumper: dump() never throws, even on internal failure") {
     vc::utils::debug::set_output_dir(dir);
     vc::utils::debug::set_enabled(true);
 
-    vc::vc_image img(4, 2, 3);
+    vc::vc_image img = vc::vc_image::zeros(4, 2, 3);
     CHECK_NOTHROW(vc::utils::debug::dump("test", img));
 
     vc::utils::debug::set_enabled(false);
@@ -62,7 +62,7 @@ TEST_CASE("vc_image_dumper: dump() writes a numbered file when enabled") {
     vc::utils::debug::set_output_dir(dir);
     vc::utils::debug::set_enabled(true);
 
-    vc::vc_image img(4, 2, 3);
+    vc::vc_image img = vc::vc_image::zeros(4, 2, 3);
     vc::utils::debug::dump("resize", img);
 
     CHECK(std::filesystem::exists(dir + "/000_resize.png"));
@@ -80,7 +80,7 @@ TEST_CASE(
     vc::utils::debug::dump("test",
                            builder([&]() -> std::optional<vc::vc_image> {
                                invoked = true;
-                               return vc::vc_image(4, 2, 3);
+                               return vc::vc_image::zeros(4, 2, 3);
                            }));
 
     CHECK(invoked == false);
@@ -95,7 +95,7 @@ TEST_CASE("vc_image_dumper::dump_builder: deferred callable is invoked when "
     vc::utils::debug::dump("test",
                            builder([&]() -> std::optional<vc::vc_image> {
                                invoked = true;
-                               return vc::vc_image(4, 2, 3);
+                               return vc::vc_image::zeros(4, 2, 3);
                            }));
 
     CHECK(invoked == true);
@@ -128,7 +128,7 @@ TEST_CASE("vc_image_dumper::dump_builder: tag_enabled(false) suppresses this "
     vc::utils::debug::dump("test",
                            builder([&]() -> std::optional<vc::vc_image> {
                                invoked = true;
-                               return vc::vc_image(4, 2, 3);
+                               return vc::vc_image::zeros(4, 2, 3);
                            }));
 
     CHECK(invoked == false);

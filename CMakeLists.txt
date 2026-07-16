@@ -81,6 +81,7 @@ set(VC_LIB_SOURCES
     src/vc_exception.cpp
     src/vc_error_code.cpp
     src/vc_image.cpp
+    src/vc_image_writer.cpp
     src/io/vc_io_stb.cpp
     src/utils/vc_log.cpp
     src/utils/vc_image_dumper.cpp

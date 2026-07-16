@@ -32,13 +32,18 @@ void vc_grayscale_stage::declare(contract_builder& contract) const {
 }
 
 void vc_grayscale_stage::process(vc_pipe_context& context) const {
-    // TODO(you): read the "rgb" input image (ctx.get_input(slots::rgb)), build
-    // a new 1-channel vc_image, fill it with a luminance of the RGB channels
-    // (e.g. 0.299 R + 0.587 G + 0.114 B over the f32 buffer), and
-    // ctx.set_output(slots::grey, vc_pipe_packet{result}).
-    // Note: the base vc_image constructor is itself still a learning stub, so a
-    // full numeric test waits until that is implemented — declare() alone is
-    // enough to exercise the pipeline's type contract.
+    // TODO(you): read the "rgb" input image (ctx.get_input(slots::rgb) -> const
+    // vc_image&), then BUILD the output through a vc_image_writer (the only way
+    // to write pixels; #include "vc/vc_image_writer.h"):
+    //   vc_image_writer out{image.width(), image.height(), 1, vc::buf_f32{0.0f}};
+    //   read the rgb input via input.pixels()->as<vc::buf_f32>() and
+    //   input.meta().index(x, y, ch); write luminance
+    //   (e.g. 0.299 R + 0.587 G + 0.114 B) via out.at<vc::buf_f32>(x, y, 0);
+    //   then ctx.set_output(slots::grey,
+    //                       vc_pipe_packet{std::move(out).seal()});
+    // Note: vc_image_writer::validated() is still a learning stub (no dimension
+    // checks yet), but allocation works — so a full numeric test is possible
+    // once this process() body is written.
     (void)context;
 }
 

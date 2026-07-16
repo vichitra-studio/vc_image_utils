@@ -190,13 +190,16 @@ std::vector<vc::bench::bench_case> substrate_cases() {
     // exceeds the small-buffer optimization of common std libs, so a heap
     // allocation per packet is EXPECTED; a double fits inline. The ratio
     // confirms that threshold cost (Sec 5.1). The dominant HEAP-ALLOCATION cost
-    // is independent of the stubbed vc_image ctor — boxing copies the ~32-byte
-    // handle either way — but the shared_ptr refcount atomic inside that copy is
-    // null/free today and lands (a small addition, not the dominant cost) once
-    // the ctor allocates. See Sec 9.
+    // is independent of the stubbed vc_image_meta::element_count() (still a
+    // TODO(you) rep, so zeros() below allocates a 0-element buffer) — boxing
+    // copies the ~32-byte handle either way — but the shared_ptr refcount atomic
+    // inside that copy is null/free today and lands (a small addition, not the
+    // dominant cost) once the rep is implemented and the buffer is non-empty.
+    // See Sec 9.
     cases.push_back(
         {"packet", true, [](ankerl::nanobench::Bench& bench) {
-             const vc::vc_image image(kWidth, kHeight, kChannels);
+             const vc::vc_image image =
+                 vc::vc_image::zeros(kWidth, kHeight, kChannels);
 
              // Sanity: a boxed value round-trips back to the same type.
              {

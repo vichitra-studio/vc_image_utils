@@ -20,8 +20,8 @@
 #error "VC_TEST_OUTPUT_DIR must be defined by CMake (see CMakeLists.txt)"
 #endif
 
-TEST_CASE("vc_image: constructor validates and allocates") {
-    vc::vc_image img(4, 2, 3);
+TEST_CASE("vc_image: zeros() validates and allocates") {
+    vc::vc_image img = vc::vc_image::zeros(4, 2, 3);
     CHECK(img.width() == 4);
     CHECK(img.height() == 2);
     CHECK(img.channels() == 3);
@@ -30,10 +30,10 @@ TEST_CASE("vc_image: constructor validates and allocates") {
     CHECK(img.pixels()->size() == img.pixel_count());
 }
 
-TEST_CASE("vc_image: constructor rejects invalid dimensions") {
-    CHECK_THROWS_AS(vc::vc_image(0, 2, 3), vc::vc_exception);
-    CHECK_THROWS_AS(vc::vc_image(4, 0, 3), vc::vc_exception);
-    CHECK_THROWS_AS(vc::vc_image(4, 2, 0), vc::vc_exception);
+TEST_CASE("vc_image: zeros() rejects invalid dimensions") {
+    CHECK_THROWS_AS(vc::vc_image::zeros(0, 2, 3), vc::vc_exception);
+    CHECK_THROWS_AS(vc::vc_image::zeros(4, 0, 3), vc::vc_exception);
+    CHECK_THROWS_AS(vc::vc_image::zeros(4, 2, 0), vc::vc_exception);
 }
 
 TEST_CASE("vc_error_code: round-trips through to_int/to_error_code") {

@@ -59,21 +59,24 @@ std::vector<vc::bench::bench_case> micro_cases() {
 
     // ---- passthrough: the real rung ladder (rung 1 vs rung 2a) ----
     // NOT baseline-eligible YET: both rungs copy a vc_image whose pixels_ is a
-    // null shared_ptr under the stubbed ctor, so today they measure the box/map/
-    // dispatch plumbing but NOT the refcount atomic a real copy carries. rung1
-    // (a bare handle copy) is dominated by that absent atomic — ~0.26 ns is
-    // essentially "no control block touched". Implementing the vc_image ctor
-    // changes these numbers but is NOT a "bench code change", so the Sec 8
-    // lifecycle rule would not flag a committed baseline for regeneration — the
-    // exact reason grayscale/mean are excluded. So passthrough is gated the same
-    // way: it runs and prints (the ladder is wired and ready), but is committed
-    // only once the ctor lands. Flip to true then (and add a correctness gate).
+    // null shared_ptr under the stubbed vc_image_meta::element_count() (still a
+    // TODO(you) rep, so zeros()/with_fill() allocate a 0-element buffer), so
+    // today they measure the box/map/dispatch plumbing but NOT the refcount
+    // atomic a real copy carries. rung1 (a bare handle copy) is dominated by
+    // that absent atomic — ~0.26 ns is essentially "no control block touched".
+    // Implementing element_count() changes these numbers but is NOT a "bench
+    // code change", so the Sec 8 lifecycle rule would not flag a committed
+    // baseline for regeneration — the exact reason grayscale/mean are excluded.
+    // So passthrough is gated the same way: it runs and prints (the ladder is
+    // wired and ready), but is committed only once the rep lands. Flip to true
+    // then (and add a correctness gate).
     cases.push_back(
         {"passthrough", /*baseline_eligible=*/false,
          [](ankerl::nanobench::Bench& bench) {
              using stage_t = vc::pipe::vc_passthrough_stage;
              const stage_t stage("bench_passthrough");
-             const vc::vc_image image(kWidth, kHeight, kChannels);
+             const vc::vc_image image =
+                 vc::vc_image::zeros(kWidth, kHeight, kChannels);
 
              const vc::pipe::slot_name in_slot{stage_t::slots::in.name};
              const vc::pipe::slot_name out_slot{stage_t::slots::out.name};
@@ -116,7 +119,8 @@ std::vector<vc::bench::bench_case> micro_cases() {
          [](ankerl::nanobench::Bench& bench) {
              using stage_t = vc::pipe::vc_grayscale_stage;
              const stage_t stage("bench_grayscale");
-             const vc::vc_image image(kWidth, kHeight, kChannels);
+             const vc::vc_image image =
+                 vc::vc_image::zeros(kWidth, kHeight, kChannels);
 
              const vc::pipe::slot_name in_slot{stage_t::slots::rgb.name};
 
@@ -142,7 +146,8 @@ std::vector<vc::bench::bench_case> micro_cases() {
          [](ankerl::nanobench::Bench& bench) {
              using stage_t = vc::pipe::vc_mean_brightness_stage;
              const stage_t stage("bench_mean");
-             const vc::vc_image image(kWidth, kHeight, kChannels);
+             const vc::vc_image image =
+                 vc::vc_image::zeros(kWidth, kHeight, kChannels);
 
              const vc::pipe::slot_name in_slot{stage_t::slots::image.name};
 

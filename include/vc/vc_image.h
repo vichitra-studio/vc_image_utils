@@ -4,54 +4,99 @@
 #pragma once
 
 #include <cstddef>
+#include <utility>
 
+#include "vc/vc_image_meta.h"
+#include "vc/vc_image_writer.h"
 #include "vc/vc_types.h"
 
 namespace vc {
 
+// An immutable, shareable image — the value that flows between pipeline stages.
+// It is uniformly READ-ONLY: there is no mutable pixel accessor anywhere on this
+// type, and it holds its pixels as a shared_ptr<const vc_pixel_buffer>, so once
+// an image exists nothing can change it (docs/coding_guidelines.md Sec 4.2). A
+// copy is a cheap refcount bump that shares the same const buffer — safe by
+// construction, so images are passed by value through vc_pipe_packet without a
+// deep copy.
+//
+// Pixels are produced by filling a vc_image_writer and sealing it; that seal is
+// the single construction path — zeros()/with_fill() below are named factories
+// that go through the very same writer, not a second path. The image composes a
+// vc_image_meta descriptor (geometry now, the vc_image_spec seed later) exposed
+// via meta(), plus the const buffer.
 class vc_image {
   public:
-    // TODO(you): implement in src/vc_image.cpp.
-    //   1. Validate: width == 0 || height == 0 || channels == 0 || channels > 4
-    //      -> throw vc::vc_exception(vc::vc_error_code::invalid_argument,
-    //      "...")
-    //   2. Allocate: cast the FIRST operand to std::size_t before multiplying
-    //      width * height * channels (uint32_t arithmetic can overflow before
-    //      a later cast would help) ->
-    //      std::make_shared<vc::vc_pixel_buffer>(count, vc::buf_f32{0.0f})
-    //   3. Assign width_, height_, channels_
-    //   See docs/coding_guidelines.md Sec 6.3.
-    vc_image(vc::image_dim width,
-             vc::image_dim height,
-             vc::channel_count channels);
+    // Named, explicit-intent factories. A single (w, h, c) CONSTRUCTOR read as
+    // general-purpose while only ever producing zeros — a quiet mismatch
+    // between what it looked like and what it did. Two named factories say
+    // exactly what content you get, and both funnel through with_fill() ->
+    // vc_image_writer -> seal(), so validation/allocation logic lives in
+    // exactly one place (vc_image_writer::validated()).
 
-    vc::image_dim width() const noexcept {
-        return width_;
+    // A valid, IMMUTABLE image of the given geometry, every element 0.0f.
+    static vc_image zeros(image_dim width, image_dim height,
+                          channel_count channels);
+
+    // A valid, IMMUTABLE image of the given geometry, every element `fill`.
+    // T is constrained by vc_pixel_element (vc_pixel_buffer.h) — the SAME
+    // concept vc_pixel_buffer's and vc_image_writer's constructors are
+    // constrained by, so an unsupported fill type (anything other than
+    // buf_f32/buf_u8/buf_u16) is a compile error with a clear
+    // constraints-not-satisfied diagnostic. The concept IS the compile-time
+    // type check here — no separate static_assert needed.
+    template <vc_pixel_element T>
+    static vc_image with_fill(image_dim width, image_dim height,
+                              channel_count channels, T fill) {
+        return vc_image_writer(width, height, channels, fill).seal();
     }
-    vc::image_dim height() const noexcept {
-        return height_;
+
+    // ---- descriptor ----
+
+    // The image's descriptor as a value — the thing the pipeline matches and
+    // propagates. New descriptor fields become reachable here with no change to
+    // vc_image itself.
+    const vc_image_meta& meta() const noexcept {
+        return meta_;
     }
-    vc::channel_count channels() const noexcept {
-        return channels_;
+
+    // Terse forwarders for the stable core (dimensions never change shape);
+    // everything that grows is reached through meta().
+    image_dim width() const noexcept {
+        return meta_.width();
+    }
+    image_dim height() const noexcept {
+        return meta_.height();
+    }
+    channel_count channels() const noexcept {
+        return meta_.channels();
     }
 
-    // TODO(you): total number of elements in the buffer, independent of
-    // dtype (width * height * channels). Mind overflow — see Sec 6.3.
-    std::size_t pixel_count() const noexcept;
+    // Total element count in the buffer, independent of dtype.
+    std::size_t pixel_count() const noexcept {
+        return meta_.element_count();
+    }
 
-    // TODO(you): read-only access. Must not allow mutation through the
-    // returned handle. See docs/coding_guidelines.md Sec 4.2.
-    vc::const_pixel_buffer_ptr pixels() const noexcept;
+    // ---- pixels (read-only) ----
 
-    // TODO(you): explicit mutation path — caller's responsibility not to
-    // break the width*height*channels == size() invariant. See Sec 4.2.
-    vc::pixel_buffer_ptr mutable_pixels() noexcept;
+    // Read-only handle to the pixel buffer. Callers read typed data through
+    // pixels()->as<T>() (span<const T>) and locate elements with
+    // meta().index(x, y, ch). There is deliberately no mutable counterpart.
+    const_pixel_buffer_ptr pixels() const noexcept {
+        return pixels_;
+    }
 
   private:
-    vc::image_dim width_ = 0;
-    vc::image_dim height_ = 0;
-    vc::channel_count channels_ = 0;
-    vc::pixel_buffer_ptr pixels_;
+    // The one true minter: vc_image_writer::seal() moves its filled buffer in
+    // here (qualified to const) alongside the descriptor. No other code can
+    // construct an image from a raw buffer.
+    friend class vc_image_writer;
+    vc_image(vc_image_meta meta, const_pixel_buffer_ptr pixels)
+        : meta_(meta), pixels_(std::move(pixels)) {
+    }
+
+    vc_image_meta meta_;
+    const_pixel_buffer_ptr pixels_;
 };
 
 } // namespace vc

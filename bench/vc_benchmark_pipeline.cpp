@@ -60,7 +60,8 @@ std::vector<vc::bench::bench_case> macro_cases() {
              const vc::pipe::stage_name pt =
                  pipe.add(std::make_unique<stage_t>("pt"));
 
-             const vc::vc_image image(kWidth, kHeight, kChannels);
+             const vc::vc_image image =
+                 vc::vc_image::zeros(kWidth, kHeight, kChannels);
 
              // The open input of this one-stage graph is pt.in; builds a fresh
              // sink map for one run().

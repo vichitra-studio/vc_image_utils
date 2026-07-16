@@ -32,13 +32,15 @@ vc::vc_image stb_image_reader::read(const path& p, const read_config& config) {
     //      force a conversion (Sec 7.4).
     //   2. if (!data) throw vc::vc_exception(vc::vc_error_code::decode_error,
     //         "stb_image_reader::read: " + p + ": " + stbi_failure_reason());
-    //   3. Construct vc::vc_image img(w, h, channels_in_file).
-    //   4. Copy data into img.mutable_pixels(), dividing each byte by 255.0f.
-    //      Do NOT use stbi_loadf — it silently linearises (applies gamma).
-    //      We work in encoded 8-bit space here.
-    //   5. stbi_image_free(data) — always, even though vc_image owns its
-    //      own buffer; stb's buffer is separate and must be freed here.
-    //   6. return img;
+    //   3. Build the image through a writer (vc_image is immutable — the writer
+    //      is the only write path; #include "vc/vc_image_writer.h"):
+    //      vc::vc_image_writer w(w, h, channels_in_file, vc::buf_f32{0.0f});
+    //   4. Copy data into w.pixels<vc::buf_f32>() (or w.at<vc::buf_f32>(...)),
+    //      dividing each byte by 255.0f. Do NOT use stbi_loadf — it silently
+    //      linearises (applies gamma). We work in encoded 8-bit space here.
+    //   5. stbi_image_free(data) — always, even though the buffer now owns its
+    //      own copy; stb's buffer is separate and must be freed here.
+    //   6. return std::move(w).seal();  // hand back the immutable image
 
     throw vc::vc_exception(vc::vc_error_code::decode_error,
                            "stb_image_reader::read: not yet implemented (" + p +
