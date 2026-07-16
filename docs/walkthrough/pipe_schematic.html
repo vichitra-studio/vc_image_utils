@@ -204,7 +204,7 @@
       <ul class="members">
         <li><span class="k">const</span> stage_name&amp; name() <span class="c">const // per-instance</span></li>
         <li><span class="k">virtual const char*</span> kind() <span class="c">const = 0 // per-type</span></li>
-        <li><span class="k">virtual void</span> declare(vc_pipe_contract&amp;) <span class="c">const = 0</span></li>
+        <li><span class="k">virtual void</span> declare(contract_builder&amp;) <span class="c">const = 0</span></li>
         <li><span class="k">virtual void</span> process(vc_pipe_context&amp;) <span class="c">const = 0</span></li>
         <li class="sub"><span class="c">protected:</span> i_pipe(stage_name)</li>
       </ul>
@@ -229,7 +229,7 @@
         <li>stage_port(stage, slot_name) <span class="c">// from a name</span></li>
         <li><span class="k">bool</span> operator==(…);&nbsp; <span class="k">size_t</span> hash()</li>
       </ul>
-      <div class="card-note">A <b>graph coordinate</b>: which slot on which stage. THE single currency — <code class="inline">connect()</code> takes a pair, and <code class="inline">run()</code> keys its maps by it. Built from a typed <code class="inline">slot&lt;T&gt;</code> <em>or</em> a plain name (the config path).</div>
+      <div class="card-note">A <b>graph coordinate</b>: which slot on which stage. THE run-time currency — <code class="inline">run()</code> keys its maps by it, and <code class="inline">connect()</code> lowers each <code class="inline">(stage, slot&lt;T&gt;)</code> into one internally. Built from a typed <code class="inline">slot&lt;T&gt;</code> <em>or</em> a plain name (the config path).</div>
     </div>
 
     <div class="card" style="--tone:var(--signal)">
@@ -254,7 +254,7 @@
         <li>vector&lt;slot_name&gt; input_slot_names() / output_slot_names()</li>
         <li class="sub"><span class="c">private struct</span> slot_decl { name; <span class="ty">type</span> }</li>
       </ul>
-      <div class="card-note">The <b>signs</b> a stage posts: which slot carries which type. Type lookups <b>throw</b> on an undeclared slot (exceptions-only) — so <code class="inline">validate()</code> never branches on not-found. Type layer <span class="tag live">live</span> · data layer (image spec) <span class="tag later">later</span></div>
+      <div class="card-note">The <b>signs</b> a stage posts — but a stage never holds this contract: <code class="inline">declare()</code> is handed a narrow write-only <code class="inline">contract_builder</code> view (<code class="inline">add_*_slot</code> only). The full contract, with its name-keyed type lookups, stays framework-internal for <code class="inline">validate()</code>/<code class="inline">run()</code> (§12.6). Lookups <b>throw</b> on an undeclared slot (exceptions-only) — so <code class="inline">validate()</code> never branches on not-found. Type layer <span class="tag live">live</span> · data layer (image spec) <span class="tag later">later</span></div>
     </div>
 
     <div class="card" style="--tone:var(--signal)">
@@ -263,25 +263,25 @@
         <li class="sub"><span class="c">// author-facing (typed slot&lt;T&gt;)</span></li>
         <li><span class="k">template</span>&lt;T&gt; <span class="k">const</span> T&amp; get_input(<span class="ty">slot&lt;T&gt;</span>) <span class="c">const</span></li>
         <li><span class="k">void</span> set_output(<span class="ty">slot&lt;T&gt;</span>, vc_pipe_packet)</li>
-        <li class="sub"><span class="c">// runner-facing (by name)</span></li>
-        <li><span class="k">void</span> set_input(name, vc_pipe_packet)</li>
-        <li><span class="k">const</span> vc_pipe_packet&amp; get_output(name) <span class="c">const</span></li>
-        <li class="sub"><span class="c">private:</span> unordered_map inputs_, outputs_</li>
+        <li class="sub"><span class="c">// runner-facing (whole-map handoff)</span></li>
+        <li><span class="k">explicit</span> vc_pipe_context(unordered_map&lt;name, packet&gt;)</li>
+        <li>unordered_map&lt;name, packet&gt; take_outputs() <span class="k">&amp;&amp;</span></li>
+        <li class="sub"><span class="c">private:</span> name-keyed lowering + unordered_map inputs_, outputs_</li>
       </ul>
-      <div class="card-note">The <b>tray</b> for one run of one stage. The API splits by audience: the <em>author</em> reads inputs / writes outputs through typed slots; the <em>runner</em> injects / harvests by name. Input &amp; output are <b>separate namespaces</b>.</div>
+      <div class="card-note">The <b>tray</b> for one run of one stage. The surface splits by audience and <b>no name-keyed method is public</b>: the <em>author</em> reads inputs / writes outputs through typed <code class="inline">slot&lt;T&gt;</code>; the <em>runner</em> injects inputs through the <b>map constructor</b> and harvests through <b>take_outputs()</b>, working name-keyed on plain maps it owns. Input &amp; output stay <b>separate namespaces</b>.</div>
     </div>
 
     <div class="card span2" style="--tone:var(--accent)">
       <div class="card-head"><span class="name">vc_pipeline</span><span class="stereotype">orchestrator · the belt + foreman</span></div>
       <ul class="members">
         <li>stage_name add(unique_ptr&lt;i_pipe&gt;) <span class="c">// takes ownership; returns the stage's own name()</span></li>
-        <li><span class="k">void</span> connect(<span class="ty">stage_port</span> from, <span class="ty">stage_port</span> to) <span class="c">// wire output port → input port</span></li>
+        <li><span class="k">template</span>&lt;Tout,Tin&gt; <span class="k">void</span> connect(stage_name, <span class="ty">slot&lt;Tout&gt;</span>, stage_name, <span class="ty">slot&lt;Tin&gt;</span>) <span class="c">// wire output slot → input slot</span></li>
         <li><span class="k">void</span> validate() <span class="c">const</span> <span class="tag later">TODO(you)</span> <span class="c">— assembly-time type check</span></li>
         <li>unordered_map&lt;<span class="ty">stage_port</span>, vc_pipe_packet&gt; run(unordered_map&lt;<span class="ty">stage_port</span>, vc_pipe_packet&gt;) <span class="c">const</span> <span class="tag later">TODO(you)</span></li>
         <li class="sub"><span class="c">private struct</span> connection { <span class="ty">stage_port</span> from; <span class="ty">stage_port</span> to }</li>
         <li class="sub"><span class="c">private:</span> vector&lt;unique_ptr&lt;i_pipe&gt;&gt; stages_;&nbsp; vector&lt;connection&gt; connections_</li>
       </ul>
-      <div class="card-note"><b>Assemble → validate → run.</b> Holds pipes generically as <code class="inline">i_pipe</code> and wires them by <em>string</em> slot names carried in a <code class="inline">stage_port</code> — which is exactly what lets a CLI or config file compose a pipeline at runtime. <code class="inline">run()</code> is the <b>map variant</b>: inject the open inputs, execute in order, harvest the open outputs.</div>
+      <div class="card-note"><b>Assemble → validate → run.</b> Holds pipes generically as <code class="inline">i_pipe</code>; every wire is spelled through a stage's typed <code class="inline">slots::</code> members, which <code class="inline">connect()</code> lowers to a <code class="inline">stage_port</code> internally — the string coordinate stays the runtime-composition currency a CLI or config file can compose, but authors never spell it. <code class="inline">run()</code> is the <b>map variant</b>: inject the open inputs, execute in order, harvest the open outputs.</div>
     </div>
 
     <div class="card" style="--tone:var(--run)">
@@ -318,7 +318,8 @@
     <div class="rel"><span class="a">stages</span><span class="arw">──</span><span class="verb">implement</span><span class="arw">──▷</span><span class="b">i_pipe</span></div>
     <div class="rel"><span class="a">connection</span><span class="arw">──</span><span class="verb">joins ▸ two</span><span class="arw">──▶</span><span class="b">stage_port</span></div>
     <div class="rel"><span class="a">stage_port</span><span class="arw">──</span><span class="verb">lowers</span><span class="arw">──▷</span><span class="b">slot&lt;T&gt;</span></div>
-    <div class="rel"><span class="a">i_pipe::declare</span><span class="arw">──</span><span class="verb">fills</span><span class="arw">──▶</span><span class="b">vc_pipe_contract</span></div>
+    <div class="rel"><span class="a">i_pipe::declare</span><span class="arw">──</span><span class="verb">writes through</span><span class="arw">──▶</span><span class="b">contract_builder</span></div>
+    <div class="rel"><span class="a">contract_builder</span><span class="arw">──</span><span class="verb">fills (view onto)</span><span class="arw">──▶</span><span class="b">vc_pipe_contract</span></div>
     <div class="rel"><span class="a">vc_pipe_contract</span><span class="arw">──</span><span class="verb">holds ▸ many</span><span class="arw">──▶</span><span class="b">slot_decl</span></div>
     <div class="rel"><span class="a">slot_decl</span><span class="arw">──</span><span class="verb">is lowered</span><span class="arw">──▷</span><span class="b">slot&lt;T&gt;</span></div>
     <div class="rel"><span class="a">i_pipe::process</span><span class="arw">──</span><span class="verb">reads / writes</span><span class="arw">──▶</span><span class="b">vc_pipe_context</span></div>
@@ -339,8 +340,8 @@
         <p>Stations mounted on the belt. Each stage carries its <em>own</em> name; <code class="inline">add()</code> returns it for typo-safe wiring. (Same for <code class="inline">"mean"</code>.)</p>
       </div></div>
       <div class="step"><div class="idx">2</div><div class="body">
-        <code>pipe.connect({grey, grayscale::slots::grey}, {mean, mean::slots::image});</code>
-        <p>Wire grayscale's <span class="slotref">"grey"</span> output port to mean's <span class="slotref">"image"</span> input port. Each <code class="inline">{stage, slot&lt;T&gt;}</code> is a <span class="slotref">stage_port</span> — the slot lowers to its name right here.</p>
+        <code>pipe.connect(grey, grayscale::slots::grey, mean, mean::slots::image);</code>
+        <p>Wire grayscale's <span class="slotref">"grey"</span> output slot to mean's <span class="slotref">"image"</span> input slot. Each wire is spelled through the stage's typed <code class="inline">slots::</code> member; <code class="inline">connect()</code> lowers each <code class="inline">(stage, slot&lt;T&gt;)</code> to a <span class="slotref">stage_port</span> internally.</p>
       </div></div>
       <div class="step"><div class="idx">3</div><div class="body">
         <code>pipe.validate();</code>
@@ -408,7 +409,7 @@
         <tr><td>slot&lt;T&gt;, stage_port, names</td><td><span class="f">include/vc/pipe/vc_pipe_types.h</span></td><td>done</td></tr>
         <tr><td>type-erased parcel</td><td><span class="f">include/vc/pipe/vc_pipe_packet.h</span></td><td>done</td></tr>
         <tr><td>the interface</td><td><span class="f">include/vc/pipe/i_pipe.h</span></td><td>done</td></tr>
-        <tr><td>contract (add_*_slot, type lookups)</td><td><span class="f">…/vc_pipe_contract.h · src/pipe/vc_pipe_contract.cpp</span></td><td>done</td></tr>
+        <tr><td>contract + author-facing builder view</td><td><span class="f">…/vc_pipe_contract.h · vc_pipe_contract_builder.h · src/pipe/vc_pipe_contract.cpp</span></td><td>done</td></tr>
         <tr><td>per-run tray</td><td><span class="f">…/vc_pipe_context.h · src/pipe/vc_pipe_context.cpp</span></td><td>done</td></tr>
         <tr><td>belt + foreman</td><td><span class="f">…/vc_pipeline.h · src/pipe/vc_pipeline.cpp</span></td><td>add/connect done · validate/run <b>TODO</b></td></tr>
         <tr><td>worked reference stage</td><td><span class="f">…/stages/vc_passthrough_stage.*</span></td><td>done</td></tr>

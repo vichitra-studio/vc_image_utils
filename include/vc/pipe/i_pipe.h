@@ -11,8 +11,10 @@ namespace vc::pipe {
 
 // Forward declarations keep the interface header light: a pipe only names
 // these types by reference, so their full definitions are needed only in the
-// .cpp that implements a concrete stage.
-class vc_pipe_contract;
+// .cpp that implements a concrete stage. declare() is handed a contract_builder
+// (the narrow author-facing view), NOT the full vc_pipe_contract — that stays
+// framework-internal (docs/pipe_design.md Sec 12.5).
+class contract_builder;
 class vc_pipe_context;
 
 // A pipe is one image-processing stage — the unit a pipeline chains together.
@@ -51,7 +53,7 @@ class i_pipe {
     // The stage TYPE's stable identifier (a literal). Per-type, not per-run.
     virtual const char* kind() const = 0;
 
-    virtual void declare(vc_pipe_contract& contract) const = 0;
+    virtual void declare(contract_builder& contract) const = 0;
     virtual void process(vc_pipe_context& context) const = 0;
 
   protected:

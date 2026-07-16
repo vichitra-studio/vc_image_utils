@@ -16,8 +16,14 @@ namespace vc::pipe {
 // else. A contract describes only what a stage consumes and produces — it has
 // NO knowledge of what that stage is wired to. Wiring is graph-global topology
 // that only exists once stages are assembled, so it lives on vc_pipeline, not
-// here (docs/pipe_design.md Sec 6, Sec 12.2). The pipeline reads contracts back
+// here (docs/pipe_design.md Sec 6, Sec 12.5). The pipeline reads contracts back
 // at assembly time to type-check every connection before any pixels flow.
+//
+// FRAMEWORK-INTERNAL: a stage author never holds one of these. declare() is
+// handed a contract_builder — a write-only view exposing just add_*_slot — so
+// the name-keyed query methods below (input_slot_type, input_slot_names, ...)
+// are reachable only by vc_pipeline::validate()/run(), the framework code that
+// owns the contract. Nothing name-keyed sits on the author-facing surface.
 //
 // This is the "type layer" of the contract, and the only layer live now. The
 // "data layer" — matching a vc_image_spec (planar/linear/float32, etc.) — is

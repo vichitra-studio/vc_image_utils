@@ -655,17 +655,19 @@ definition; everything else is a projection of it, in lowered form:
 | slot definition (name + type), authoring | `slot<T>` | **public** (stage authors) |
 | slot identity | `slot_name` (string) | public |
 | payload type | the C++ type / `std::type_index` | — |
+| author-facing contract surface | `contract_builder` (write-only view) | **public** (stage authors) — see §12.6 |
 | declared slot (runtime record) | `slot_decl { name, type_index }` | **private to `vc_pipe_contract`** |
-| graph coordinate / wiring currency | `stage_port { stage_name, slot_name }` | **public** (wiring) |
+| graph coordinate / `run()` map key | `stage_port { stage_name, slot_name }` | framework/assembly (§12.6) |
 
 Exactly **three** slot representations, each with one job: `slot<T>` authors, `slot_decl` stores
 (private), `stage_port` wires. `slot<T>` appears only at the author-facing call sites
-(`add_input_slot`, `add_output_slot`, `ctx.get_input`, `ctx.set_output`, and a `stage_port` ctor) and
-is gone by the next line — it never propagates or is stored. `stage_port` is the *single* wiring
-currency: `connect` takes a pair of them and `run()` keys its maps by them (§12.5). **Visibility is
-decided by audience:** *does anyone outside the framework legitimately name this type?* — `stage_port`
-yes (public), `slot_decl` no (private); the erased `type_index` leaks only as an opaque token for the
-type-check, never the decl.
+(`contract_builder::add_input_slot` / `add_output_slot`, `ctx.get_input`, `ctx.set_output`, and
+`connect`) and is gone by the next line — it never propagates or is stored. `stage_port` is the graph
+coordinate: `connect` builds them from `slot<T>` and `run()` keys its maps by them. **Visibility is
+decided by audience — *what may a stage author or external caller touch?*** The author-facing surface
+is `slot<T>`-only; name-keyed methods (`stage_port`'s string ctor, the contract's type/name lookups,
+the context's string get/set) are framework-internal, reached by `vc_pipeline` using types it owns, no
+`friend` (§12.6). The erased `type_index` leaks only as an opaque token for the type-check.
 
 ### 12.2 Decisions
 
@@ -884,3 +886,114 @@ and `AlignAfterOpenBracket: BlockIndent` gives a different shape and would churn
 `// clang-format off` guards were rejected (unwanted noise), so `add_*_slot` takes clang-format's
 natural wrap — which is close anyway: one designated field per line, brace attached:
 `push_back(slot_decl{.name = …,` / `.type = …});`.
+
+### 12.6 Encapsulation review (2026-07-15)
+
+A follow-up review asked the load-bearing question: *what may a stage author or an external caller
+actually touch?* The answer tightened the surface so that **no name-keyed method sits on the
+author-facing surface** — the invariant is now "typed at the edge, name-keyed only inside the
+framework." **These decisions supersede the matching §12.5 bullets** (Context 2×2 with public
+string-keyed methods; `connect(stage_port, stage_port)`; `declare(vc_pipe_contract&)`). Build stayed
+green; the pipe suite stayed 14 green / 6 red (reps untouched).
+
+The organizing distinction is **who holds the object**, not whether a name string appears in the code.
+`validate()`/`run()` are members of `vc_pipeline`; a pipeline method reading a contract *it owns* is a
+class using its own internals, not exposed API — so **no `friend` is needed** (an explicit non-goal:
+friending the whole pipeline would widen access as the pipeline grows pooling/caching). Two things stay
+irreducibly name-based and that is fine: stage *instance* names, and `run()`'s open-slot computation
+("declared names minus connected names", and `run()` is generic — no `T`).
+
+**`contract_builder` — the whole author-facing contract surface.** `declare()` now takes a
+`contract_builder&` (new type, `include/vc/pipe/vc_pipe_contract_builder.h`): a narrow, write-only,
+non-copyable **view** over a `vc_pipe_contract` the framework owns, exposing only
+`add_input_slot(slot<T>)` / `add_output_slot(slot<T>)` and nothing else. The full `vc_pipe_contract`
+(with `input_slot_type` / `input_slot_names` / …) is unchanged but **framework-internal by use** — the
+pipeline builds it, wraps it in a builder for the `declare()` call, then queries the populated contract
+in `validate()`/`run()`. A stage author only ever holds a builder, so the name-keyed query methods are
+off their surface without being deleted or friended.
+
+**Context — map boundary in, `take_outputs()` out; no public per-slot name-keyed method.** The
+runner-facing `set_input` / `get_output` / `has_output` and the string-keyed `get_input` are gone from
+the public surface. Inputs enter through a **constructor** taking
+`std::unordered_map<slot_name, vc_pipe_packet>` (the runner gathers a stage's open inputs + upstream
+outputs into one map and hands it over in a single coarse call); outputs leave through
+`take_outputs() &&` (harvest all at once). The author sees only the typed `get_input(slot<T>)` /
+`set_output(slot<T>)`; their string-keyed lowering targets are now **private**, reached only through a
+`slot<T>`. This is the mechanism that lets `run()` drive a context with **no `friend`** — it works
+name-keyed on plain maps it owns, never on a per-slot context method.
+
+**`connect` takes `slot<T>`, not `stage_port`.** `connect(stage_name, slot<Tout>, stage_name,
+slot<Tin>)` (a template) replaces `connect(stage_port, stage_port)`, so the raw-string
+`stage_port(stage_name, slot_name)` ctor leaves the *assembly* surface — every wire is spelled through
+a stage's `slots::` members. **Deliberately NOT a compile-time type check:** `Tout`/`Tin` are
+independent (the user rejected a compile-time-safety framing twice); `connect` just lowers each
+descriptor to its `stage_port`, and `validate()` still does the runtime type compare (this project is
+runtime-composition; config-wired graphs get no compile step). The `stage_port(stage_name, slot_name)`
+ctor is **kept** (not on the author/rep surface): `stage_port` is the graph *coordinate* — `run()`'s
+map key — and `run()` must build result keys from `(stage_name, slot_name)` internally during harvest;
+with no `friend`, that ctor stays reachable. It is the config/framework coordinate ctor, analogous to
+instance names being irreducibly string.
+
+**`validate()` stays a real rep (option A).** It looks each connection's two types up from the internal
+contracts and compares them — the meaningful exercise — rather than having `connect` pre-capture types
+into the connection struct (which would make `validate()` a trivial field compare).
+
+**Net author-facing surface:** `slot<T>` for `declare()`, `get_input`, `set_output`, and `connect`; the
+`run()` map at one coarse boundary; the context constructor / `take_outputs()`. **Zero name-keyed
+methods on the surfaces handed to a stage author** (`declare` → `contract_builder`, `process` →
+typed-only context); zero `friend`. Note the honest scope: `vc_pipe_contract` and `stage_port` remain
+**public, freely-constructible** types whose name-keyed members an external caller *can* reach —
+"framework-internal" here means *not handed to authors*, not *inaccessible*. The boundary that matters,
+and the one this review closes, is the author/rep surface. Fully hiding `stage_port`'s string ctor
+would need a narrow `friend class vc_pipeline` on `stage_port` (so `run()`'s harvest builds result keys
+through a private ctor) — a value-type friendship, unlike the rejected friend-on-the-growing-pipeline;
+[OPEN] — **taken up and resolved in §12.7**.
+
+### 12.7 Encapsulation closure — specified, then deferred by choice (2026-07-16)
+
+The §12.6 `[OPEN]` question — *should the residual public string surfaces be mechanically closed?* — was
+taken up in full. Outcome: **specify the closure completely, keep the code where it is, do not implement
+it now.** The residual public string surfaces on `vc_pipe_contract` / `stage_port` / `vc_pipe_context`
+are left open **by choice, not oversight.**
+
+**The full closure, specified** (what "zero public string surface" would actually take):
+
+- **`stage_port`** — privatize the `stage_port(stage_name, slot_name)` ctor (keep the typed
+  `stage_port(stage_name, slot<T>)` ctor public); add `friend class vc_pipeline` so `run()`'s harvest
+  builds result keys through the private ctor.
+- **`vc_pipe_contract`** — privatize the ctor, `add_*_slot`, and the `*_slot_type` / `*_slot_names`
+  query methods; add `friend class vc_pipeline` (owns and queries the contract) **and**
+  `friend class contract_builder` (writes through it in `declare()`).
+- **`vc_pipe_context`** — privatize the map constructor and `take_outputs()`; add
+  `friend class vc_pipeline` (the only legitimate driver).
+
+That is **four narrow friend grants**, each scoped to a small value/view type that opens only to
+`vc_pipeline` (one-directional, not mutual, not transitive) — categorically different from the broad
+*friend-the-whole-pipeline* rejected in §12.6, whose objection was that the pipeline itself grows
+pooling/caching surface over time. These grants do not have that problem; they were never the concern.
+
+**Decision: keep the code as-is — and the reason is *not* "the callers are still stubs."**
+
+- On record and corrected: arguing that `validate()`/`run()` "don't exist yet" is **not** a valid
+  justification — they will be written soon, and a design is not settled by the transient absence of its
+  callers. The sequencing principle only holds in its *correct* form: harden an interface against
+  *observed* usage friction, never against the mere fact that usage has not happened yet.
+- The load-bearing reason is that **the interior strings are the erased core, not a leak to seal.** There
+  are exactly **two** real audiences: the *author edge*, which must be typed — already closed in §12.6
+  via `contract_builder` + the typed context — and the *framework interior*, which is legitimately
+  name-keyed because `run()`/`validate()` are generic over `i_pipe*` and hold no `T`. The closure would
+  defend a **third** boundary — "the interior must be *mechanically* unreachable from outside" — whose
+  beneficiary does not exist. No external caller constructs a rogue `vc_pipe_contract` or `stage_port`:
+  the pipeline owns contracts; authors are handed builders; a future plugin authors *stages*, not
+  contracts or graph coordinates. Spending four friend grants plus value-type→pipeline coupling to
+  defend a threat model with no inhabitant is cost without payoff.
+- The right moment to close it is when a real caller reveals friction, or an actual external-author
+  boundary (a third-party plugin surface) materializes — informed by usage, not preemptive.
+
+**Learning-build note.** This is a scaffold-for-fluency build (Claude scaffolds; the user writes the
+reps). Implementing the closure as a **rep on the `friend`/attorney idiom** is a legitimate exercise on
+its own axis, wholly separate from the engineering verdict above — practice in the idiom, not a
+correctness fix. The §12.6 surface is already more than sufficient to write `validate()`/`run()` and the
+stages against; nothing downstream is blocked on this closure either way.
+
+This resolves the §12.6 `[OPEN]` item: **deferred, by choice.**

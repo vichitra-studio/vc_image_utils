@@ -6,7 +6,7 @@
 #include <utility>
 
 // TODO(you): you will need these to implement declare()/process():
-//   #include "vc/pipe/vc_pipe_contract.h"
+//   #include "vc/pipe/vc_pipe_contract_builder.h"  // declare() adds slots here
 //   #include "vc/pipe/vc_pipe_context.h"
 //   #include "vc/pipe/vc_pipe_packet.h"
 //   #include "vc/vc_image.h"
@@ -22,7 +22,7 @@ const char* vc_mean_brightness_stage::kind() const {
     return "mean_brightness";
 }
 
-void vc_mean_brightness_stage::declare(vc_pipe_contract& contract) const {
+void vc_mean_brightness_stage::declare(contract_builder& contract) const {
     // TODO(you): the key line that makes this stage worth having — the OUTPUT
     // is a scalar, not an image. slots::mean is a slot<double>, so
     // add_output_slot records a `double` payload type. The tests expect input

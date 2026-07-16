@@ -5,6 +5,7 @@
 
 #include <memory>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "vc/pipe/i_pipe.h"
@@ -28,20 +29,32 @@ class vc_pipeline {
     // refer to the stage without restating the string literal:
     //   const auto grey =
     //   pipe.add(std::make_unique<vc_grayscale_stage>("grey"));
-    //   pipe.connect({grey, vc_grayscale_stage::slots::grey},
-    //                {mean, vc_mean_brightness_stage::slots::image});
+    //   pipe.connect(grey, vc_grayscale_stage::slots::grey,
+    //                mean, vc_mean_brightness_stage::slots::image);
     stage_name add(std::unique_ptr<i_pipe> pipe);
 
-    // Wire an upstream OUTPUT port to a downstream INPUT port. A stage_port is
-    // {stage, slot}; build each from a stage name and a typed slot descriptor —
-    // `{from, some_stage::slots::out}` — which keeps the slot typo-safe and
-    // carries its type, while making `stage_port` the single wiring currency
-    // the map-variant run() also speaks.
+    // Wire an upstream OUTPUT slot to a downstream INPUT slot, each named by
+    // its stage plus a typed slot descriptor:
+    //   pipe.connect(grey, vc_grayscale_stage::slots::grey,
+    //                mean, vc_mean_brightness_stage::slots::image);
+    // Taking slot<T> (not a raw slot name) keeps the wiring typo-safe and keeps
+    // the name-keyed stage_port ctor off the assembly surface — every wire is
+    // spelled through a stage's `slots::` members (Sec 12.5).
     //
-    // No compile-time type check: this is a runtime-composition library, so a
-    // type mismatch across a connection is caught at assembly time by
-    // validate(), on both the code-wired and config-wired paths (Sec 6).
-    void connect(stage_port from, stage_port to);
+    // The two slot types are INDEPENDENT — this is NOT a compile-time type
+    // check. `vc_image_utils` is a runtime-composition library, so a mismatch
+    // across a connection is caught at assembly time by validate(), on both the
+    // code-wired and config-wired paths (Sec 6); connect just lowers each
+    // descriptor to its stage_port coordinate.
+    template <typename Tout, typename Tin>
+    void connect(stage_name from_stage,
+                 slot<Tout> from_slot,
+                 stage_name to_stage,
+                 slot<Tin> to_slot) {
+        connections_.push_back(
+            connection{.from = stage_port{std::move(from_stage), from_slot},
+                       .to = stage_port{std::move(to_stage), to_slot}});
+    }
 
     // ---- validate (TODO(you)) ----
     //

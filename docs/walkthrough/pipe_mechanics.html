@@ -110,7 +110,7 @@
       │  <span class="cmt">add_input_slot / stage_port ctor / ctx.get_input — the boundary</span>
       ▼
 slot_decl{ name:<span class="str">"rgb"</span>, type:<span class="ty">type_index(vc_image)</span> }   <span class="cmt">// runtime: a value you can store &amp; compare</span></code></pre>
-    <div class="callout"><b>Three representations, one per job.</b> <code class="inline">slot&lt;T&gt;</code> authors (typo-safe, type deduced); the private <code class="inline">slot_decl</code> stores (erased, owning); <code class="inline">stage_port{stage, slot}</code> is the single wiring currency that <code class="inline">connect()</code> and <code class="inline">run()</code> both speak. Lowering is <em>one-way</em> — you can recover a name's type as a <code class="inline">type_index</code>, never reconstruct a compile-time <code class="inline">slot&lt;T&gt;</code>.</div>
+    <div class="callout"><b>Three representations, one per job.</b> <code class="inline">slot&lt;T&gt;</code> authors (typo-safe, type deduced); the private <code class="inline">slot_decl</code> stores (erased, owning); <code class="inline">stage_port{stage, slot}</code> is the graph coordinate <code class="inline">connect()</code> lowers each wire into and <code class="inline">run()</code> keys its maps by. Lowering is <em>one-way</em> — you can recover a name's type as a <code class="inline">type_index</code>, never reconstruct a compile-time <code class="inline">slot&lt;T&gt;</code>.</div>
   </div>
 
   <!-- ========= 1. THE DONE MECHANISMS ========= -->
@@ -143,29 +143,32 @@ contract.<span class="fn">add_output_slot</span>(slots::grey);    <span class="c
 <span class="cmt">// what one push records:</span>
 slot_decl { name: <span class="str">"rgb"</span>, type: <span class="ty">type_index(vc_image)</span> }
 
-<span class="cmt">// how the pipeline reads it back — a value, so a check is just ==</span>
-std::type_index t = contract.<span class="fn">input_slot_type</span>(<span class="str">"rgb"</span>);   <span class="cmt">// THROWS vc_exception if never declared</span></code></pre>
+<span class="cmt">// how the pipeline reads it back — off the FULL vc_pipe_contract it owns, NOT</span>
+<span class="cmt">// the builder (which exposes only add_*_slot); the type is a value, check is ==</span>
+std::type_index t = full_contract.<span class="fn">input_slot_type</span>(<span class="str">"rgb"</span>);   <span class="cmt">// THROWS if never declared</span></code></pre>
     <div class="callout"><b>The mechanism:</b> a stage names+types its slots in exactly one place (its <code class="inline">struct slots</code>), <code class="inline">declare()</code> forwards them, and the pipeline reads the declarations back to validate. Because the lookup <b>throws</b> on an undeclared slot (this project's only error channel), <code class="inline">validate()</code> never carries a not-found branch — just the real type comparison.</div>
   </div>
 
   <h2>Mechanism 3 · the per-run context <span class="pill done" style="margin-left:.6rem">implemented</span></h2>
   <div class="block tone" style="--tone:var(--signal)">
-    <h3>vc_pipe_context — two maps, name → packet</h3>
-    <p class="sub">One map for inputs, one for outputs (separate namespaces). The typed <code class="inline">get_input(slot&lt;T&gt;)</code> is thin sugar: look up the packet, then unbox it. The API is split by audience — the author uses typed slots, the runner uses names.</p>
+    <h3>vc_pipe_context — typed at the edge, map handoff at the boundary</h3>
+    <p class="sub">One map for inputs, one for outputs (separate namespaces). The typed <code class="inline">get_input(slot&lt;T&gt;)</code> is thin sugar: look up the packet, then unbox it. The surface splits by audience — and <b>no name-keyed method is public</b>: the author uses typed slots, the runner hands inputs in as one map and harvests outputs as one map.</p>
 <pre class="code"><code><span class="cmt">// author-facing: T is deduced from the descriptor, never spelled at the call site</span>
 <span class="kw">template</span> &lt;<span class="kw">typename</span> T&gt; <span class="kw">const</span> T&amp; <span class="fn">get_input</span>(slot&lt;T&gt; s) <span class="kw">const</span> {
     <span class="kw">return</span> <span class="fn">get_input</span>(slot_name{s.name}).<span class="fn">get</span>&lt;T&gt;();   <span class="cmt">// map lookup + any_cast</span>
 }
 <span class="kw">template</span> &lt;<span class="kw">typename</span> T&gt; <span class="kw">void</span> <span class="fn">set_output</span>(slot&lt;T&gt; s, vc_pipe_packet p);
 
-<span class="cmt">// runner-facing: keyed by plain name — the pipeline only has names in hand</span>
-<span class="kw">void</span> <span class="fn">set_input</span>(<span class="kw">const</span> slot_name&amp; name, vc_pipe_packet p);
-<span class="kw">const</span> vc_pipe_packet&amp; <span class="fn">get_output</span>(<span class="kw">const</span> slot_name&amp; name) <span class="kw">const</span>;
+<span class="cmt">// runner-facing: whole-map handoff — the ONLY way inputs enter, and outputs leave</span>
+<span class="kw">explicit</span> <span class="fn">vc_pipe_context</span>(std::unordered_map&lt;slot_name, vc_pipe_packet&gt; inputs);
+std::unordered_map&lt;slot_name, vc_pipe_packet&gt; <span class="fn">take_outputs</span>() <span class="kw">&amp;&amp;</span>;   <span class="cmt">// harvest all at once</span>
 
-<span class="cmt">// private:</span>
+<span class="cmt">// private: name-keyed lowering targets (reached only through a slot&lt;T&gt;), plus the two maps</span>
+<span class="kw">const</span> vc_pipe_packet&amp; <span class="fn">get_input</span>(<span class="kw">const</span> slot_name&amp; name) <span class="kw">const</span>;
+<span class="kw">void</span> <span class="fn">set_output</span>(<span class="kw">const</span> slot_name&amp; name, vc_pipe_packet p);
 std::unordered_map&lt;slot_name, vc_pipe_packet&gt; inputs_;
 std::unordered_map&lt;slot_name, vc_pipe_packet&gt; outputs_;</code></pre>
-    <div class="callout"><b>Audience, not symmetry.</b> An author only ever <em>reads</em> inputs and <em>writes</em> outputs, so the typed sugar lives there; the runner only <em>writes</em> inputs and <em>reads</em> outputs by name. That is why <code class="inline">get_input</code> has a typed form and <code class="inline">get_output</code> does not — not an oversight.</div>
+    <div class="callout"><b>Split by audience — no public name-keyed method.</b> The author reads inputs / writes outputs through typed <code class="inline">slot&lt;T&gt;</code>; the runner injects inputs through the <b>map constructor</b> and harvests them through <b>take_outputs()</b>, working name-keyed on plain maps it owns — never through a per-slot context method. The old symmetric name-keyed pair on the public surface is gone; the two name-keyed lowering targets are now <b>private</b>, reachable only through a <code class="inline">slot&lt;T&gt;</code>.</div>
   </div>
 
   <!-- ========= 2. THE ALGORITHMS ========= -->
@@ -191,13 +194,14 @@ connections_  = [ { from:{<span class="str">"grey"</span>,<span class="str">"gre
      open outputs = all declared output slots minus every connection's `from`
 <span class="lit">3.</span> require `inputs` keys == open inputs EXACTLY (a missing OR extra key → throw).
 <span class="lit">4.</span> <span class="kw">for each</span> stage <span class="kw">in</span> insertion order:
-     ctx = vc_pipe_context{}
-     move the caller's packets for this stage's open inputs → ctx.<span class="fn">set_input</span>(slot, …)
+     unordered_map&lt;slot_name, packet&gt; in;
+     <span class="kw">for each</span> open input on this stage: MOVE the caller's packet out of `inputs` → in
      <span class="kw">for each</span> connection whose `to.stage` == this stage:
-         ctx.<span class="fn">set_input</span>(conn.to.slot, ctxs[conn.from.stage].<span class="fn">get_output</span>(conn.from.slot))
-     stage.<span class="fn">process</span>(ctx)          <span class="cmt">// reads inputs, sets outputs</span>
-     keep ctx (its outputs feed downstream)
-<span class="lit">5.</span> harvest: <span class="kw">for each</span> open output port → result[{stage, slot}] = ctx.<span class="fn">get_output</span>(slot)</code></pre>
+         in[conn.to.slot] = stash[conn.from.stage].<span class="fn">at</span>(conn.from.slot)   <span class="cmt">// copy upstream output</span>
+     vc_pipe_context ctx{std::<span class="fn">move</span>(in)};   <span class="cmt">// the map is the ONLY way inputs enter</span>
+     stage.<span class="fn">process</span>(ctx)                       <span class="cmt">// reads inputs, sets outputs</span>
+     stash[stage.<span class="fn">name</span>()] = std::<span class="fn">move</span>(ctx).<span class="fn">take_outputs</span>()   <span class="cmt">// harvest; ctx is now spent</span>
+<span class="lit">5.</span> harvest: <span class="kw">for each</span> open output port → result[{stage, slot}] = stash[stage].<span class="fn">at</span>(slot)</code></pre>
   </div>
 
   <!-- ========= 3. THE TRACE ========= -->
@@ -228,40 +232,42 @@ mean → { in  "image": <span class="ty">vc_image</span>,  out "mean": <span cla
     <div class="tstep" style="--tone:var(--run)">
       <div class="rail"><span class="num">3</span><span class="wire"></span></div>
       <div class="content">
-        <div class="title">run() · inject onto the open input</div>
-        <p class="desc">grey's "rgb" is an open input (no connection feeds it), so the caller's packet is moved there.</p>
-        <div class="state"><span class="lbl">ctx[grey]</span><pre>inputs_  = { "rgb": <span class="pk">packet⟨vc_image⟩</span> }
-outputs_ = { }</pre></div>
+        <div class="title">run() · build grey's input map</div>
+        <p class="desc">grey's "rgb" is an open input (no connection feeds it), so the caller's packet is moved into grey's input map. The stash starts empty.</p>
+        <div class="state"><span class="lbl">grey's input map</span><pre>in    = { "rgb": <span class="pk">packet⟨vc_image⟩</span> }   ← moved from caller
+stash = { }</pre></div>
       </div>
     </div>
 
     <div class="tstep" style="--tone:var(--run)">
       <div class="rail"><span class="num">4</span><span class="wire"></span></div>
       <div class="content">
-        <div class="title">run() · grayscale.process(ctx)</div>
-        <p class="desc"><code class="inline">ctx.get_input(slots::rgb)</code> → <code class="inline">const vc_image&amp;</code>; builds a new 1-channel image, publishes it.</p>
-        <div class="state"><span class="lbl">ctx[grey]</span><pre>inputs_  = { "rgb":  <span class="pk">packet⟨vc_image⟩</span> }
-outputs_ = { "grey": <span class="pk">packet⟨vc_image⟩</span> }   ← new</pre></div>
+        <div class="title">run() · grayscale.process(ctx) → stash</div>
+        <p class="desc">A transient <code class="inline">vc_pipe_context{std::move(in)}</code> is built. <code class="inline">ctx.get_input(slots::rgb)</code> → <code class="inline">const vc_image&amp;</code>; process builds a new 1-channel image and publishes it. <code class="inline">take_outputs()</code> then drains ctx into the stash — the context is transient, gone after this.</p>
+        <div class="state"><span class="lbl">stash after grey</span><pre>ctx = vc_pipe_context{ std::move(in) };  grey.process(ctx);
+stash["grey"] = std::move(ctx).take_outputs()
+              = { "grey": <span class="pk">packet⟨vc_image⟩</span> }   ← ctx now spent</pre></div>
       </div>
     </div>
 
     <div class="tstep" style="--tone:var(--run)">
       <div class="rail"><span class="num">5</span><span class="wire"></span></div>
       <div class="content">
-        <div class="title">run() · route stage 1 → stage 2</div>
-        <p class="desc">The connection {grey.grey → mean.image} copies grey's published output into stage 2's tray.</p>
-        <div class="state"><span class="lbl">ctx[mean]</span><pre>inputs_  = { "image": <span class="pk">packet⟨vc_image⟩</span> }   ← from ctx[grey].get_output("grey")
-outputs_ = { }</pre></div>
+        <div class="title">run() · build mean's input map</div>
+        <p class="desc">The connection {grey.grey → mean.image} copies grey's stashed output into mean's input map. grey.grey is a <em>consumed</em> output, so the stash holds it only to feed this connection — it never reaches the final harvest.</p>
+        <div class="state"><span class="lbl">mean's input map</span><pre>in    = { "image": <span class="pk">packet⟨vc_image⟩</span> }   ← copied from stash["grey"].at("grey")
+stash = { "grey": … }   held to feed the connection</pre></div>
       </div>
     </div>
 
     <div class="tstep" style="--tone:var(--run)">
       <div class="rail"><span class="num">6</span><span class="wire"></span></div>
       <div class="content">
-        <div class="title">run() · mean_brightness.process(ctx)</div>
-        <p class="desc">Reads "image", averages the buffer, publishes a <b>double</b> — a non-image packet on the belt.</p>
-        <div class="state"><span class="lbl">ctx[mean]</span><pre>inputs_  = { "image": <span class="pk">packet⟨vc_image⟩</span> }
-outputs_ = { "mean":  <span class="pk" style="color:var(--run)">packet⟨double⟩</span> }   ← the answer</pre></div>
+        <div class="title">run() · mean_brightness.process(ctx) → stash</div>
+        <p class="desc">A fresh transient context is built from mean's input map. process() reads "image", averages the buffer, publishes a <b>double</b> — a non-image packet on the belt — and <code class="inline">take_outputs()</code> stashes it.</p>
+        <div class="state"><span class="lbl">stash after mean</span><pre>ctx = vc_pipe_context{ std::move(in) };  mean.process(ctx);
+stash["mean"] = std::move(ctx).take_outputs()
+              = { "mean": <span class="pk" style="color:var(--run)">packet⟨double⟩</span> }   ← the answer</pre></div>
       </div>
     </div>
 
@@ -269,7 +275,7 @@ outputs_ = { "mean":  <span class="pk" style="color:var(--run)">packet⟨double�
       <div class="rail"><span class="num">7</span></div>
       <div class="content">
         <div class="title">run() · harvest the open output</div>
-        <p class="desc">mean's "mean" is an open output (no connection consumes it) → placed in the returned map, keyed by its port.</p>
+        <p class="desc">mean's "mean" is an open output (no connection consumes it). The final harvest reads it from <code class="inline">stash["mean"]</code> into the returned map, keyed by its <code class="inline">stage_port</code>.</p>
         <div class="state"><span class="lbl">caller</span><pre>auto outputs = pipe.<span class="fn">run</span>(std::<span class="fn">move</span>(inputs));
 <span class="kw">double</span> brightness = outputs.<span class="fn">at</span>({<span class="str">"mean"</span>, slots::mean}).<span class="fn">get</span>&lt;<span class="kw">double</span>&gt;();   <span class="cmt">// any_cast guaranteed to pass</span></pre></div>
       </div>
@@ -324,9 +330,9 @@ vc::<span class="ty">vc_image</span> img = reader.<span class="fn">read</span>(<
 <span class="kw">const auto</span> grey = pipe.<span class="fn">add</span>(std::<span class="fn">make_unique</span>&lt;<span class="ty">vc_grayscale_stage</span>&gt;(<span class="str">"grey"</span>));
 <span class="kw">const auto</span> mean = pipe.<span class="fn">add</span>(std::<span class="fn">make_unique</span>&lt;<span class="ty">vc_mean_brightness_stage</span>&gt;(<span class="str">"mean"</span>));
 
-<span class="cmt">// 3. wire output port → input port. A stage_port is { stage, slot&lt;T&gt; }.</span>
-pipe.<span class="fn">connect</span>({grey, vc_grayscale_stage::slots::grey},
-             {mean, vc_mean_brightness_stage::slots::image});
+<span class="cmt">// 3. wire output slot → input slot, each named by its stage + typed slot.</span>
+pipe.<span class="fn">connect</span>(grey, vc_grayscale_stage::slots::grey,
+             mean, vc_mean_brightness_stage::slots::image);
 
 <span class="cmt">// 4. check the wiring BEFORE any pixels move (throws on a type mismatch)</span>
 pipe.<span class="fn">validate</span>();
@@ -355,7 +361,7 @@ inputs.<span class="fn">emplace</span>(<span class="ty">stage_port</span>{grey, 
 
     <span class="kw">const char*</span> <span class="fn">kind</span>() <span class="kw">const override</span> { <span class="kw">return</span> <span class="str">"blur"</span>; }   <span class="cmt">// per-type identity</span>
 
-    <span class="kw">void</span> <span class="fn">declare</span>(vc_pipe_contract&amp; c) <span class="kw">const override</span> {
+    <span class="kw">void</span> <span class="fn">declare</span>(contract_builder&amp; c) <span class="kw">const override</span> {
         c.<span class="fn">add_input_slot</span>(slots::in);
         c.<span class="fn">add_output_slot</span>(slots::out);
     }
@@ -395,7 +401,7 @@ vc::<span class="ty">vc_image</span> blended =
   <h2>Ownership &amp; lifetime — who holds what</h2>
   <div class="block">
 <pre class="code"><code>vc_pipeline     <span class="kw">owns</span>   unique_ptr&lt;i_pipe&gt;        <span class="cmt">// sole owner of every stage</span>
-vc_pipe_context <span class="kw">holds</span>  vc_pipe_packet by value    <span class="cmt">// moved in, moved across connections</span>
+vc_pipe_context <span class="kw">holds</span>  vc_pipe_packet by value    <span class="cmt">// moved in; copied to downstream inputs (shallow)</span>
 vc_pipe_packet  <span class="kw">holds</span>  std::any (heap)            <span class="cmt">// payload must be copyable</span>
 vc_image        <span class="kw">holds</span>  shared_ptr&lt;buffer&gt;         <span class="cmt">// COPY IS SHALLOW — shares pixels</span></code></pre>
     <div class="callout"><b>The one guardrail:</b> <code class="inline">ctx.get_input(slots::in)</code> returns <code class="inline">const vc_image&amp;</code>, so a stage can only reach the buffer through <code class="inline">pixels()</code> (const) — never <code class="inline">mutable_pixels()</code>. A transform produces a <em>new</em> image rather than mutating a shared input. In-place mutation with an ownership check (<code class="inline">use_count()==1</code>) is a <span style="color:var(--assembly)">[LATER]</span> performance move.</div>
