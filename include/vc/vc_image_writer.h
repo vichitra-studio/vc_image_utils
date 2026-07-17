@@ -119,7 +119,7 @@ class vc_image_writer {
     // Same discipline as any view into a moved-from object: do not use a
     // writer-derived span/ref after seal(). (use_count alone does not enforce
     // this — it governs the shared_ptr, not view lifetimes.)
-    std::shared_ptr<vc_pixel_buffer> pixels_;
+    pixel_buffer_ptr pixels_;
 };
 
 } // namespace vc
