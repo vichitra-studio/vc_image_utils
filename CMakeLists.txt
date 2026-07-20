@@ -92,6 +92,14 @@ set(VC_LIB_SOURCES
     src/pipe/stages/vc_passthrough_stage.cpp
     src/pipe/stages/vc_grayscale_stage.cpp
     src/pipe/stages/vc_mean_brightness_stage.cpp
+    src/pipe/stages/vc_blur_stage.cpp
+    src/edit/vc_edit_session.cpp
+    src/edit/vc_build_pipeline.cpp
+    src/edit/vc_table.cpp
+    src/edit/vc_edit_settings_store.cpp
+    src/edit/vc_edit_table.cpp
+    src/edit/vc_stage_registry.cpp
+    src/edit/vc_image_meta.cpp
 )
 
 add_library(vc_image_utils_lib STATIC ${VC_LIB_SOURCES})
@@ -127,9 +135,21 @@ add_executable(vc_image_utils_tests
     tests/test_vc_image_dumper.cpp
     tests/test_vc_perf.cpp
     tests/test_vc_pipe.cpp
+    tests/test_vc_edit.cpp
+    tests/test_vc_param_schema.cpp
+    tests/support/recording_store.h
 )
 
 target_include_directories(vc_image_utils_tests SYSTEM PRIVATE third_party)
+
+# [M7] tests/support/ holds PURE test spies — never part of the library's
+# public include/ tree, since they exist only to help tests observe
+# behavior and must not leak into anything a consumer of the library could
+# link against. This gives any test TU a stable `#include "support/<name>.h"`
+# path (quote-include's relative-to-file search already resolves this from
+# tests/*.cpp, but the explicit include dir keeps it working if support/
+# code is ever reached from a nested test subdirectory).
+target_include_directories(vc_image_utils_tests PRIVATE tests)
 
 target_compile_definitions(vc_image_utils_tests PRIVATE
     VC_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/data"

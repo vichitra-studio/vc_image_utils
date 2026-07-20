@@ -49,7 +49,7 @@ scalability · 18. The schema/serialization mechanism · 19. Glossary
   aggregate, **`edit_session`** (§3) — this is what resolves the "state is scattered
   everywhere" friction.
 - The render **pipeline is disposable**, rebuilt from the edit state on demand by
-  `build_pipeline`. Expensive results survive in a **persistent derived store**, not in
+  `build_pipeline`. Expensive results survive in the **derived stores** (§5), not in
   the pipeline.
 - Stages are **pure** (`output = f(inputs, params)`) and **never mutate inputs**. That
   one invariant licenses caching, buffer reuse, and (later) parallelism — all in the
@@ -82,7 +82,27 @@ Two invariants:
 **Why the pipeline is disposable yet work isn't repeated:** the *recipe* (pipeline
 object) is cheap to rebuild; the expensive *results* live in a persistent, content-
 hashed store that survives rebuilds (§5). darktable works the same way — the pixelpipe
-is re-walked every render, but its cache persists (§15.3).
+is re-walked every render, but its cache persists (§15.3). **Rebuild is cheap by
+construction:** stage objects are rebuilt fresh per render; only the expensive part
+(pixels/derived data) is skipped, and it is skipped *by the cache*, not by keeping the
+graph alive. The one exception, deferred: stages with genuinely expensive
+*construction* (compiling a shader, loading a LUT) get an engine-level resource cache
+keyed by `(kind, params-hash)` — **[LATER]**.
+
+**Edits are truth; a failed render never corrupts them.** The edit state (§3) is the
+one source of truth; the rendered image is disposable output. A render that fails or
+is cancelled leaves the edit state untouched — it never partially applies. The
+preview is simply left stale, tracked by a hash of the current edit state, and
+re-rendered; because the derived-data cache (§5) retains every stage that *did*
+succeed, a retry recomputes only from the point of failure onward, not from scratch.
+
+**Two idioms, not one, and never blurred.** Two different immutability/mutability
+idioms coexist by design, applied where each one's driver actually holds (full
+treatment in §16 L19): **(A)** immutable-value + builder, where the driver is
+*stable shared identity* — `vc_image`, captured metadata, cached derived data; **(B)**
+a read/write capability split, where the driver is *least-privilege / CQS* — the
+storage interfaces (§7), cancellation (§8). Edits themselves are genuinely mutable
+state and are never smeared with either idiom's immutability.
 
 ## 2. The three kinds of data — the central taxonomy
 
@@ -99,9 +119,9 @@ question — *can it be regenerated identically, reliably, cheaply?*
 The taxonomy drives everything downstream:
 - **A** is app-specific → plain JSON, no XMP (§4.4).
 - **B** is where standards/interop genuinely live → a `metadata` interface (§6).
-- **C-repro** is a *performance* store: loss ⇒ recompute, not data loss. **Persistent,
-  not casually evicted; core on device** (re-aligning a burst per deghost tweak is
-  unacceptable).
+- **C-repro** is a *performance* store: loss ⇒ recompute, not data loss. Lives in
+  **`vc_cached_edits_table`** (§5, B6) — content-hash-keyed; **core on device** (re-aligning
+  a burst per deghost tweak is unacceptable), even though the store *may* evict.
 - **C-nonrepro** can't be regenerated identically, so it behaves like intent and
   **must travel with the edit** (§9).
 
@@ -125,6 +145,45 @@ class edit_session {                 // everything about ONE image
 };
 ```
 
+> **[SUPERSEDED 2026-07-18]** The sketch above (a single injected `derived_store&`)
+> is superseded. **The session owns all durable state directly** — it does not
+> reach out to a store handed in from outside: immutable `source_`, `edits_`, an
+> **edited-metadata overlay** (mutable, session-owned — distinct from the image's
+> own *captured* metadata, `shared_ptr<const i_image_meta>`, §6), a
+> `vc_persistent_edits_table`, and a `vc_cached_edits_table` — the latter two behind one
+> `i_edit_table` interface, replacing the old single `derived_store&` (§5, §7).
+> Updated member set:
+> ```cpp
+> class edit_session {
+>     vc_image             source_;        // immutable source
+>     edit_document         edits_;        // Kind A (+ Kind C-nonrepro bundled here)
+>     /* edited-metadata overlay */        // Kind B edited layer, mutable (§6)
+>     vc_persistent_edits_table   persistent_;   // Kind C-nonrepro, pinned/saved (§5, §7)
+>     vc_cached_edits_table    cache_;        // Kind C-repro, evictable, never saved (§5, §7)
+> };
+> ```
+> **[DECIDED 2026-07-18, built — Part C-1]** The two derived stores are **injected**
+> (not owned by value), as **two separate nullable non-owning pointers**
+> (`vc_persistent_edits_table*`, `vc_cached_edits_table*`): they differ in both key scheme and
+> serialization lifecycle and each outlives the session, so the session merely
+> references them, and injection enables test/mock substitution. The metadata overlay
+> is an **owning `unique_ptr<i_image_meta>`** (alias `image_metadata_handle`) — session-local
+> mutable state, not an externally-owned backend — which makes the aggregate
+> **move-only** (a snapshot copy would need a metadata `clone()`, a later rep). The
+> built 5-arg ctor is `vc_edit_session(vc_image source, vc_edit_document edits,
+> image_metadata_handle meta, vc_persistent_edits_table*, vc_cached_edits_table*)`, superseding the
+> owned-by-value member sketch above. This also settles the metadata-handle question:
+> one alias does **not** suffice — the image-composed (captured) metadata is a
+> `shared_ptr<const i_image_meta>` (on `vc_image_info`) while the session's edited
+> overlay is a `unique_ptr<i_image_meta>`; two distinct handle kinds.
+
+> **[DECIDED 2026-07-20]** `meta` is now **mandatory**, matching `persistent`/`cache`:
+> the ctor throws `vc::vc_exception` if `meta` is null, so `meta()` returns
+> `i_image_meta&` (not a pointer) and stays `noexcept` — there is no "no backend
+> attached" state to represent. This supersedes the "meta is NULLABLE" framing
+> above; every caller must inject a real (even if trivial in-memory
+> `vc_memory_image_meta`) backend.
+
 **Scattered storage, unified access.** This is Lightroom's catalog entry / darktable's
 "image" concept **[unverified as to internal structure]**. It is: what **undo/redo**
 snapshots (§10), what **portability** bundles (§9), what the **UI** binds to, and what
@@ -138,6 +197,11 @@ collection," they depend on `edit_session` — not on reaching into stores indiv
 The document holds **user-facing settings**, organized by tool (like RawTherapee
 `ProcParams`, §15.2) — **not** stage param structs. Stages receive a **narrow slice**,
 never the whole document.
+
+`build_pipeline` is the **sole session-reader**: it is the only code that reads
+`edit_session` state directly. It wires slots and derives each stage's params from
+that state; a stage itself is never handed the session, only the narrow slotted
+inputs `build_pipeline` chose for it (§4.2, §4.3, §8).
 
 ```cpp
 struct capture_settings  { int bracket_count = 5; double ev_spacing = 2.0; };  // cross-cutting
@@ -169,15 +233,44 @@ knowledge lives here, imperatively** — this is RawTherapee's `ImProcCoordinato
 exist, so this assembly step is irreducible regardless of registry (§8). Moving the
 graph to *data* is [LATER].
 
-### 4.3 Params on a stage
-A stage owns a **plain typed `params` struct** (no variant bag), built at image-load
-and read directly in the hot path (`params_.exposure` — zero indirection). `i_pipe`
-is **untouched**: params are resolved *before* construction, at the factory boundary
-the `kind()` seam already anticipates (`i_pipe.h:27-29`). A stage's params can be
-**empty** and absent from the document (a plumbing stage like `align` has no user
-knobs — it exists because `deghost` depends on it).
+**Registry-erased construction [design NOW].** A stage is instantiated through the
+registry, not `new`-chained directly: `register_stage<StageT>(kind, builder)`
+captures, at registration, the concrete stage type together with its edit-layer
+params-builder and constructor, behind one uniform call
+`create(kind, name, session) -> stage_ptr`. No casts anywhere in the call path; the
+`vc_param_struct` concept (§4.3) is enforced at registration, not at use. This is
+what `build_pipeline` calls to get each stage it wires.
 
-### 4.4 Serialization [NOW: hand-written; LATER: schema-driven — see §18]
+> **[REVERTED]** An intermediate shape moved each stage's `from_session` out to a
+> free builder function living in the edit layer, supplied to `register_stage` at
+> registration. That was reverted: `from_session` (e.g. `vc_blur_stage::from_session`)
+> lives back on the stage as a static, sitting next to the params struct it
+> produces. `vc_stage_registry::register_stage` accepts either shape identically —
+> it only requires something invocable with `const vc_edit_session&`, so a pointer
+> to a static member function (`&vc_blur_stage::from_session`) satisfies the same
+> `vc_stage_builder` concept a free function would. The stage itself stays
+> session-blind either way (§4.3) — `from_session` derives params from a
+> session, but nothing in `process()` ever sees one.
+
+### 4.3 Params on a stage
+**A stage is a pure function of its slots (data) and its params (config)** — it sees
+no session, no runner, no cache; everything it needs is pushed in at build time
+(§8). A stage owns a **plain typed `params` struct** (no variant bag), built at
+image-load and read directly in the hot path (`params_.exposure` — zero
+indirection). `i_pipe` is **untouched**: params are resolved *before*
+construction, at the factory boundary the `kind()` seam already anticipates
+(`i_pipe.h:27-29`). A stage's params can be **empty** and absent from the document
+(a plumbing stage like `align` has no user knobs — it exists because `deghost`
+depends on it).
+
+**Concrete params, not a runtime base class.** Params stay concrete per-stage
+types (Design A) — the `vc_param_struct` concept (§4.2, §18) is the
+*standardization* (every params type shapes up the same way, checkable at compile
+time), **not** a virtual/runtime params base class. Generic consumers that need a
+type-erased view — UI, serialization — go through the **schema** (§18), which is
+that view; the stage's hot-path code never sees it.
+
+### 4.4 Serialization [NOW: hand-written; NOW: schema-driven framework BUILT — see §18; persistent-store wiring LATER]
 - **Format: JSON.** Human-readable, diffable, nests (masks = arrays of strokes),
   versionable. Purpose is **reliable representation + import/export + own-ecosystem
   consumption** — *not* cross-app edit interop, which is impossible anyway (every
@@ -192,12 +285,32 @@ knobs — it exists because `deghost` depends on it).
 - **Binary in JSON**: possible via base64 (reliable), but reserve for *small* binary
   (a hash, a tiny mask). Large blobs (mask pixels, embeddings) go to the derived store
   (Kind C), never JSON.
-- **[LATER] schema-driven serialization** (§18): declare each field once as a
-  descriptor; one generic `save`/`load`/`describe` walks it, so save/load/UI/CLI/
-  cache-key all derive from a single source (escapes RawTherapee's per-field
-  duplication, §15.2). Adopted **when hand-written boilerplate hurts**, not before.
+- **[NOW, framework BUILT — see §18] schema-driven serialization**: declare each
+  field once as a descriptor; one generic `save`/`load`/`describe` walks it, so
+  save/load/UI/CLI/cache-key all derive from a single source (escapes
+  RawTherapee's per-field duplication, §15.2). Wiring the schema through the
+  *persistent* doc store is still **[LATER]** (awaits the `doc_writer`/
+  `doc_reader` bodies, §7); broader adoption for user-facing settings remains
+  **when hand-written boilerplate hurts**, not before.
+- **Portability shape [design NOW; build LATER — see also §9]:** the source image
+  stays pristine — never touched by serialization. What actually saves is a JSON
+  **sidecar** holding the edit document + the edited-metadata overlay (§6) + **ids**
+  that reference derived data, not the bytes themselves. A **companion blob store**
+  sits beside the sidecar and holds the *persistent*-derived bytes those ids point
+  at (§5) — **not** base64'd inline (base64 stays reserved for genuinely small
+  binary, as above). **Export is one self-contained bundle**: sidecar + metadata +
+  the referenced derived blobs, packaged together. The **evictable** cache (§5) is
+  never part of this — it may optionally back a private warm-start mirror, but it
+  is never saved or bundled.
 
 ## 5. Derived data (Kind C) — cache + persistent store [LATER; seam NOW]
+
+> **[SUPERSEDED 2026-07-18]** The "three tiers" list below predates B6 and blurs
+> the axis B6 uses to split the two derived stores: its middle tier describes a
+> content-hash-keyed, "reproducible-but-expensive" persistent store — that is
+> `vc_cached_edits_table`'s definition now, not `vc_persistent_edits_table`'s, which is
+> **non-reproducible** and id-keyed (see the corrected paragraph below). Kept
+> for narrative continuity only; the two-store split below is authoritative.
 
 Three tiers, cut by "reliably reproducible?" (§2):
 - **Transient in-memory cache** — cheap intermediates; evictable freely.
@@ -206,6 +319,18 @@ Three tiers, cut by "reliably reproducible?" (§2):
   core on device.** Reconstructible if lost (not source of truth).
 - **Bundled with the edit** — non-reproducible derived (AI masks): persisted as data,
   travels with the document (§9).
+
+**A reproducible cache and a non-reproducible persistent store are two concrete
+stores behind one interface [design NOW; B6].** `vc_cached_edits_table`
+(**reproducible**, content-hash keyed, may evict, never saved) and
+`vc_persistent_edits_table` (**non-reproducible**, id-keyed, pinned, saved/bundled —
+§4.4, §9) are **separate objects**, not one store with a policy flag: they
+differ in **both** reproducibility/key-scheme **and** serialization lifecycle
+(evictable vs. pinned/saved), and conflating them would force one object to
+carry two independent axes of variance. Both sit behind one `i_edit_table`
+interface (§7), so **access is source-agnostic** — a consumer reading through
+the interface and slots cannot tell, and does not need to, whether the value
+it got came from the cache or the persistent store.
 
 ### 5.1 Caching model
 Cache key = `hash(own param slice + input hash)`; the input hash transitively encodes
@@ -219,6 +344,21 @@ downstream pixels — the input-hash term is mandatory (this closed the "metaphy
 dependency" gap raised in review). Coarse (recompute-suffix, RawTherapee-style) suits
 the batch merge; fine per-stage (darktable-style) suits the interactive editor — same
 pure stages, product-tuned schedule.
+
+**Runner memoization, mechanically [design NOW; B7].** Stages themselves are pure
+and never touch the cache (§4.3) — memoization is entirely the runner's job. At the
+start of a `run()`, a cheap **chained-hash pre-pass** walks the graph and computes
+each node's `hash(params-via-`schema()` + input-hashes)` (§18 for `schema()`),
+deciding hit/miss for every node before any pixels move; a changed upstream hash
+automatically propagates downstream, so the pre-pass alone detects everything that
+must recompute. Only the misses actually run. Running is **demand-driven**: a miss
+on some slot causes the runner to run *that slot's producer* — the upstream stage
+wired to it — which is the same mechanism §5.2's tap/injection design already
+describes from the inject side (inject ⇒ skip the producer; here, a genuine miss ⇒
+*run* the producer). Params reach the cache only **via `schema()`, as the cache
+key** — the params object itself is never stored *in* the cache; the store holds
+outputs, keyed by hash. (Store access itself is spelled `get`/`set` uniformly,
+per the Q2 naming decision — §7, §19.)
 
 ### 5.2 Taps & injections — a `run()` extension [LATER; design NOW]
 The pipeline needs keyed read/write of **any** slot, not just open ones:
@@ -237,7 +377,10 @@ packet` is `std::any`, so a slot carries a `vector<vc_image>`, a homography, a
 `vector<feature_point>`, or an embedding tensor identically. Make expensive/shared
 derived data a **first-class stage output** (wired via slots), which makes it
 independently cacheable, tappable, and dump-inspectable. Compute inline only when
-cheap and single-consumer.
+cheap and single-consumer. This uniformity is exactly what makes the two-store
+split behind `i_edit_table` (§5, B6) invisible to a consumer: a slot value is a
+slot value regardless of whether `vc_cached_edits_table` or `vc_persistent_edits_table`
+produced it.
 
 ## 6. Image metadata (Kind B) — behind an interface [LATER; seam NOW]
 
@@ -249,19 +392,64 @@ struct metadata {
     virtual std::optional<value> get(field) const = 0;   // read EXIF/IPTC/XMP
     virtual void set(field, value) = 0;                  // rating, copyright, keyword
 };
-// implementations: exiv2_metadata (desktop), dng_sdk_metadata (on-device)
+// implementations: per-platform backends (Apple Image I/O / Android ExifInterface /
+// desktop parser / DNG SDK) — NEVER exiv2
 ```
 
-- **Licensing (load-bearing):** exiv2 is **GPL → desktop only** (per the project
-  licensing memo); on-device (paid app) writes metadata into the output DNG via the
-  **DNG SDK** (permissive). The interface is what lets the same calling code run either
-  backend — and here **both interface criteria hold** (2 real implementations + a
-  polymorphic caller), unlike the Kind A/C case (§7).
+> **Revises the earlier exiv2-on-desktop choice (B4, 2026-07-18).** The line below
+> previously read "exiv2 is GPL → desktop only," with `exiv2_metadata`/
+> `dng_sdk_metadata` as the two implementations. That choice is now revised:
+> exiv2 must **never** enter the core value type on *any* platform — the backend is
+> **permissive and per-platform** everywhere (Apple Image I/O, Android
+> ExifInterface, a desktop parser, and the DNG SDK), not split GPL-desktop /
+> permissive-device. The "≥2 real implementations + a polymorphic caller"
+> substitutability argument below still holds — it now rests on the per-platform
+> backends rather than on exiv2 vs DNG SDK. **[Ambiguity — flagged, not resolved
+> here]** the collation records this as a plain Part-B decision, not as one of the
+> four explicit supersessions; it is recorded here as a B4-driven revision of this
+> section's earlier content rather than as a fifth formal supersession.
+
+- **Licensing (load-bearing):** the backend is **permissive, per-platform**, chosen
+  and instantiated by the **loader**, behind the interface — Apple Image I/O
+  on-platform, Android ExifInterface on-platform, a desktop parser, the DNG SDK for
+  DNG output. exiv2 (GPL) is excluded everywhere, not just off-desktop. The
+  interface is what lets the same calling code run any backend — and here **both
+  interface criteria hold** (multiple real implementations + a polymorphic caller),
+  unlike the Kind A/C case (§7).
 - **Source of truth** = the app's model; XMP is a *sync target* for interop (LR-style
   **[unverified]**), not the only home.
 - **MVP scope:** EXIF passthrough + copyright + color matrices into the output DNG.
   Full catalog metadata (ratings/flags/keywords) is editor-era; the interface
   accommodates it so we are not bottled up.
+- **`field`/`value` stay `std::string` placeholders [LATER; B4].** The interface
+  above is intentionally under-typed for now — typing `field`/`value` properly
+  pre-bakes the full field-set decision (which EXIF/IPTC/XMP tags exist as named,
+  typed fields), which is deferred; string placeholders keep the interface usable
+  without committing to that set early.
+- **Composition, not fusion, with the image [design NOW; B4].** Metadata stays a
+  separate subsystem (L14, §16) but **rides the image**: `vc_image_info`
+  **composes** a `shared_ptr<const i_image_meta>` rather than metadata and image
+  geometry being fused into one type. Physical pixel dimensions always live on
+  `vc_image_info` itself, never inferred from metadata — the reason is EXIF
+  **orientation**: an EXIF-rotated image's *display* width is not its *buffer*
+  width, so "dimensions" cannot be read off metadata alone without the
+  orientation-application step in between. Because metadata rides the image, it
+  reaches stages the same way pixels do — through **typed slots** (§5.3) — with no
+  separate metadata-passing channel. A **mask is simply an image whose composed
+  metadata is null** (a mask has no EXIF story of its own).
+- **Two layers, merged on export [design NOW; B4].** *Captured* metadata
+  (immutable, `shared_ptr<const i_image_meta>`, lives on the image) and *edited*
+  metadata (mutable, an overlay owned by `edit_session`, §3) are distinct layers,
+  not one mutable store. They merge only **on export** (mechanics — [LATER]).
+  This is also why one `image_metadata_handle` alias cannot cover both: the
+  captured handle and the overlay handle are different kinds of thing (§3).
+- **Image writer never parses EXIF [design NOW; B5].** `vc_image_writer` composes
+  a **ready-made** `vc_image_info` (including its `shared_ptr<const i_image_meta>`)
+  and seals it — it does not itself read or parse EXIF bytes. Constructing the
+  `i_image_meta` object is the **loader's/backend's** job, handed to the writer
+  already built. This keeps EXIF-parsing concerns out of the writer entirely
+  (separation of concerns): the writer's job is composing a sealed, ready image,
+  not decoding metadata formats.
 
 ## 7. Storage interfaces [LATER; shape settled]
 
@@ -280,7 +468,69 @@ interface. What they *share* is the storage engine beneath:
   misses (⇒ recompute). **Separate instance, different durability** (may-evict vs the
   document's never-evict) — the one distinction to preserve.
 
+> **[SUPERSEDED 2026-07-18]** The single `derived_store` bullet above (built, in the
+> code that existed this session, over a raw `i_kv_store&`) is superseded. Kind C
+> storage is now **two concrete implementations behind one `i_edit_table`
+> interface** — `vc_cached_edits_table` and `vc_persistent_edits_table` (§5, B6) — not one
+> store object. The "one distinction to preserve" (may-evict vs never-evict) is now
+> expressed as two *separate types*, not one type's policy setting: they differ in
+> **both** eviction policy **and** serialization lifecycle (whether the store is
+> ever saved/bundled, §4.4). A consumer reads/writes through `i_edit_table` and
+> typed slots without knowing which concrete store answered — **source-agnostic
+> access** (§5).
+
+**Reader/writer standardized as concepts, not one inherited interface
+[design NOW; B11].** `vc_optional_reader`/`vc_writer` are **concepts**, checked at compile
+time, not a base class every backend derives from — this matches the `vc_pixel_
+element`/`vc_param_struct` style already used elsewhere in this codebase (§4.3, §18)
+rather than introducing virtual dispatch where it isn't needed. There are **two
+reader flavors**, and they stay distinct rather than collapsing to one shape:
+**total-get** (settings-style: a miss silently returns a default — this is what
+`doc_reader` above does) vs **miss-exposing** (cache-style: a miss returns
+`optional`, so the caller can decide to recompute — this is what the derived-store
+read side does, §5.1). `vc_edit_settings_reader`/`vc_edit_settings_writer` **stay split** (a read-view
+over a `const` store vs a write-view over a mutable store — least-privilege/CQS,
+§16 L19) — they are **not** merged into one reader-writer type even though both
+satisfy the `vc_optional_reader`/`vc_writer` concepts.
+
 `edit_session` (§3) composes these; it is a facade (has-a), not a shared interface (is-a).
+
+> **Naming (recorded here; applies to code when built).** The
+> low-level byte-store family is renamed: the
+> `kv_store` class above becomes `i_table`, its in-memory runtime backend
+> becomes `vc_memory_table`, and the `kv_bytes` alias becomes `data_bytes`
+> (alias, no prefix, per the naming rule at §14/§19). Store access verbs are
+> standardized to **`get`/`set` everywhere** — the existing `optional`/default-
+> fallback return already carries the miss semantics (total-get vs miss-exposing,
+> above), so the verb name itself does not need to encode it. **Naming-state
+> flag:** this doc's sketches above write `kv_store` unprefixed, as illustrative
+> pseudocode predating the `vc_` class-prefix convention (§14.1); the
+> renames in this note are recorded against the *intended* prefixed identifiers
+> (`vc_kv_store → i_table`, etc.), not against the literal unprefixed
+> spelling shown in the sketches above. The same sketch's `put(key, bytes)`
+> likewise predates the get/set verb standardization above; read it as
+> `set(key, bytes)` under the renamed identifiers.
+
+> **[DECIDED 2026-07-20]** The byte-store family's interim names
+> (`i_data_store`/`vc_memory_data_store`, built earlier this session under the
+> naming this note originally recorded) are superseded by `i_table`/
+> `vc_memory_table` above — `i_data_store` sat one word away from the
+> consumer-facing `i_edit_table` (§5, B6) for two genuinely different
+> abstraction layers, which recreated the vagueness the original rename was
+> meant to fix; `i_table` instead reads as `i_edit_table`'s lower-level,
+> generic sibling. Same day: the reader concepts are renamed
+> `vc_reader → vc_optional_reader` and `vc_total_reader → vc_defaulted_reader`
+> (named after each one's return shape — `optional<V>` vs. a defaulted `V` —
+> rather than the more jargon-y "total function" sense of "total"), and all
+> three concepts (`vc_optional_reader`, `vc_defaulted_reader`, `vc_writer`)
+> move out of the shared `vc_store_concepts.h` (deleted) into the header of
+> their sole or primary consumer — `vc_optional_reader` into
+> `vc_edit_table.h`, `vc_defaulted_reader` into `vc_edit_settings_store.h`,
+> and `vc_writer` (shared by both) into `vc_table.h`, the common dependency
+> both already had. A concept cannot be a class member (C++20 restricts
+> `concept` declarations to namespace scope), so "under the relevant class"
+> was not on the table — this is the closest equivalent, no concept left
+> owned by a dedicated concepts-only file.
 
 ## 8. Relationship to the render pipeline
 
@@ -293,7 +543,18 @@ interface. What they *share* is the storage engine beneath:
   engine infers the graph from types (GEGL/vkdt/darktable all wire explicitly); a
   registry lets wiring be *data* but never removes the need to *state* it. Data-driven
   graph template is [LATER] and even then dynamic structure (variable stage counts,
-  conditionals) stays code.
+  conditionals) stays code. **Erasure shape [design NOW; B10]:**
+  `register_stage<StageT>(kind, builder)` → uniform `create(kind, name, session) ->
+  stage_ptr`, concept-enforced, no casts; full detail on the `from_session` static
+  at §4.2.
+- **Stage purity, restated for the runner [B1]** — a stage sees only its slots and
+  params, never the session, the runner, or the cache (§4.3). This is the invariant
+  the rest of this list (buffers, caching, concurrency) leans on.
+- **Runner memoization [design NOW; B7]** — before any stage runs, a cheap
+  chained-hash **pre-pass** computes every node's `hash(params-via-schema() +
+  input-hashes)` and decides hit/miss for the whole graph; a miss causes the
+  runner to run that slot's **producer** on demand. Mechanics, and the relation to
+  §5.2's tap/injection design, are in §5.1 — this is the runner-level summary.
 - **Buffers** — pipeline-owned; stages are pure and produce their output (private
   scratch is their own; they **never** mutate inputs). Point-ops may run in place, area
   ops need a distinct buffer — but that is the *pipeline's* schedule choice driven by
@@ -311,9 +572,36 @@ interface. What they *share* is the storage engine beneath:
   preview, output profile for export), **not** the edit doc. `build_pipeline` appends it
   per render destination. This keeps "edit" (in the doc) and "view transform" (from the
   target) cleanly separate while both run as stages (§16 L18).
-- **Cancellation [NOW]** — `run()` takes a cooperative **cancellation token**, checked
-  between stages and at checkpoints inside long stages. Interactive re-render (drag ⇒
-  cancel in-flight ⇒ restart) needs it.
+- **Run context [design NOW; B8/B9] / Cancellation** — `run()` takes a
+  **`vc_render_context`** (see the note below) that carries a cooperative cancellation
+  token, checked between stages and at checkpoints inside long stages. Interactive
+  re-render (drag ⇒ cancel in-flight ⇒ restart) needs it.
+
+  > **[SUPERSEDED 2026-07-18]** `vc_pipeline::run(inputs, const
+  > vc_cancellation_token& = {})` is superseded by `run(inputs, const
+  > vc_render_context&)`. The run context is a **control-only host [B8]**:
+  > cancellation lives there now, a **progress**-reporting seam is added
+  > **[LATER]**, and — deliberately — it does **not** hold the derived-data
+  > cache (§5); control and cache stay separate concerns threaded independently
+  > into `run()`.
+  >
+  > **Cancellation mechanics are unchanged in kind, wrapped differently [B9].**
+  > The existing value-semantic **`token`/`source` split** (read-only `token`
+  > checked by the pipeline; write-only `source` held by the caller that
+  > requests cancellation) is **kept** — justified by least-privilege + CQS, and
+  > by staying cheaply copyable — and is now wrapped inside the run context
+  > rather than passed bare. A base/derived inheritance design (one polymorphic
+  > cancellation type) was considered and **rejected**: it would lose the cheap
+  > copyable token and add a virtual call on a path checked between every stage.
+  > This is idiom (B) from §1/§16 L19 — read/write capability split, not
+  > immutable-value+builder.
+  >
+  > **[DECIDED 2026-07-18, built — Part C-3]:** `vc_pipe_context` receives the
+  > run context **now** — the runner threads it in (held BY VALUE, defaulted so
+  > every existing call site is unaffected) and exposes `run_context()`, so a
+  > stage's `process()` MAY read `run_context().cancelled()` as an in-process
+  > checkpoint. No stage does yet (the blur `process()` stays a rep shell), but the
+  > seam is in place without a future interface change.
 - **Concurrency [LATER]** — pure stages enable parallel execution; the executor/
   threading/tiling is built later without touching stage semantics (Halide's algorithm/
   schedule split validates this, §15.5).
@@ -323,9 +611,13 @@ interface. What they *share* is the storage engine beneath:
   the rest) are **robust stage domain logic, not errors** — the design scales without a
   partial-failure framework because robustness is per-stage. Per-stage "bypass-on-error
   ⇒ pass-through" policy is [LATER] (editor-era; darktable disables a failed module).
+  **A cancelled/failed `run()` is not a partial-failure edge case for the edit
+  state** — edits are never mutated by rendering, so there is nothing to roll back;
+  see the render-failure-consistency invariant (B15) and the disposable-pipeline /
+  resource-cache note (B13), both at §1.
 - **Resolution awareness / preview [LATER; design NOW]** — the render *request* carries
   `{target resolution / pyramid level, ROI}`; it is **not** source metadata (the source
-  image's `vc_image_meta` describes *its* geometry; a preview is a different image).
+  image's `vc_image_info` describes *its* geometry; a preview is a different image).
   Stages must be resolution-aware, and **spatial params must scale with level** (a 5 px
   blur at full-res ≈ 1.25 px at 1/4 preview) so preview matches export. Scale-awareness
   is the crux of preview↔export parity (§17.6).
@@ -336,7 +628,10 @@ interface. What they *share* is the storage engine beneath:
 
 1. **All inputs travel.** Transfer bundle = **source + JSON doc + non-reproducible
    derived** (AI masks embedded/bundled — never left in the local cache). Reproducible
-   derived regenerates on the target.
+   derived regenerates on the target. Concretely (§4.4, B14): the bundle is the JSON
+   **sidecar** (edit doc + metadata overlay + derived-data ids) plus the
+   **companion blob store** those ids reference — never the evictable cache, which
+   is reproducible by definition and simply rebuilds on the target.
 2. **Same engine / process version.** Add an **engine/process version** axis to the
    document (beyond doc/module versions); the target selects a matching render path or
    upgrades knowingly (LR's "process version" / dt module versions **[unverified]**).
@@ -380,13 +675,16 @@ transforms in play, so the reference-frame discipline starts now.
 
 **[NOW]** immutable `vc_image` (done); `edit_document` (typed, user-facing) +
 narrow-slice stage params; hand-written JSON serialization (`nlohmann/json`);
-`build_pipeline` (hand-written assembly); construction `kind()` registry; `edit_session`
-aggregate (thin); cancellation token on `run()`; reserved version fields
-(doc/module/engine); fatal-error model with stage-context wrapping; reference-frame
-discipline for stored coordinates.
+schema-driven serialization framework (`vc::params`, BUILT — see §18;
+persistent-store wiring still LATER); `build_pipeline` (hand-written assembly);
+construction `kind()` registry; `edit_session` aggregate (thin); `vc_render_context`
+hosting cancellation on `run()` (§8, B8/B9); reserved version fields
+(doc/module/engine); fatal-error model with stage-context wrapping;
+reference-frame discipline for stored coordinates.
 
-**[LATER]** persistent derived store + tiers; taps/injections `run()` extension;
-metadata subsystem; `kv_store` + adapters; schema-driven serialization; buffer pooling
+**[LATER]** `vc_cached_edits_table` / `vc_persistent_edits_table` real backends (§5, B6);
+taps/injections `run()` extension;
+metadata subsystem; `kv_store` + adapters; buffer pooling
 / liveness aliasing; chained-hash caching; data-driven graph template;
 concurrency/parallel executor; resolution-aware preview/pyramid + scale-aware params;
 masks-follow-geometry (full); stage-declared order priority; per-stage bypass-on-error;
@@ -399,27 +697,57 @@ undo/redo mechanics; `vc_image_spec` semantic axes; region-scoped invalidation.
    seam confirmed present (§17.1). Also `pipe_design.md §11 #1`.
 3. **[OPEN]** Multi-instance representation in the document (count+one-config vs
    `vector` field) — deferred to P4 (§17.2).
-4. **[OPEN]** Non-reproducible-derived storage location (embedded base64 vs bundled
-   sibling).
+4. **[DECIDED, B14]** Non-reproducible-derived storage location: a **companion blob
+   store** bundled beside the sidecar (bundled sibling) — explicitly NOT base64'd
+   inline for large derived data (§4.4, §9).
 5. **[OPEN]** Metadata master persistence location & catalog scope (editor-era).
 6. **[OPEN]** Coordinate-space/geometry full model, and the reference-frame choice — §11.
-7. **[OPEN]** `edit_session` final name.
+7. **[DECIDED 2026-07-18, built]** Aggregate name: **`vc_edit_session`** (namespace `vc::edit`).
 8. **[PARKED]** Derived-store eviction/GC/invalidation policy; exact cache-key hashing;
    tap/injection API shape; schema-adoption trigger; preview↔export parity details;
-   `vc_image_spec` field set (`pipe_design.md §11 #4`).
+   `vc_image_spec` field set (`pipe_design.md §11 #4`). Related: neither
+   `vc_cached_edits_table`'s key nor `vc_persistent_edits_table`'s stored payload currently folds
+   in `render_engine_version` (`vc_engine_version.h`) — so a cache hit or a persisted
+   artifact from a superseded engine version could currently look valid when it may not
+   be. The real hashing/serialization mechanism (still unbuilt) needs to account for this.
 
 ## 14. Linkage & learning-build split
 
 `pipe_design.md` owns the **execution substrate**; this doc owns the **editing model**.
 They meet at `build_pipeline` (edit state → `vc_pipeline`) and at three amendments this
 doc requests to the `pipe_design.md` `run()` contract, to be reconciled there when built:
-**(a)** a cancellation token, **(b)** `taps` + `injections` (read/write any slot),
+**(a)** a `vc_render_context` (control-only host wrapping the cancellation token now,
+a progress seam [LATER] — §8), **(b)** `taps` + `injections` (read/write any slot),
 **(c)** a resolution/ROI render request.
 
 **Learning-build split:** Claude scaffolds interfaces and framework plumbing
 (`edit_session`, `kv_store`/adapters, `metadata` interface, registry, the serialization
 framework); the user writes the rep logic (settings→stage derivations in
 `build_pipeline`, stage `params`/`process` bodies, validation).
+
+### 14.1 Naming & aliasing convention [design NOW; B16]
+Two, and only two, spellings: **classes/structs/enums/concepts carry a `vc_`
+prefix**; **type aliases are lowercase, no prefix** (already the working
+convention — the Phase 2 alias sweep applied it). The rule for *what gets a
+named type at all*: anything that **means something in the system** gets one —
+reuse existing vocabulary where it already fits (`vc::utils::message`, `path`,
+`slot_name`, …) or add a new alias at the seam where the meaning is introduced;
+only genuinely **incidental** primitives (a loop index, a transient bool) stay
+raw. **Aliases stay weak `using` aliases, never strong wrapper types** — a strong
+type (a distinct class wrapping, say, an `int` id) was considered and rejected as
+more machinery than the goal needs; the aliases exist for readability and
+refactorability, not for compile-time type-safety, and `using` gives exactly that
+without the ceremony.
+
+### 14.2 Test doubles vs runtime backends [design NOW; B17]
+**Test doubles never ship in library code.** A pure test spy — e.g. a
+`recording_store` that exists only to observe calls in a test — belongs in a
+dedicated test-support area, not in the library alongside real backends. This is
+distinct from an **in-memory backend that is a legitimate runtime state** (an
+ephemeral, never-saved session genuinely wants an in-memory store as *the*
+backend, not as a mock of one) — that kind of in-memory implementation may stay in
+the library. The test/library line is drawn by *purpose* (observing test
+behavior vs serving a real runtime need), not by "is it in-memory."
 
 ## 15. Reference studies — the five engines (2026-07 session)
 
@@ -546,6 +874,7 @@ For each fork: the choice, the lever that tipped it, and the status.
 | L16 | non-reproducible derived: cache vs persist | **persist with the edit** | can't regenerate identically (model drift) ⇒ behaves like intent |
 | L17 | error model | **exceptions for fatal; degradation as stage logic** | robustness is per-stage; no partial-failure framework needed |
 | L18 | display transform: edit vs view | **view — terminal stage, output-target config** | it is *how you view*, not *what you edited* |
+| L19 | immutability idiom: one universal rule vs applied per-driver | **two idioms, applied by driver (B12)** | (A) immutable-value+builder where *stable shared identity* drives (images, captured metadata, cached derived); (B) read/write split where *least-privilege/CQS* drives (storage interfaces §7, cancellation §8); never smear (A) onto genuinely mutable edits |
 
 ## 17. Scenarios & scalability
 
@@ -592,10 +921,11 @@ not in the schema/document.
 ### 17.5 Deghost re-render / caching [scales; the merge is not one-shot]
 Adjusting deghosting post-merge is a re-render. The chained-hash cache (§5.1) makes it
 cheap: deghost's params change ⇒ deghost-down recomputes, but **alignment/features
-(upstream, unchanged) are a cache hit** — no re-align. On device this needs the
-*persistent* derived store (§5), not a throwaway cache — hence "core, not optional." If
-the burst is closed and reopened, a disk-backed derived store avoids re-aligning
-(reproducible-but-precious).
+(upstream, unchanged) are a cache hit** — no re-align. Alignment/features are Kind
+C-repro (§2), so on device this needs **`vc_cached_edits_table`** (§5, B6) —
+content-hash-keyed, not the (non-reproducible, id-keyed) `vc_persistent_edits_table` —
+hence "core, not optional." If the burst is closed and reopened, a disk-backed
+cache avoids re-aligning (reproducible-but-precious).
 
 ### 17.6 Preview / pyramid / preview-export parity [design now, build later]
 The render request carries `{level/resolution, ROI}`. The hard part is **scale-aware
@@ -620,11 +950,23 @@ All ride the `std::any` packet on typed slots (§5.3); expensive/shared ones bec
 stage outputs → independently cacheable, tappable, persistable, inspectable. Uniform
 with pixels; no special-casing.
 
-## 18. The schema / serialization mechanism [LATER — the end-state]
+## 18. The schema / serialization mechanism [BUILT — pulled forward 2026-07-17 by request]
 
 Captures the §15.1 escape hatch as a concrete C++ design. Declare each field **once**;
-generate save/load/describe. Understood and endorsed; adopted when hand-written
-per-field serialization (the [NOW] baseline) starts to hurt.
+generate save/load/describe.
+
+> **Status update (2026-07-17): the framework is now BUILT** (was [LATER]; pulled
+> forward at the user's request to power toy/learning stages like blur, even though
+> those params are not user-facing). It ships as **`include/vc/vc_param_schema.h`**
+> (namespace `vc::params`): the `field<C,T>` descriptor + deduction guides, the
+> `param_value` concept (exactly `{double,int,bool}` — the doc_writer/doc_reader
+> overload set), and the generic `save`/`load` (sink-templated `std::apply`+fold).
+> A worked reference (`vc_blur_stage` + `blur_params`/`blur_schema`) and green
+> round-trip tests (`tests/test_vc_param_schema.cpp`) accompany it. **Still gated:**
+> wiring the schema through the *persistent* doc store awaits the `doc_writer`/
+> `doc_reader` bodies (still `TODO(you)`); `save`/`load` already work against any
+> conforming sink today. The hand-written per-field baseline remains valid for
+> user-facing settings — adopt the schema where it helps.
 
 ```cpp
 // One schema entry: templated on the owning struct C and the field type T,
@@ -676,17 +1018,31 @@ serializer) + nested sub-schemas + container serializers. Opaque bulk stays Kind
 Note the schema carries **more than serialization** (ranges, UI hints, cache-key
 material), which is why a pure serialization library (e.g. cereal) wouldn't replace it.
 
+> **Naming (recorded here; applies to code when built): `vc_field →
+> vc_param_field`.** The sketch above writes unprefixed `field` as illustrative
+> pseudocode (§14.1); the tree already declares the prefixed type this rename
+> targets — `struct vc_field` at `include/vc/vc_param_schema.h:47` — so this
+> rename applies to code (`vc_field` → `vc_param_field`) when the build pass
+> reaches it.
+
 ## 19. Glossary
 
 - **Non-destructive editing** — original preserved; result computed from
   original + a description of operations.
 - **edit document** — the saveable, structured record of Kind-A edit settings.
 - **`edit_session`** — the per-image aggregate composing source + edit doc + metadata +
-  derived-store handle (§3).
+  derived-store handle (§3). **[SUPERSEDED 2026-07-18]** — the session now owns
+  two derived stores directly (`vc_persistent_edits_table` + `vc_cached_edits_table`,
+  behind `i_edit_table`) plus a mutable edited-metadata overlay, not one
+  derived-store handle; see §3.
 - **sidecar** — a companion file stored next to the image, holding the edit document.
 - **serialize/deserialize** — object ↔ savable bytes; **JSON** is the text encoding.
 - **`kv_store` / `doc_writer` / `derived_store`** — shared byte store + typed adapter
-  (Kind A) + content-hash adapter (Kind C) (§7).
+  (Kind A) + content-hash adapter (Kind C) (§7). **[SUPERSEDED 2026-07-18]** — the
+  single `derived_store` shape is superseded by the two-store `i_edit_table`
+  design (`vc_cached_edits_table` + `vc_persistent_edits_table`); see the
+  `i_edit_table` / `vc_cached_edits_table` / `vc_persistent_edits_table` entry below
+  and §5/§7.
 - **narrow slice** — the small, per-stage subset of config a stage depends on (vs the
   whole document).
 - **purity** — a stage's output depends only on (inputs, params); no hidden state, no
@@ -706,4 +1062,21 @@ material), which is why a pure serialization library (e.g. cereal) wouldn't repl
 - **process/engine version** — the render-path version recorded so an edit reproduces.
 - **scale-aware param** — a spatial param that scales with render resolution so preview
   matches export (§17.6).
+- **naming convention (B16, §14.1)** — classes/structs/enums/concepts: `vc_` prefix;
+  type aliases: lowercase, no prefix, `using` only (never a strong wrapper type).
+- **`vc_param_field`** — Q2 rename of the schema field descriptor (`vc_field →
+  vc_param_field`, §18); applies to the shipped `struct vc_field`
+  (`include/vc/vc_param_schema.h:47`).
+- **`i_table` family** — Q2 rename of the byte-store family: `vc_kv_store →
+  i_table`, `vc_memory_kv_store → vc_memory_table`, `kv_bytes →
+  data_bytes` (alias, no prefix) (§7).
+- **`get`/`set`** — Q2-standardized store access verbs, used uniformly across the
+  storage interfaces (§5.1, §7); the total-get/miss-exposing distinction lives in
+  return type and doc comment, not in the verb name.
+- **`i_edit_table` / `vc_cached_edits_table` / `vc_persistent_edits_table`** — one
+  interface, two concrete Kind-C stores, distinguished by eviction policy *and*
+  serialization lifecycle (§5, §7).
+- **`vc_render_context`** — the control-only host `run()` takes in place of a bare
+  cancellation token: holds cancellation now, a progress seam [LATER]; never the
+  cache (§8).
 ```

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <memory>
 #include <utility>
 
 #include "vc/pipe/vc_pipe_types.h"
@@ -64,5 +65,11 @@ class i_pipe {
   private:
     stage_name name_;
 };
+
+// An owned pipeline stage. The registry factory and vc_pipeline both traffic
+// in a stage's owning handle; naming it here (right after the class it
+// wraps) gives that handle a domain vocabulary instead of the raw
+// std::unique_ptr<i_pipe> spelling.
+using stage_ptr = std::unique_ptr<i_pipe>;
 
 } // namespace vc::pipe

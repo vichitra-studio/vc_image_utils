@@ -128,6 +128,36 @@ be reproduced on distribution — paste the required notice text in the entry.
       OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
       THE SOFTWARE.
 
+### nlohmann/json v3.11.3
+- License: MIT
+- Used in: desktop library, app (the edit-document JSON codec, Kind A — docs/edit_model.md Sec 4.4)
+- Link type: header-only (single header `third_party/nlohmann/json.hpp`, reached via the
+  blanket `third_party` SYSTEM PRIVATE include on the library targets — the same wiring as stb)
+- Notice required on distribution: yes (MIT — reproduce the copyright + permission notice)
+- Source: https://github.com/nlohmann/json
+- Pinned tag: `v3.11.3`
+
+      MIT License
+      Copyright (c) 2013-2023 Niels Lohmann <https://nlohmann.me>
+
+      Permission is hereby granted, free of charge, to any person obtaining a copy
+      of this software and associated documentation files (the "Software"), to deal
+      in the Software without restriction, including without limitation the rights
+      to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+      copies of the Software, and to permit persons to whom the Software is
+      furnished to do so, subject to the following conditions:
+
+      The above copyright notice and this permission notice shall be included in all
+      copies or substantial portions of the Software.
+
+      THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+      IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+      FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+      AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+      LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+      OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+      THE SOFTWARE.
+
 <!-- Template — copy one block per dependency:
 
 ### <name> <version>

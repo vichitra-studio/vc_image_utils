@@ -16,7 +16,7 @@
 
 namespace vc::pipe {
 
-stage_name vc_pipeline::add(std::unique_ptr<i_pipe> pipe) {
+stage_name vc_pipeline::add(stage_ptr pipe) {
     stage_name name = pipe->name(); // copy the name before the pipe is moved
     stages_.push_back(std::move(pipe));
     return name;
@@ -55,8 +55,8 @@ void vc_pipeline::validate() const {
     //   The data contract (vc_image_spec) is [LATER]; only the type layer here.
 }
 
-std::unordered_map<stage_port, vc_pipe_packet>
-vc_pipeline::run(std::unordered_map<stage_port, vc_pipe_packet> inputs) const {
+render_io_map vc_pipeline::run(render_io_map inputs,
+                               const vc_render_context& run_context) const {
     // TODO(you): the linear runner, MAP VARIANT (docs/pipe_design.md Sec 12.5).
     //   1. Gather contracts: for each stage, wrap a fresh vc_pipe_contract in a
     //      contract_builder, declare() into it, and keep the contract (you need
@@ -74,8 +74,10 @@ vc_pipeline::run(std::unordered_map<stage_port, vc_pipe_packet> inputs) const {
     //          input port on this stage MOVE the caller's packet out of
     //          `inputs`; for each connection whose `to.stage` is this stage,
     //          copy the upstream stage's published output for from.slot.
-    //        - construct vc_pipe_context{std::move(stage_inputs)} and call
-    //          stage->process(ctx).
+    //        - construct vc_pipe_context{std::move(stage_inputs), run_context}
+    //          (the run context threads into the per-stage context — see
+    //          vc_pipe_context.h — even though no stage checks it yet) and
+    //          call stage->process(ctx).
     //        - harvest with `auto outs = std::move(ctx).take_outputs();` and
     //          stash `outs` (keyed by stage_name) so downstream stages and the
     //          final harvest can read this stage's outputs.
@@ -83,10 +85,23 @@ vc_pipeline::run(std::unordered_map<stage_port, vc_pipe_packet> inputs) const {
     //   stashed
     //      output for that slot into the result map keyed by that stage_port.
     //
+    // TODO(you): cancellation, via the `run_context` parameter above. BEFORE
+    //   running each stage in step 4, check `run_context.cancelled()`. On
+    //   cancel, stop and surface it per the chosen policy — the assumed policy
+    //   (matched by the run()-observes-a-pre-cancelled-context spec in
+    //   tests/test_vc_edit.cpp) is to THROW vc::vc_exception(invalid_argument,
+    //   "run cancelled"); a return-empty policy is equally valid but must flip
+    //   that test's expectation. The in-process checkpoint (reading
+    //   context.run_context().cancelled() from inside a stage's process()) is
+    //   now WIRED (the context carries it — see step 4) but still waits on a
+    //   long stage that actually checks it existing ([LATER] for the check
+    //   itself, not the plumbing).
+    //
     // Placeholder so the scaffold links. Returning an empty map makes the run()
     // tests fail loudly until this is written (same convention as
     // tests/test_vc_image.cpp).
     (void)inputs;
+    (void)run_context;
     return {};
 }
 

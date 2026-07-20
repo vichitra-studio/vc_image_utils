@@ -9,8 +9,10 @@
 #include <vector>
 
 #include "vc/pipe/i_pipe.h"
+#include "vc/pipe/vc_cancellation_token.h"
 #include "vc/pipe/vc_pipe_packet.h"
 #include "vc/pipe/vc_pipe_types.h"
+#include "vc/pipe/vc_render_context.h"
 
 namespace vc::pipe {
 
@@ -31,7 +33,7 @@ class vc_pipeline {
     //   pipe.add(std::make_unique<vc_grayscale_stage>("grey"));
     //   pipe.connect(grey, vc_grayscale_stage::slots::grey,
     //                mean, vc_mean_brightness_stage::slots::image);
-    stage_name add(std::unique_ptr<i_pipe> pipe);
+    stage_name add(stage_ptr pipe);
 
     // Wire an upstream OUTPUT slot to a downstream INPUT slot, each named by
     // its stage plus a typed slot descriptor:
@@ -85,8 +87,20 @@ class vc_pipeline {
     // Taken by value as a SINK: the runner MOVES each packet out of the map and
     // into a stage's context, so an rvalue argument avoids a deep image copy
     // (an lvalue caller copies at the call site, knowingly).
-    std::unordered_map<stage_port, vc_pipe_packet>
-    run(std::unordered_map<stage_port, vc_pipe_packet> inputs) const;
+    //
+    // `run_context` is the run's CONTROL-ONLY host (see vc_render_context.h)
+    // — cancellation now, checked BETWEEN stages by run()'s body, progress
+    // [LATER]. This SUPERSEDES the bare `const vc_cancellation_token&`
+    // signature; it is a trailing DEFAULT so every existing one-argument
+    // call site binds a never-cancelled context and is unaffected — this
+    // change is purely additive. The context is threaded through
+    // i_pipe::process()/vc_pipe_context (each per-stage vc_pipe_context is
+    // built with a copy of `run_context`), so a stage MAY add an
+    // in-process cancellation checkpoint by reading
+    // context.run_context().cancelled() — no stage does yet
+    // (vc_blur_stage::process() stays a rep shell).
+    render_io_map run(render_io_map inputs,
+                      const vc_render_context& run_context = {}) const;
 
   private:
     // The wiring lives here, not on any contract: a connection joins two
@@ -99,7 +113,7 @@ class vc_pipeline {
 
     const i_pipe* find_stage(const stage_name& name) const;
 
-    std::vector<std::unique_ptr<i_pipe>> stages_;
+    std::vector<stage_ptr> stages_;
     std::vector<connection> connections_;
 };
 

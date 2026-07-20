@@ -14,7 +14,7 @@
 
 namespace vc {
 
-vc_image_meta vc_image_writer::validated(image_dim width,
+vc_image_info vc_image_writer::validated(image_dim width,
                                          image_dim height,
                                          channel_count channels) {
     // TODO(you): this is the one rep left in the image core — the same
@@ -25,7 +25,7 @@ vc_image_meta vc_image_writer::validated(image_dim width,
     // Until this throws, vc_image_writer{0, 2, 3, ...} constructs a degenerate
     // image instead of failing — so the "rejects invalid dimensions" test stays
     // red on purpose. See docs/coding_guidelines.md Sec 6.3.
-    return vc_image_meta{width, height, channels};
+    return vc_image_info{width, height, channels};
 }
 
 vc_image vc_image_writer::seal() && {

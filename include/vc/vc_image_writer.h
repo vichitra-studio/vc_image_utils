@@ -8,7 +8,7 @@
 #include <memory>
 #include <span>
 
-#include "vc/vc_image_meta.h"
+#include "vc/vc_image_info.h"
 #include "vc/vc_pixel_buffer.h"
 #include "vc/vc_types.h"
 
@@ -27,7 +27,7 @@ class vc_image; // seal() produces one; its full definition is needed only in th
 // lifecycle ENDS at seal(): the pixels move out, const-qualified, into a
 // vc_image, and the writer is spent.
 //
-// The writer owns nothing clever: it composes a vc_image_meta (geometry,
+// The writer owns nothing clever: it composes a vc_image_info (geometry,
 // indexing) with a vc_pixel_buffer (storage, typing, the size invariant) and
 // adds exactly the two things those don't have — mutation and the one-way seal.
 class vc_image_writer {
@@ -53,7 +53,7 @@ class vc_image_writer {
     vc_image_writer& operator=(const vc_image_writer&) = delete;
 
     // ---- geometry (read-only; delegates to the composed descriptor) ----
-    const vc_image_meta& meta() const noexcept {
+    const vc_image_info& meta() const noexcept {
         return meta_;
     }
     image_dim width() const noexcept {
@@ -67,6 +67,18 @@ class vc_image_writer {
     }
     std::size_t pixel_count() const noexcept {
         return meta_.element_count();
+    }
+
+    // ---- metadata (composed descriptor field) ----
+
+    // Attach a ready-built i_image_meta to this image's descriptor before
+    // seal(). Written plumbing, not a rep: the writer composes a READY
+    // vc_image_info and never parses EXIF itself — some loader/backend
+    // builds the i_image_meta and hands it in here. Forwards to
+    // vc_image_info::set_metadata(); null (the default) means "no
+    // metadata" (e.g. a mask).
+    void set_metadata(const_image_meta_ptr metadata) noexcept {
+        meta_.set_metadata(std::move(metadata));
     }
 
     // ---- write access (this type's reason to exist) ----
@@ -106,10 +118,10 @@ class vc_image_writer {
     // Validate the requested geometry, then hand back the descriptor the member
     // init list stores. Kept as a static so it can run in the init list, before
     // pixels_ is allocated.
-    static vc_image_meta
+    static vc_image_info
     validated(image_dim width, image_dim height, channel_count channels);
 
-    vc_image_meta meta_;
+    vc_image_info meta_;
     // Mutable and uniquely held (use_count == 1) until seal() moves it out, so
     // the move is a cheap ownership transfer, not a copy. CAUTION: the spans/
     // refs handed out by pixels<T>()/at<T>() are NON-OWNING views into this

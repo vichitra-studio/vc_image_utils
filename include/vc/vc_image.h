@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <utility>
 
-#include "vc/vc_image_meta.h"
+#include "vc/vc_image_info.h"
 #include "vc/vc_image_writer.h"
 #include "vc/vc_types.h"
 
@@ -23,7 +23,7 @@ namespace vc {
 // Pixels are produced by filling a vc_image_writer and sealing it; that seal is
 // the single construction path — zeros()/with_fill() below are named factories
 // that go through the very same writer, not a second path. The image composes a
-// vc_image_meta descriptor (geometry now, the vc_image_spec seed later) exposed
+// vc_image_info descriptor (geometry now, the vc_image_spec seed later) exposed
 // via meta(), plus the const buffer.
 class vc_image {
   public:
@@ -56,7 +56,7 @@ class vc_image {
     // The image's descriptor as a value — the thing the pipeline matches and
     // propagates. New descriptor fields become reachable here with no change to
     // vc_image itself.
-    const vc_image_meta& meta() const noexcept {
+    const vc_image_info& meta() const noexcept {
         return meta_;
     }
 
@@ -91,11 +91,11 @@ class vc_image {
     // here (qualified to const) alongside the descriptor. No other code can
     // construct an image from a raw buffer.
     friend class vc_image_writer;
-    vc_image(vc_image_meta meta, const_pixel_buffer_ptr pixels)
+    vc_image(vc_image_info meta, const_pixel_buffer_ptr pixels)
         : meta_(meta), pixels_(std::move(pixels)) {
     }
 
-    vc_image_meta meta_;
+    vc_image_info meta_;
     const_pixel_buffer_ptr pixels_;
 };
 

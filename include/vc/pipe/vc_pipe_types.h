@@ -8,7 +8,10 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
+
+#include "vc/pipe/vc_pipe_packet.h"
 
 namespace vc::pipe {
 
@@ -96,3 +99,15 @@ template <> struct std::hash<vc::pipe::stage_port> {
         return p.hash();
     }
 };
+
+namespace vc::pipe {
+
+// The pipeline-level, graph-wide map keyed by stage_port: vc_pipeline::run()'s
+// open-inputs argument and open-outputs return value. Distinct from a single
+// stage's own input/output maps (vc_pipe_context), which are keyed by bare
+// slot_name because they only ever concern one stage at a time — a
+// stage_port's extra stage field only matters once packets are being handed
+// across the whole graph, which is exactly what run() does.
+using render_io_map = std::unordered_map<stage_port, vc_pipe_packet>;
+
+} // namespace vc::pipe

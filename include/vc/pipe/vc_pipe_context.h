@@ -8,6 +8,7 @@
 
 #include "vc/pipe/vc_pipe_packet.h"
 #include "vc/pipe/vc_pipe_types.h"
+#include "vc/pipe/vc_render_context.h"
 
 namespace vc::pipe {
 
@@ -32,18 +33,38 @@ namespace vc::pipe {
 //
 // Written in full so stages have a stable API to build against; the reps are
 // the stage process() bodies and the pipeline runner that drives contexts.
+//
+// Also carries the run's vc_render_context: a stage MAY read cancelled()
+// from its context to add an in-process checkpoint, though no stage does
+// yet (vc_blur_stage::process() stays a throwing rep shell regardless). The
+// context is held BY VALUE (it is a cheap, copyable value type wrapping one
+// token) rather than by reference, so a vc_pipe_context never outlives the
+// run_context it was built with.
 class vc_pipe_context {
   public:
+    // A single stage's packet map, keyed by bare slot_name — distinct from
+    // vc_pipeline's graph-wide render_io_map (vc_pipe_types.h), which is
+    // keyed by stage_port because it spans every stage at once.
+    using packet_map = std::unordered_map<slot_name, vc_pipe_packet>;
+
     vc_pipe_context() = default;
 
     // The runner builds a stage's input packets (open inputs + upstream
     // outputs) into one map keyed by input-slot name and constructs the context
     // from it. This whole-map handoff is the ONLY way inputs enter a context —
     // there is no per-slot public setter — so the name-keyed surface never
-    // reaches a stage author.
-    explicit vc_pipe_context(
-        std::unordered_map<slot_name, vc_pipe_packet> inputs)
-        : inputs_(std::move(inputs)) {
+    // reaches a stage author. `run_context` defaults to a never-cancelled
+    // context, so every existing single-argument call site (all of them,
+    // before this milestone) is unaffected.
+    explicit vc_pipe_context(packet_map inputs, vc_render_context run_context = {})
+        : inputs_(std::move(inputs)), run_context_(std::move(run_context)) {
+    }
+
+    // The run's control-only host, threaded in by the runner (or, in tests,
+    // by whoever constructs a context directly). A stage's process() body
+    // may read run_context().cancelled() as an in-process checkpoint.
+    const vc_render_context& run_context() const noexcept {
+        return run_context_;
     }
 
     // ---- author-facing: a stage's process() body ----
@@ -67,7 +88,7 @@ class vc_pipe_context {
     // Rvalue-qualified: the runner calls it on `std::move(ctx)` after
     // process(), moving the packets out — a stage's outputs are read exactly
     // once.
-    std::unordered_map<slot_name, vc_pipe_packet> take_outputs() && {
+    packet_map take_outputs() && {
         return std::move(outputs_);
     }
 
@@ -79,8 +100,9 @@ class vc_pipe_context {
     const vc_pipe_packet& get_input(const slot_name& name) const;
     void set_output(const slot_name& name, vc_pipe_packet packet);
 
-    std::unordered_map<slot_name, vc_pipe_packet> inputs_;
-    std::unordered_map<slot_name, vc_pipe_packet> outputs_;
+    packet_map inputs_;
+    packet_map outputs_;
+    vc_render_context run_context_;
 };
 
 } // namespace vc::pipe

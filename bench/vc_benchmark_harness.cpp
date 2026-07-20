@@ -190,7 +190,7 @@ std::vector<vc::bench::bench_case> substrate_cases() {
     // exceeds the small-buffer optimization of common std libs, so a heap
     // allocation per packet is EXPECTED; a double fits inline. The ratio
     // confirms that threshold cost (Sec 5.1). The dominant HEAP-ALLOCATION cost
-    // is independent of the stubbed vc_image_meta::element_count() (still a
+    // is independent of the stubbed vc_image_info::element_count() (still a
     // TODO(you) rep, so zeros() below allocates a 0-element buffer) — boxing
     // copies the ~32-byte handle either way — but the shared_ptr refcount atomic
     // inside that copy is null/free today and lands (a small addition, not the

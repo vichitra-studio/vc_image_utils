@@ -5,12 +5,16 @@
 #include "doctest/doctest.h"
 
 #include <cmath>
+#include <memory>
+#include <optional>
 #include <string>
 
+#include "vc/edit/vc_image_meta.h"
 #include "vc/io/vc_io.h"
 #include "vc/vc_error_code.h"
 #include "vc/vc_exception.h"
 #include "vc/vc_image.h"
+#include "vc/vc_image_writer.h"
 #include "vc/vc_pixel_buffer.h"
 
 #ifndef VC_TEST_DATA_DIR
@@ -34,6 +38,33 @@ TEST_CASE("vc_image: zeros() rejects invalid dimensions") {
     CHECK_THROWS_AS(vc::vc_image::zeros(0, 2, 3), vc::vc_exception);
     CHECK_THROWS_AS(vc::vc_image::zeros(4, 0, 3), vc::vc_exception);
     CHECK_THROWS_AS(vc::vc_image::zeros(4, 2, 0), vc::vc_exception);
+}
+
+// vc_image_info composes shared_ptr<const vc::edit::i_image_meta>; a mask
+// is an image whose composed metadata is null (the default), and
+// vc_image_writer::set_metadata() is the one write path onto it before
+// seal(). This is written plumbing (not a rep), so it is GREEN.
+TEST_CASE("vc_image_info: composed metadata is null by default") {
+    const vc::vc_image_info meta{4, 2, 3};
+    CHECK(meta.metadata() == nullptr);
+}
+
+TEST_CASE("vc_image_writer/vc_image_info: set_metadata is visible through seal()") {
+    auto md = std::make_shared<vc::edit::vc_memory_image_meta>();
+    md->set("iso", vc::edit::vc_metadata_value{std::string{"400"}});
+
+    vc::vc_image_writer writer{4, 2, 3, vc::buf_f32{0.0f}};
+    CHECK(writer.meta().metadata() == nullptr); // null until set
+
+    writer.set_metadata(md);
+    CHECK(writer.meta().metadata() == md);
+
+    vc::vc_image img = std::move(writer).seal();
+    REQUIRE(img.meta().metadata() != nullptr);
+    CHECK(img.meta().metadata() == md);
+    const auto iso = img.meta().metadata()->get("iso");
+    REQUIRE(iso.has_value());
+    CHECK(iso->get<std::string>() == "400");
 }
 
 TEST_CASE("vc_error_code: round-trips through to_int/to_error_code") {
