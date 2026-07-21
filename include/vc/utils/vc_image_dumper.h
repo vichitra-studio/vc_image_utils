@@ -29,9 +29,8 @@ namespace vc::utils::debug {
 // run or you don't.
 // ---------------------------------------------------------------------
 
-// TODO(you): implement in src/utils/vc_image_dumper.cpp. Off by default —
-// unlike logging, a dump call has real I/O cost (encodes and writes a
-// file), so it must be opt-in.
+// Off by default — unlike logging, a dump call has real I/O cost (encodes
+// and writes a file), so it must be opt-in.
 void set_enabled(bool on);
 bool enabled() noexcept;
 
@@ -53,9 +52,10 @@ vc::io::path output_dir() noexcept;
 // lower-level "write" primitive needs to be declared in this header at
 // all.
 //
-// Failures (bad output_dir, disk full, encode failure) are reported via
-// vc::utils::log::error("image_dumper", ...) and swallowed, not thrown — a
-// broken debug dump must never crash the pipeline it's observing.
+// Failures (bad output_dir, disk full, encode failure) are NOT caught —
+// deliberately: an unexpected dump failure crashes the run, surfacing the
+// problem immediately rather than continuing on a partially-broken debug
+// session (see write_dump() in vc_image_dumper.cpp).
 void dump(const vc::utils::string& label,
           const std::optional<vc::vc_image>& image);
 

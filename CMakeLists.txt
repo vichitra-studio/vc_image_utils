@@ -83,6 +83,7 @@ set(VC_LIB_SOURCES
     src/vc_image.cpp
     src/vc_image_writer.cpp
     src/io/vc_io_stb.cpp
+    src/io/vc_io_fs.cpp
     src/utils/vc_log.cpp
     src/utils/vc_image_dumper.cpp
     src/utils/vc_perf.cpp

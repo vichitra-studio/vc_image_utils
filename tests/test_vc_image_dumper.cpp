@@ -65,7 +65,18 @@ TEST_CASE("vc_image_dumper: dump() writes a numbered file when enabled") {
     vc::vc_image img = vc::vc_image::zeros<vc::buf_f32>(4, 2, 3);
     vc::utils::debug::dump("resize", img);
 
-    CHECK(std::filesystem::exists(dir + "/000_resize.png"));
+    // The counter is process-wide and globally-incrementing, not reset per
+    // test/directory (vc_image_dumper.h) — so its value here depends on how
+    // many earlier test cases in this run already dumped something. Check
+    // for the right SUFFIX, not a specific NNN prefix.
+    bool found = false;
+    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+        if (entry.path().filename().string().ends_with("_resize.png")) {
+            found = true;
+            break;
+        }
+    }
+    CHECK(found);
 
     vc::utils::debug::set_enabled(false);
 }

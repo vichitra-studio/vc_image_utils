@@ -163,7 +163,7 @@ namespace vc::utils {
 
 ```cpp
 namespace vc::io {
-    using path = std::string;   // filesystem path — upgrade to std::filesystem::path at P4
+    using path = std::filesystem::path;   // filesystem path
 }
 ```
 
@@ -261,10 +261,13 @@ Raw pointers are reserved for two narrow cases, not a general-purpose "maybe val
   `vc_pipeline::find_stage()`, which returns `nullptr` on a miss and is never exposed on a
   public surface).
 - A C-API boundary that itself hands back a raw pointer (e.g. `stbi_load`) — checked and
-  either thrown on or wrapped in RAII immediately, never held or passed around afterward.
-  This is the target pattern for `stb_image_reader::read()`, not yet written today
-  (`vc_io_stb.cpp` is a `TODO(you)` stub) — same "stated now, enforced when the gate lands"
-  caveat as §6.5.
+  either thrown on or freed before the function returns, never held or passed around
+  afterward. `stb_image_reader::read()` follows this: null is checked and thrown on
+  immediately, and `stbi_image_free()` runs right before the return. Note this is a manual
+  free, not RAII — a throw between the null-check and the free (e.g.
+  `vc_image_writer::validated()` rejecting the decoded geometry) would leak the buffer.
+  Low risk in practice, since stb only ever decodes geometry `validated()` already accepts,
+  but worth knowing if that assumption ever changes.
 
 No `gsl::not_null` or similar wrapper is used — a plain reference already gives the same
 compile-time non-null guarantee for both cases above, with no added dependency. Reach for a
@@ -448,8 +451,9 @@ New libraries (libraw, rawspeed, libjpeg-turbo) implement the same interfaces �
 ### 7.2 Config structs — extensible without breaking the interface
 
 ```cpp
-struct read_config  { /* fields added here as needed — empty for now */ };
-struct write_config { vc_image_format format = vc_image_format::png; /* + quality etc. later */ };
+struct read_config  { vc::pixel_dtype dtype = vc::pixel_dtype::u8; };
+struct write_config { vc_image_format format = vc_image_format::jpeg;
+                      int jpeg_quality = 100; };
 ```
 
 Virtual methods take config structs, not format-specific parameters.
@@ -461,7 +465,6 @@ Adding a field to a config struct is not a breaking change. Adding a virtual met
 enum class vc_image_format {
     png,    // PNG (lossless, supports all channel counts)
     jpeg,   // JPEG (lossy, RGB only — alpha stripped)
-    bmp,    // BMP (uncompressed, no alpha)
     // future: tiff, exr, dng, raw, ...
 };
 ```

@@ -4,6 +4,7 @@
 #include <algorithm>
 
 #include "vc/io/vc_io.h"
+#include "vc/io/vc_io_fs.h"
 
 #include "vc/vc_error_code.h"
 #include "vc/vc_exception.h"
@@ -23,6 +24,15 @@
 namespace vc::io {
 
 vc::vc_image stb_image_reader::read(const path& p, const read_config& config) {
+    // Checked before stbi_load() so a missing/unreadable input reports
+    // file_not_found — distinct from decode_error below, which now
+    // genuinely means "the file exists but stb couldn't decode it".
+    if (!file_exists(p)) {
+        throw vc::vc_exception(vc::vc_error_code::file_not_found,
+                               "stb_image_reader::read: " + p.string() +
+                                   ": file does not exist");
+    }
+
     int w = 0, h = 0, channels_in_file = 0;
     unsigned char* data = stbi_load(p.c_str(), &w, &h, &channels_in_file, 0);
     auto uw = static_cast<vc::image_dim>(w);
@@ -31,7 +41,7 @@ vc::vc_image stb_image_reader::read(const path& p, const read_config& config) {
 
     if (!data) {
         throw vc::vc_exception(vc::vc_error_code::decode_error,
-                               "stb_image_reader::read: " + p + ": " +
+                               "stb_image_reader::read: " + p.string() + ": " +
                                    stbi_failure_reason());
     }
 
@@ -77,6 +87,16 @@ vc::vc_image stb_image_reader::read(const path& p, const read_config& config) {
 void stb_image_writer::write(const path& p,
                              const vc::vc_image& image,
                              const write_config& config) {
+    // Auto-create the target's parent directory if it doesn't exist yet,
+    // rather than making every caller ensure it exists first — a no-op if
+    // it already exists (ensure_directory()'s own semantics).
+    // vc::utils::debug::write_dump() relies on this: it no longer creates
+    // its own output directory, since this already covers it.
+    const auto parent = p.parent_path();
+    if (!parent.empty()) {
+        ensure_directory(parent);
+    }
+
     auto buf = image.pixels();
     std::vector<unsigned char> data(buf->size());
     switch (buf->dtype()) {
@@ -127,7 +147,8 @@ void stb_image_writer::write(const path& p,
 
     if (!result) {
         throw vc::vc_exception(vc::vc_error_code::encode_error,
-                               "stb_image_writer::write: failed to write " + p);
+                               "stb_image_writer::write: failed to write " +
+                                   p.string());
     }
 }
 

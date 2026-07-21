@@ -4,14 +4,13 @@
 #pragma once
 
 #include <cstdint>
-#include <string>
+#include <filesystem>
 
 #include "vc/vc_types.h"
 
 namespace vc::io {
 
-using path =
-    std::string; // filesystem path — upgrade to std::filesystem::path at P4
+using path = std::filesystem::path; // filesystem path
 
 enum class vc_image_format : std::uint8_t {
     png,  // PNG (lossless, supports all channel counts)
