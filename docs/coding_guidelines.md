@@ -233,6 +233,45 @@ with `clang++ -std=c++20 -Wall -Wextra -fsyntax-only`. Always return by value.
 | Large / heap-owning types (`vc_image`, `string`) | `const&` for read; value for sink (moves in) |
 | `shared_ptr` | `const pixel_buffer_ptr&` — avoid copying unless sharing ownership is intended |
 
+### 4.4 Non-owning dependencies — `T&`, not a nullable pointer
+
+A dependency a type does not own but requires to be valid for its entire lifetime (an
+injected backing store, a required collaborator) is held as a plain C++ reference, not a raw
+pointer:
+
+```cpp
+class vc_edit_session {
+    // ...
+    vc_persistent_edits_table& persistent_; // non-owning; non-nullable
+    vc_cached_edits_table& cache_;          // non-owning; non-nullable
+};
+```
+
+A reference cannot be null and cannot be rebound after construction — the compiler enforces
+non-nullability for free, with no wrapper type and no runtime check. Where a member is
+owning but the pointer's type technically allows null even though the value must never be
+(e.g. `vc_edit_session`'s `unique_ptr<i_image_meta> meta_`), the constructor's body checks
+for null and throws `vc::vc_exception` before construction completes
+(`vc_edit_session.cpp`), so no caller ever observes a live object with a null `meta_` —
+every later access can stay an unchecked dereference. Validation happens once, at the one
+construction boundary, not on every subsequent access.
+
+Raw pointers are reserved for two narrow cases, not a general-purpose "maybe valid" type:
+- A genuinely nullable lookup result, always internal/private (e.g.
+  `vc_pipeline::find_stage()`, which returns `nullptr` on a miss and is never exposed on a
+  public surface).
+- A C-API boundary that itself hands back a raw pointer (e.g. `stbi_load`) — checked and
+  either thrown on or wrapped in RAII immediately, never held or passed around afterward.
+  This is the target pattern for `stb_image_reader::read()`, not yet written today
+  (`vc_io_stb.cpp` is a `TODO(you)` stub) — same "stated now, enforced when the gate lands"
+  caveat as §6.5.
+
+No `gsl::not_null` or similar wrapper is used — a plain reference already gives the same
+compile-time non-null guarantee for both cases above, with no added dependency. Reach for a
+wrapper type only if a future site needs *pointer* semantics (rebindable, storable in a
+container) combined with a non-null guarantee a reference can't express — no such site
+exists today.
+
 ---
 
 ## 5. Error handling
@@ -263,14 +302,42 @@ Every value must have a one-line comment stating exactly when it is used.
 ### 5.3 Error code utilities (namespace `vc`)
 
 ```cpp
-int                  to_int(vc_error_code code) noexcept;   // enum → underlying int, by value
-vc_error_code        to_error_code(int value);               // int → enum; throws vc_exception on invalid
-vc::utils::string    to_string(vc_error_code code) noexcept; // enum → short label; NRVO applies
+[[nodiscard]] int                  to_int(vc_error_code code) noexcept;   // enum → underlying int, by value
+[[nodiscard]] vc_error_code        to_error_code(int value);               // int → enum; throws vc_exception on invalid
+[[nodiscard]] vc::utils::string    to_string(vc_error_code code) noexcept; // enum → short label; NRVO applies
 ```
 
 - Enums are small value types — always pass by value, not const ref
 - `to_string` returns `vc::utils::string` (a short label, not a full message — use `vc::utils::message` for the latter)
 - Callers dispatch on `code()`, not on string matching
+
+### 5.4 `[[nodiscard]]` on optional-returning lookups and pure factories
+
+Because §5.1 already routes every failure path through `vc::vc_exception`, there are no
+ignorable bool/error-code status returns in this codebase to protect — the usual
+`[[nodiscard]] bool save(...)` case doesn't arise here. `[[nodiscard]]` is used instead
+where silently discarding the return value is a plausible, specific bug:
+
+- **Optional-returning lookups**, where a miss is expected control flow the caller must
+  branch on (`i_table::get`, `i_edit_table::get`, `i_image_meta::get`, and every override):
+  ```cpp
+  [[nodiscard]] virtual std::optional<data_bytes>
+  get(const std::string& key) const = 0;
+  ```
+  Mark both the interface declaration and every override explicitly — do not rely on the
+  attribute propagating through virtual dispatch alone.
+- **Pure factories and one-way transitions**, whose entire effect is the value they hand
+  back (`vc_image::zeros`/`with_fill`, `vc_image_writer::seal()`) and pure converters
+  (`to_int`, `to_error_code`, `to_string`).
+
+Not applied to mutators/setters (they return `void`) or to trivial accessors already always
+used at the call site — a blanket project-wide default would be noise given how much of
+this API already fails via exceptions rather than a return value.
+
+A `[[nodiscard]]` call made only for its side effect (e.g. a doctest `CHECK_THROWS_AS`
+exercising a validating constructor) discards the result explicitly with a `static_cast<void>`
+or C-style `(void)` cast — `(void)` casts to `void` are exempt from `-Wold-style-cast`, so
+this is the idiomatic suppression, not a warning-flag workaround.
 
 ---
 
@@ -309,6 +376,40 @@ vc_image(vc::image_dim w, vc::image_dim h, vc::channel_count c) {
 ### 6.4 No raw `new` / `delete`
 
 Use `std::make_shared`, `std::make_unique`. Raw heap allocation is banned.
+
+### 6.5 State invariants explicitly; enforce in exactly one place
+
+A class that promises "valid by construction" (§6.3) should say so directly, not leave the
+guarantee implicit or scattered across the files that happen to rely on it:
+
+```cpp
+// Invariant: width() * height() * channels() == pixels()->size() for the lifetime of
+// this object. Enforced by construction: the writer allocates the buffer at exactly
+// element_count() elements, and vc_pixel_buffer exposes no resize()/clear() to break
+// that afterward — never re-checked here.
+class vc_image { /* ... */ };
+```
+
+The invariant is enforced in exactly one gate — typically the constructor, or, for a
+builder/writer type like `vc_image_writer`, the point where the built value is validated
+before use — and nowhere else re-derives or re-checks it. This is what makes "valid by
+construction" true rather than aspirational: once the gate passes, every other member
+function can assume the invariant holds instead of defensively re-verifying it.
+
+(The comment above is the target shape once `vc_image_info::element_count()` computes the
+real `width*height*channels` product — it is currently a `TODO(you)` stub hardcoded to
+`0`, so the equality does not hold in practice yet, even though `vc_pixel_buffer`'s
+fixed-size, no-resize design already guarantees it can never be broken once it does.
+`vc_image_writer::validated()` is a separate, narrower gate: it only rejects degenerate
+*geometry* — zero dimensions, `channels > 4` — not the size==product equality itself. Don't
+attribute an invariant to a gate that doesn't actually establish it; say what's true today
+until it is.)
+
+Not every class needs a stated invariant. A plain data-holding struct with no constraint on
+its fields yet (e.g. a settings/params struct whose valid ranges are still an open domain
+question) has none to state — inventing one prematurely is worse than leaving it
+undocumented until the constraint is actually decided. State an invariant when it is real
+and decided; enforce it the moment it is stated.
 
 ---
 

@@ -31,7 +31,8 @@ class i_table {
     virtual ~i_table() = default;
 
     virtual void put(const std::string& key, data_bytes value) = 0;
-    virtual std::optional<data_bytes> get(const std::string& key) const = 0;
+    [[nodiscard]] virtual std::optional<data_bytes>
+    get(const std::string& key) const = 0;
 };
 
 // The tests backend. A std::unordered_map wrapper is PLUMBING, not a rep —
@@ -40,7 +41,8 @@ class i_table {
 class vc_memory_table : public i_table {
   public:
     void put(const std::string& key, data_bytes value) override;
-    std::optional<data_bytes> get(const std::string& key) const override;
+    [[nodiscard]] std::optional<data_bytes>
+    get(const std::string& key) const override;
 
   private:
     std::unordered_map<std::string, data_bytes> map_;

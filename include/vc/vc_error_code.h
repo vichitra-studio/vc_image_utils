@@ -25,10 +25,10 @@ enum class vc_error_code : std::uint8_t {
                       // null buffer)
 };
 
-int to_int(vc_error_code code) noexcept;
-vc_error_code
+[[nodiscard]] int to_int(vc_error_code code) noexcept;
+[[nodiscard]] vc_error_code
 to_error_code(int value); // throws vc_exception if value is out of range
 
-vc::utils::string to_string(vc_error_code code) noexcept;
+[[nodiscard]] vc::utils::string to_string(vc_error_code code) noexcept;
 
 } // namespace vc

@@ -112,7 +112,7 @@ class vc_image_writer {
     // null buffer, so at()/pixels() would dereference null, a second seal()
     // would mint an image with null pixels, and any span/ref obtained earlier is
     // now a view into the sealed image (see the pixels_ note below).
-    vc_image seal() &&;
+    [[nodiscard]] vc_image seal() &&;
 
   private:
     // Validate the requested geometry, then hand back the descriptor the member

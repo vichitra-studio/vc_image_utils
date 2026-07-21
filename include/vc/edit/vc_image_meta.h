@@ -80,7 +80,7 @@ class i_image_meta {
     using field = std::string;         // placeholder key vocabulary
     using value = vc_metadata_value;   // type-erased value vocabulary
 
-    virtual std::optional<value> get(const field& f) const = 0;
+    [[nodiscard]] virtual std::optional<value> get(const field& f) const = 0;
     virtual void set(const field& f, value v) = 0;
 
     // [LATER] virtual std::unique_ptr<i_image_meta> clone() const = 0;
@@ -104,7 +104,7 @@ using image_metadata_handle = std::unique_ptr<i_image_meta>;
 // vc_memory_table, so it is written in full (it is NOT a rep).
 class vc_memory_image_meta : public i_image_meta {
   public:
-    std::optional<value> get(const field& f) const override;
+    [[nodiscard]] std::optional<value> get(const field& f) const override;
     void set(const field& f, value v) override;
 
   private:

@@ -63,7 +63,8 @@ class i_edit_table {
     // std::nullopt so the caller can decide to recompute — the opposite of
     // vc_edit_settings_reader's total-get (vc_edit_settings_store.h). See
     // vc_optional_reader (the miss-exposing concept flavor) above.
-    virtual std::optional<data_bytes> get(const std::string& key) const = 0;
+    [[nodiscard]] virtual std::optional<data_bytes>
+    get(const std::string& key) const = 0;
     virtual void set(const std::string& key, data_bytes value) = 0;
 };
 
@@ -81,7 +82,8 @@ class vc_cached_edits_table : public i_edit_table {
   public:
     explicit vc_cached_edits_table(i_table& backing);
 
-    std::optional<data_bytes> get(const std::string& key) const override;
+    [[nodiscard]] std::optional<data_bytes>
+    get(const std::string& key) const override;
     void set(const std::string& key, data_bytes value) override;
 
   private:
@@ -105,7 +107,8 @@ class vc_persistent_edits_table : public i_edit_table {
   public:
     explicit vc_persistent_edits_table(i_table& backing);
 
-    std::optional<data_bytes> get(const std::string& key) const override;
+    [[nodiscard]] std::optional<data_bytes>
+    get(const std::string& key) const override;
     void set(const std::string& key, data_bytes value) override;
 
   private:

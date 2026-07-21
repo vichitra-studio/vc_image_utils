@@ -35,8 +35,8 @@ class vc_image {
     // exactly one place (vc_image_writer::validated()).
 
     // A valid, IMMUTABLE image of the given geometry, every element 0.0f.
-    static vc_image zeros(image_dim width, image_dim height,
-                          channel_count channels);
+    [[nodiscard]] static vc_image
+    zeros(image_dim width, image_dim height, channel_count channels);
 
     // A valid, IMMUTABLE image of the given geometry, every element `fill`.
     // T is constrained by vc_pixel_element (vc_pixel_buffer.h) — the SAME
@@ -46,8 +46,10 @@ class vc_image {
     // constraints-not-satisfied diagnostic. The concept IS the compile-time
     // type check here — no separate static_assert needed.
     template <vc_pixel_element T>
-    static vc_image with_fill(image_dim width, image_dim height,
-                              channel_count channels, T fill) {
+    [[nodiscard]] static vc_image with_fill(image_dim width,
+                                            image_dim height,
+                                            channel_count channels,
+                                            T fill) {
         return vc_image_writer(width, height, channels, fill).seal();
     }
 
