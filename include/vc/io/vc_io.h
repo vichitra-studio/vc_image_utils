@@ -23,13 +23,7 @@ class i_image_writer {
                        const write_config& config = {}) = 0;
 };
 
-// TODO(you): implement both in src/io/vc_io_stb.cpp.
-//   - read(): stbi_load(..., desired_channels=0), divide each byte by
-//     255.0f, construct a vc::vc_image, throw vc::vc_exception on failure
-//     (check stbi_failure_reason()).
-//   - write(): multiply each float by 255.0f, round with +0.5f before
-//     casting to uint8_t, call stbi_write_png with stride = width * channels.
-//   See docs/coding_guidelines.md Sec 7.4.
+// stb-backed implementation of both interfaces; see src/io/vc_io_stb.cpp.
 class stb_image_reader : public i_image_reader {
   public:
     vc::vc_image read(const path& p, const read_config& config = {}) override;

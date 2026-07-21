@@ -8,12 +8,8 @@
 #include "vc/vc_error_code.h"
 #include "vc/vc_exception.h"
 #include "vc/vc_image_writer.h"
+#include "vc/vc_pixel_buffer.h"
 #include "vc/vc_types.h"
-
-// TODO(you): you will need this once read()/write() call ->as<T>() on a
-// pixel buffer — vc_types.h (included via vc_io.h -> vc_image.h) only
-// forward-declares vc_pixel_buffer.
-// #include "vc/vc_pixel_buffer.h"
 
 // This is the only translation unit that includes these headers, so it's
 // also the only place the *_IMPLEMENTATION macros can be defined — no risk
