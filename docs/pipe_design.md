@@ -263,7 +263,7 @@ So:
   layer — its job is only to translate the user's text world into the stage's typed world.
 
 This also resolves the "virtual functions can't be templates" constraint (see
-`vc_info_builder.h` for the same rule): `i_pipe`'s methods are non-template virtuals operating
+`vc_log_info_builder.h` for the same rule): `i_pipe`'s methods are non-template virtuals operating
 on generic slot identity; the enum + a per-stage type trait (§4.3) are a *non-virtual,
 per-stage* ergonomic layer on top.
 

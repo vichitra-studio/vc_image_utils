@@ -66,10 +66,10 @@ TEST_CASE("vc_log: should_log respects enabled and min_level") {
     vc::utils::log::set_min_level(vc::utils::log::level::info);
 }
 
-TEST_CASE("vc_log::log_builder: deferred lambda is not invoked when globally "
-          "disabled") {
+TEST_CASE("vc_log::log_info_builder: deferred lambda is not invoked when "
+          "globally disabled") {
     vc::utils::log::set_enabled(false);
-    vc::utils::log::log_builder builder;
+    vc::utils::log::log_info_builder builder;
 
     bool invoked = false;
     vc::utils::log::debug("test",
@@ -82,9 +82,9 @@ TEST_CASE("vc_log::log_builder: deferred lambda is not invoked when globally "
     vc::utils::log::set_enabled(true);
 }
 
-TEST_CASE("vc_log::log_builder: deferred lambda is invoked when enabled") {
+TEST_CASE("vc_log::log_info_builder: deferred lambda is invoked when enabled") {
     vc::utils::log::set_enabled(true);
-    vc::utils::log::log_builder builder;
+    vc::utils::log::log_info_builder builder;
 
     bool invoked = false;
     vc::utils::log::debug("test",
@@ -96,9 +96,9 @@ TEST_CASE("vc_log::log_builder: deferred lambda is invoked when enabled") {
     CHECK(invoked == true);
 }
 
-TEST_CASE("vc_log::log_builder: nullopt from the callable emits nothing") {
+TEST_CASE("vc_log::log_info_builder: nullopt from the callable emits nothing") {
     vc::utils::log::set_enabled(true);
-    vc::utils::log::log_builder builder;
+    vc::utils::log::log_info_builder builder;
 
     cerr_capture capture;
     vc::utils::log::debug("test",
@@ -109,10 +109,10 @@ TEST_CASE("vc_log::log_builder: nullopt from the callable emits nothing") {
     CHECK(capture.str().empty());
 }
 
-TEST_CASE("vc_log::log_builder: tag_enabled(false) suppresses this instance's "
-          "messages") {
+TEST_CASE("vc_log::log_info_builder: tag_enabled(false) suppresses this "
+          "instance's messages") {
     vc::utils::log::set_enabled(true);
-    vc::utils::log::log_builder builder(false);
+    vc::utils::log::log_info_builder builder(false);
 
     bool invoked = false;
     vc::utils::log::debug("test",
@@ -124,13 +124,13 @@ TEST_CASE("vc_log::log_builder: tag_enabled(false) suppresses this instance's "
     CHECK(invoked == false);
 }
 
-TEST_CASE(
-    "vc_log: debug() still filters by level even though log_builder doesn't") {
-    // log_builder's should_build() no longer checks level (only
+TEST_CASE("vc_log: debug() still filters by level even though log_info_builder "
+          "doesn't") {
+    // log_info_builder's should_build() no longer checks level (only
     // tag_enabled + the global switch) — debug()/info()/warning()/error()
     // are where level filtering actually happens now, so a message built
-    // via log_builder (or passed directly) still gets discarded if it's
-    // below min_level.
+    // via log_info_builder (or passed directly) still gets discarded if
+    // it's below min_level.
     vc::utils::log::set_enabled(true);
     vc::utils::log::set_min_level(vc::utils::log::level::error);
 
@@ -141,10 +141,10 @@ TEST_CASE(
     vc::utils::log::set_min_level(vc::utils::log::level::info);
 }
 
-TEST_CASE("vc_log::log_builder: temp() form ignores tag_enabled, respects only "
-          "the global switch") {
+TEST_CASE("vc_log::log_info_builder: temp() form ignores tag_enabled, respects "
+          "only the global switch") {
     vc::utils::log::set_enabled(true);
-    vc::utils::log::log_builder builder(false); // tag disabled
+    vc::utils::log::log_info_builder builder(false); // tag disabled
 
     bool invoked = false;
     vc::utils::log::temp(

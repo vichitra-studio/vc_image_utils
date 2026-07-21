@@ -85,9 +85,9 @@ deep nesting adds redundancy without clarity.
 ```
 vc              — vc_image, vc_exception, vc_error_code + all core typedefs
 vc::utils       — string, message (low-level, no circular deps — everything can include this)
-vc::utils::log  — level, debug/info/warning/error/temp, log_builder
+vc::utils::log  — level, debug/info/warning/error/temp, log_info_builder
 vc::utils::perf — scoped_timer
-vc::utils::debug — image dump/visualisation (dump, dump_builder)
+vc::utils::debug — image dump/visualisation (dump, dump_image_builder)
 vc::io          — path, vc_image_format, read_config, write_config,
                   i_image_reader, i_image_writer, stb_image_reader, stb_image_writer
 ```
@@ -497,13 +497,13 @@ include/vc/vc_error_code.h    — vc_error_code enum + to_int/to_error_code/to_s
 include/vc/vc_exception.h     — vc_exception class
 include/vc/vc_image.h         — vc_image class
 include/vc/utils/vc_strings.h — vc::utils string typedefs
-include/vc/utils/vc_info_builder.h — vc::utils::info_builder<T>: shared base for
-                                 log_builder/dump_builder (header-only, no .cpp — see §9)
+include/vc/utils/vc_log_info_builder.h — vc::utils::log_info_builder_base<T>: shared base for
+                                 log_info_builder/dump_image_builder (header-only, no .cpp — see §9)
 include/vc/utils/vc_log.h     — vc::utils::log: level enum, debug/info/warning/error/temp,
-                                 log_builder
+                                 log_info_builder
 include/vc/utils/vc_perf.h    — vc::utils::perf: scoped_timer (no builder — reports once
                                  at destruction from an enabled() answer already captured)
-include/vc/utils/vc_image_dumper.h — vc::utils::debug: dump, dump_builder
+include/vc/utils/vc_image_dumper.h — vc::utils::debug: dump, dump_image_builder
 include/vc/io/vc_io_types.h   — vc::io typedefs (path, vc_image_format, read/write config)
 include/vc/io/vc_io.h         — vc::io interfaces + stb adapter declarations
 
@@ -523,9 +523,9 @@ docs/                         — project documentation
 
 One class / one interface per header. No omnibus headers.
 `src/` mirrors `include/vc/` for implementation files — except `vc_pixel_buffer.h` and
-`vc_info_builder.h`, neither of which has a `.cpp`: every member that isn't a template is a
+`vc_log_info_builder.h`, neither of which has a `.cpp`: every member that isn't a template is a
 one-liner (`dtype()`/`size()`; `set_tag_enabled()`/`tag_enabled()`), and the rest — the
-constructor and `as<T>()` for `vc_pixel_buffer`, `operator()`/`resolve()` for `gate<T>` —
+constructor and `as<T>()` for `vc_pixel_buffer`, `operator()`/`resolve()` for `log_info_builder_base<T>` —
 are templates that must be defined where instantiated. Nothing non-template is left to put in
 a `.cpp`.
 

@@ -9,19 +9,19 @@
 
 namespace vc::utils {
 
-// Shared base for vc::utils::log::log_builder and vc::utils::debug::
-// dump_builder — the one place a deferred callable (F&&) gets resolved
+// Shared base for vc::utils::log::log_info_builder and vc::utils::debug::
+// dump_image_builder — the one place a deferred callable (F&&) gets resolved
 // into std::optional<T>: the info a derived class builds, gated by
 // should_build(), a subsystem-specific condition each derived class
 // defines. Every override should fold in this instance's own
-// tag_enabled() (see log_builder/dump_builder) — the base doesn't enforce
-// that itself, since should_build() has to stay a simple, opaque predicate
-// to remain virtual (see below).
+// tag_enabled() (see log_info_builder/dump_image_builder) — the base doesn't
+// enforce that itself, since should_build() has to stay a simple, opaque
+// predicate to remain virtual (see below).
 //
 // vc::utils::perf::scoped_timer does NOT use this — it only ever reports
 // once, at destruction, using an enabled() answer already captured at
 // construction, so it has no repeated, reusable decision to make the way
-// log_builder/dump_builder do. See vc_perf.h's comment for why.
+// log_info_builder/dump_image_builder do. See vc_perf.h's comment for why.
 //
 // operator() is a template (F is deduced per call site) and templates
 // cannot be virtual — that's a hard C++ rule, not a design choice: virtual
@@ -31,11 +31,12 @@ namespace vc::utils {
 // is what makes this shareable at all: operator() is defined once, here,
 // non-virtual, and calls the virtual should_build() to decide whether to
 // proceed.
-template <typename T> class info_builder {
+template <typename T> class log_info_builder_base {
   public:
-    explicit info_builder(bool tag_enabled = true) : tag_enabled_(tag_enabled) {
+    explicit log_info_builder_base(bool tag_enabled = true)
+        : tag_enabled_(tag_enabled) {
     }
-    virtual ~info_builder() = default;
+    virtual ~log_info_builder_base() = default;
 
     void set_tag_enabled(bool on) noexcept {
         tag_enabled_ = on;
@@ -50,7 +51,7 @@ template <typename T> class info_builder {
     //   - Pass a callable (usually a lambda) returning std::optional<T>:
     //     only invoked if should_build(), so expensive work is skipped
     //     entirely when filtered out. Returning std::nullopt from the
-    //     callable skips this specific call for a reason this info_builder
+    //     callable skips this specific call for a reason this log_info_builder_base
     //     has no way to know about on its own.
     template <typename F> std::optional<T> operator()(F&& make_value) const {
         if (!should_build()) {
@@ -66,7 +67,7 @@ template <typename T> class info_builder {
 
     // Exposed to derived classes (not just used internally by operator())
     // so a derived class can implement a call with different gating rules
-    // than should_build() — e.g. log_builder::temp(), which bypasses
+    // than should_build() — e.g. log_info_builder::temp(), which bypasses
     // tag_enabled() entirely and uses a different condition.
     template <typename F> static std::optional<T> resolve(F&& make_value) {
         if constexpr (std::is_invocable_v<F>) {

@@ -82,10 +82,10 @@ TEST_CASE("vc_image_dumper: dump() writes a numbered file when enabled") {
 }
 
 TEST_CASE(
-    "vc_image_dumper::dump_builder: deferred callable is not invoked when "
-    "disabled") {
+    "vc_image_dumper::dump_image_builder: deferred callable is not invoked "
+    "when disabled") {
     vc::utils::debug::set_enabled(false);
-    vc::utils::debug::dump_builder builder;
+    vc::utils::debug::dump_image_builder builder;
 
     bool invoked = false;
     vc::utils::debug::dump("test",
@@ -97,10 +97,10 @@ TEST_CASE(
     CHECK(invoked == false);
 }
 
-TEST_CASE("vc_image_dumper::dump_builder: deferred callable is invoked when "
-          "enabled") {
+TEST_CASE("vc_image_dumper::dump_image_builder: deferred callable is invoked "
+          "when enabled") {
     vc::utils::debug::set_enabled(true);
-    vc::utils::debug::dump_builder builder;
+    vc::utils::debug::dump_image_builder builder;
 
     bool invoked = false;
     vc::utils::debug::dump("test",
@@ -114,13 +114,14 @@ TEST_CASE("vc_image_dumper::dump_builder: deferred callable is invoked when "
 }
 
 TEST_CASE(
-    "vc_image_dumper::dump_builder: nullopt from the callable writes nothing") {
+    "vc_image_dumper::dump_image_builder: nullopt from the callable writes "
+    "nothing") {
     const vc::io::path dir =
         std::string(VC_TEST_OUTPUT_DIR) + "/dumper_test_nullopt";
     std::filesystem::remove_all(dir);
     vc::utils::debug::set_output_dir(dir);
     vc::utils::debug::set_enabled(true);
-    vc::utils::debug::dump_builder builder;
+    vc::utils::debug::dump_image_builder builder;
 
     vc::utils::debug::dump(
         "test",
@@ -130,10 +131,10 @@ TEST_CASE(
     vc::utils::debug::set_enabled(false);
 }
 
-TEST_CASE("vc_image_dumper::dump_builder: tag_enabled(false) suppresses this "
-          "instance's messages") {
+TEST_CASE("vc_image_dumper::dump_image_builder: tag_enabled(false) suppresses "
+          "this instance's messages") {
     vc::utils::debug::set_enabled(true);
-    vc::utils::debug::dump_builder builder(false);
+    vc::utils::debug::dump_image_builder builder(false);
 
     bool invoked = false;
     vc::utils::debug::dump("test",

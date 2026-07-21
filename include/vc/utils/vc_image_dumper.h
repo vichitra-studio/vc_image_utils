@@ -6,14 +6,14 @@
 #include <optional>
 
 #include "vc/io/vc_io_types.h"
-#include "vc/utils/vc_info_builder.h"
+#include "vc/utils/vc_log_info_builder.h"
 #include "vc/utils/vc_strings.h"
 #include "vc/vc_image.h"
 
 // Unlike vc_types.h's forward declaration of vc_image (sufficient there,
 // since shared_ptr only needs a reference),
-// vc::utils::info_builder<vc::vc_image> (see vc_info_builder.h) uses
-// std::is_constructible_v<vc::vc_image, F> — a type trait, not a reference
+// vc::utils::log_info_builder_base<vc::vc_image> (see vc_log_info_builder.h)
+// uses std::is_constructible_v<vc::vc_image, F> — a type trait, not a reference
 // binding. That check doesn't depend on F, so it's evaluated the moment this
 // header is parsed, not deferred to template instantiation — which means
 // vc::vc_image must be complete right here, not just at whatever call site
@@ -47,7 +47,7 @@ vc::io::path output_dir() noexcept;
 // image is silently discarded.
 //
 // Not a template — building the image (including any deferred, only-pay-
-// if-needed computation) is dump_builder's job below, so this function's
+// if-needed computation) is dump_image_builder's job below, so this function's
 // definition lives entirely in vc_image_dumper.cpp. Nothing analogous to a
 // lower-level "write" primitive needs to be declared in this header at
 // all.
@@ -60,12 +60,13 @@ void dump(const vc::utils::string& label,
           const std::optional<vc::vc_image>& image);
 
 // ---------------------------------------------------------------------
-// dump_builder — the one place a deferred image gets resolved, built on
-// vc::utils::info_builder<vc::vc_image> (see vc_info_builder.h for
-// operator()/resolve()). should_build() checks this instance's tag_enabled()
-// and vc::utils::debug::enabled() — the same shape as log_builder.
+// dump_image_builder — the one place a deferred image gets resolved, built
+// on vc::utils::log_info_builder_base<vc::vc_image> (see vc_log_info_builder.h
+// for operator()/resolve()). should_build() checks this instance's
+// tag_enabled() and vc::utils::debug::enabled() — the same shape as
+// log_info_builder.
 //
-//   vc::utils::debug::dump_builder builder;
+//   vc::utils::debug::dump_image_builder builder;
 //   ...
 //   vc::utils::debug::dump("resize",
 //       builder([&]() -> std::optional<vc::vc_image> {
@@ -81,12 +82,13 @@ void dump(const vc::utils::string& label,
 //     visualisation (e.g. false-colouring or tone-mapping a raw/HDR
 //     buffer into something viewable) is skipped entirely when dumps are
 //     off. Return std::nullopt to skip this specific call for a reason
-//     dump_builder has no way to know about on its own.
+//     dump_image_builder has no way to know about on its own.
 // ---------------------------------------------------------------------
 
-class dump_builder : public vc::utils::info_builder<vc::vc_image> {
+class dump_image_builder
+    : public vc::utils::log_info_builder_base<vc::vc_image> {
   public:
-    using info_builder::info_builder;
+    using log_info_builder_base::log_info_builder_base;
 
   private:
     bool should_build() const override {

@@ -7,7 +7,7 @@
 #include <optional>
 #include <utility>
 
-#include "vc/utils/vc_info_builder.h"
+#include "vc/utils/vc_log_info_builder.h"
 #include "vc/utils/vc_strings.h"
 
 namespace vc::utils::log {
@@ -29,14 +29,16 @@ enum class level : std::uint8_t {
 // before any logging happens on another thread — no synchronisation here.
 // ---------------------------------------------------------------------
 
-// TODO(you): implement in src/utils/vc_log.cpp.
 void set_enabled(bool on);
 bool enabled() noexcept;
 
+// Default depends on build type (vc_log.cpp): level::debug in a debug build,
+// level::warning in a release build (NDEBUG) — a debug build shows
+// everything by default, a release build only surfaces anomalies.
 void set_min_level(level lvl);
 level min_level() noexcept;
 
-// enabled() && lvl >= min_level(). Not used by log_builder (see below) —
+// enabled() && lvl >= min_level(). Not used by log_info_builder (see below) —
 // exposed so debug()/info()/warning()/error() can filter by level
 // themselves.
 bool should_log(level lvl) noexcept;
@@ -45,13 +47,13 @@ bool should_log(level lvl) noexcept;
 // Public logging API — five plain functions, one shape: a tag and an
 // already-resolved, possibly-empty message. A nullopt msg is silently
 // discarded. These are NOT templates — building the message (including any
-// deferred, only-pay-if-needed computation) is log_builder's job below —
+// deferred, only-pay-if-needed computation) is log_info_builder's job below —
 // so their definitions live entirely in vc_log.cpp. Nothing analogous to a
 // lower-level "emit" primitive needs to be declared in this header at all.
 //
 // debug()/info()/warning()/error() each check should_log() for their own
 // level before writing — this is where level-based filtering actually
-// happens (see log_builder's comment below for why it isn't done any
+// happens (see log_info_builder's comment below for why it isn't done any
 // earlier), and temp() checks enabled() the same way.
 // ---------------------------------------------------------------------
 
@@ -64,17 +66,17 @@ void warning(const vc::utils::string& tag,
 void error(const vc::utils::string& tag,
            const std::optional<vc::utils::message>& msg);
 
-// Always emitted whenever enabled() is true — ignores log_builder's
+// Always emitted whenever enabled() is true — ignores log_info_builder's
 // tag_enabled entirely. For short-lived, ad-hoc debugging; grep
 // "vc::utils::log::temp(" before committing to catch stragglers.
 void temp(const vc::utils::string& tag,
           const std::optional<vc::utils::message>& msg);
 
 // ---------------------------------------------------------------------
-// log_builder — the one place a deferred message gets resolved, built on
-// vc::utils::info_builder<vc::utils::message> (see vc_info_builder.h for
-// operator()/resolve()). should_build() checks this instance's
-// tag_enabled() and enabled() — nothing about level. Level isn't a
+// log_info_builder — the one place a deferred message gets resolved, built on
+// vc::utils::log_info_builder_base<vc::utils::message> (see
+// vc_log_info_builder.h for operator()/resolve()). should_build() checks this
+// instance's tag_enabled() and enabled() — nothing about level. Level isn't a
 // condition the builder machinery understands at all; min_level filtering
 // happens in debug()/info()/warning()/error() themselves, each re-checking
 // should_log() for its own level regardless of how the message was built.
@@ -82,7 +84,7 @@ void temp(const vc::utils::string& tag,
 // built first — a deliberate simplification, not an oversight: only
 // tag_enabled and the master switch skip building the message early.
 //
-//   vc::utils::log::log_builder builder;
+//   vc::utils::log::log_info_builder builder;
 //   ...
 //   vc::utils::log::debug("resize",
 //       builder([&]() -> std::optional<vc::utils::message> {
@@ -90,9 +92,10 @@ void temp(const vc::utils::string& tag,
 //       }));
 // ---------------------------------------------------------------------
 
-class log_builder : public vc::utils::info_builder<vc::utils::message> {
+class log_info_builder
+    : public vc::utils::log_info_builder_base<vc::utils::message> {
   public:
-    using info_builder::info_builder;
+    using log_info_builder_base::log_info_builder_base;
 
     // temp()'s rules — only the global enabled() switch, ignoring
     // tag_enabled (matching vc::utils::log::temp() above) — so it can't
