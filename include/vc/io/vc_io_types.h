@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <string>
 
+#include "vc/vc_types.h"
+
 namespace vc::io {
 
 using path =
@@ -14,17 +16,19 @@ using path =
 enum class vc_image_format : std::uint8_t {
     png,  // PNG (lossless, supports all channel counts)
     jpeg, // JPEG (lossy, RGB only — alpha stripped)
-    bmp,  // BMP (uncompressed, no alpha)
     // future: tiff, exr, dng, raw, ...
 };
 
 struct read_config {
     // no fields yet — stb always loads the file's native channel count
     // (desired_channels = 0), see docs/coding_guidelines.md Sec 7.4
+    vc::pixel_dtype dtype =
+        vc::pixel_dtype::u8; // future: allow caller to request a dtype
 };
 
 struct write_config {
-    vc_image_format format = vc_image_format::png;
+    vc_image_format format = vc_image_format::jpeg;
+    int jpeg_quality = 100; // JPEG quality, 1-100 (ignored for PNG)
 };
 
 } // namespace vc::io

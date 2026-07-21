@@ -88,14 +88,24 @@ TEST_CASE("stb round-trip: JPEG in, PNG out, dimensions and pixels match") {
     const vc::io::path output =
         std::string(VC_TEST_OUTPUT_DIR) + "/roundtrip_test_output.png";
 
-    vc::vc_image img = reader.read(input);
+    // Explicit dtype: read()'s default is buf_u8 (vc_io_types.h), but this
+    // test asserts against buf_f32 below — the request must match what it
+    // checks, not rely on whatever the default happens to be.
+    const vc::io::read_config f32_config{.dtype = vc::pixel_dtype::f32};
+
+    vc::vc_image img = reader.read(input, f32_config);
     CHECK(img.channels() == 3);
     CHECK(img.width() > 0);
     CHECK(img.height() > 0);
 
-    writer.write(output, img);
+    // Explicit format: write_config's default is JPEG (vc_io_types.h), but
+    // this test's name and tolerance below assume a lossless PNG round-trip
+    // — the request must match that, not rely on the default.
+    const vc::io::write_config png_config{.format =
+                                              vc::io::vc_image_format::png};
+    writer.write(output, img, png_config);
 
-    vc::vc_image roundtripped = reader.read(output);
+    vc::vc_image roundtripped = reader.read(output, f32_config);
     CHECK(roundtripped.width() == img.width());
     CHECK(roundtripped.height() == img.height());
     CHECK(roundtripped.channels() == img.channels());

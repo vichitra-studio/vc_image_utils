@@ -13,6 +13,7 @@
 
 #include "vc/vc_error_code.h"
 #include "vc/vc_exception.h"
+#include "vc/vc_types.h"
 
 namespace vc {
 
@@ -23,15 +24,6 @@ namespace vc {
 using buf_f32 = float;
 using buf_u8 = std::uint8_t;
 using buf_u16 = std::uint16_t;
-
-// Which concrete type a vc_pixel_buffer currently holds. Declaration order
-// must match the variant's alternative order below — dtype() casts
-// data_.index() straight to this enum.
-enum class pixel_dtype : std::uint8_t {
-    f32, // normalised [0.0, 1.0]
-    u8,  // [0, 255]
-    u16, // [0, 65535] — not yet produced or consumed by any reader/writer
-};
 
 // The only element types vc_pixel_buffer can store. Constrains the
 // constructor and as<T>() so a request for an unsupported type fails to

@@ -1,10 +1,14 @@
 // Copyright (c) 2026 Shantanu Agarwal
 // SPDX-License-Identifier: AGPL-3.0-only
 
+#include <algorithm>
+
 #include "vc/io/vc_io.h"
 
 #include "vc/vc_error_code.h"
 #include "vc/vc_exception.h"
+#include "vc/vc_image_writer.h"
+#include "vc/vc_types.h"
 
 // TODO(you): you will need this once read()/write() call ->as<T>() on a
 // pixel buffer — vc_types.h (included via vc_io.h -> vc_image.h) only
@@ -23,52 +27,112 @@
 namespace vc::io {
 
 vc::vc_image stb_image_reader::read(const path& p, const read_config& config) {
-    (void)config; // no fields yet — see vc_io_types.h
+    int w = 0, h = 0, channels_in_file = 0;
+    unsigned char* data = stbi_load(p.c_str(), &w, &h, &channels_in_file, 0);
+    auto uw = static_cast<vc::image_dim>(w);
+    auto uh = static_cast<vc::image_dim>(h);
+    auto channels = static_cast<vc::channel_count>(channels_in_file);
 
-    // TODO(you): implement.
-    //   1. int w = 0, h = 0, channels_in_file = 0;
-    //      unsigned char* data = stbi_load(p.c_str(), &w, &h,
-    //      &channels_in_file, 0); Always pass desired_channels = 0 — never
-    //      force a conversion (Sec 7.4).
-    //   2. if (!data) throw vc::vc_exception(vc::vc_error_code::decode_error,
-    //         "stb_image_reader::read: " + p + ": " + stbi_failure_reason());
-    //   3. Build the image through a writer (vc_image is immutable — the writer
-    //      is the only write path; #include "vc/vc_image_writer.h"):
-    //      vc::vc_image_writer w(w, h, channels_in_file, vc::buf_f32{0.0f});
-    //   4. Copy data into w.pixels<vc::buf_f32>() (or w.at<vc::buf_f32>(...)),
-    //      dividing each byte by 255.0f. Do NOT use stbi_loadf — it silently
-    //      linearises (applies gamma). We work in encoded 8-bit space here.
-    //   5. stbi_image_free(data) — always, even though the buffer now owns its
-    //      own copy; stb's buffer is separate and must be freed here.
-    //   6. return std::move(w).seal();  // hand back the immutable image
+    if (!data) {
+        throw vc::vc_exception(vc::vc_error_code::decode_error,
+                               "stb_image_reader::read: " + p + ": " +
+                                   stbi_failure_reason());
+    }
 
-    throw vc::vc_exception(vc::vc_error_code::decode_error,
-                           "stb_image_reader::read: not yet implemented (" + p +
-                               ")");
+    vc_image_writer writer = [&]() {
+        switch (config.dtype) {
+        case vc::pixel_dtype::f32: {
+            auto temp_writer =
+                vc_image_writer(uw, uh, channels, vc::buf_f32{0.0f});
+            auto pix = temp_writer.pixels<vc::buf_f32>();
+            std::transform(data, data + pix.size(), pix.begin(),
+                           [](unsigned char v) {
+                               return static_cast<vc::buf_f32>(v) / 255.0f;
+                           });
+            return temp_writer;
+        }
+        case vc::pixel_dtype::u8: {
+            auto temp_writer = vc_image_writer(uw, uh, channels, vc::buf_u8{0});
+            auto pix = temp_writer.pixels<vc::buf_u8>();
+            std::copy(data, data + pix.size(), pix.begin());
+            return temp_writer;
+        }
+        case vc::pixel_dtype::u16: {
+            auto temp_writer =
+                vc_image_writer(uw, uh, channels, vc::buf_u16{0});
+            auto pix = temp_writer.pixels<vc::buf_u16>();
+            std::transform(data, data + pix.size(), pix.begin(),
+                           [](unsigned char v) {
+                               return static_cast<vc::buf_u16>(
+                                   (static_cast<unsigned>(v) << 8) | v);
+                           });
+            return temp_writer;
+        }
+        default:
+            throw vc::vc_exception(vc::vc_error_code::decode_error,
+                                   "stb_image_reader::read: unsupported dtype");
+        }
+    }();
+
+    stbi_image_free(data);
+    return std::move(writer).seal();
 }
 
 void stb_image_writer::write(const path& p,
                              const vc::vc_image& image,
                              const write_config& config) {
-    (void)image;
-    (void)config; // TODO(you): dispatch on config.format once more than PNG is
-                  // supported
+    auto buf = image.pixels();
+    std::vector<unsigned char> data(buf->size());
+    switch (buf->dtype()) {
+    case vc::pixel_dtype::f32: {
+        std::transform(buf->as<vc::buf_f32>().begin(),
+                       buf->as<vc::buf_f32>().end(), data.begin(),
+                       [](vc::buf_f32 v) {
+                           return static_cast<unsigned char>(
+                               std::clamp(v * 255.0f + 0.5f, 0.0f, 255.0f));
+                       });
+        break;
+    }
+    case vc::pixel_dtype::u8: {
+        std::copy(buf->as<vc::buf_u8>().begin(), buf->as<vc::buf_u8>().end(),
+                  data.begin());
+        break;
+    }
+    case vc::pixel_dtype::u16: {
+        std::transform(
+            buf->as<vc::buf_u16>().begin(), buf->as<vc::buf_u16>().end(),
+            data.begin(),
+            [](vc::buf_u16 v) { return static_cast<unsigned char>(v >> 8); });
+        break;
+    }
+    }
 
-    // TODO(you): implement.
-    //   1. auto buf = image.pixels(); — read-only access, see Sec 4.2.
-    //   2. Build a temporary std::vector<unsigned char> of buf->size(),
-    //      converting each float back with: value * 255.0f + 0.5f, then
-    //      cast to uint8_t. The +0.5f rounds instead of truncating.
-    //   3. int stride = static_cast<int>(image.width() * image.channels());
-    //   4. int ok = stbi_write_png(p.c_str(), static_cast<int>(image.width()),
-    //         static_cast<int>(image.height()),
-    //         static_cast<int>(image.channels()), converted.data(), stride);
-    //   5. if (!ok) throw vc::vc_exception(vc::vc_error_code::encode_error,
-    //         "stb_image_writer::write: failed to write " + p);
+    int result = 0;
+    switch (config.format) {
+    case vc::io::vc_image_format::png: {
+        int stride = static_cast<int>(image.width() * image.channels());
+        result = stbi_write_png(p.c_str(), static_cast<int>(image.width()),
+                                static_cast<int>(image.height()),
+                                static_cast<int>(image.channels()), data.data(),
+                                stride);
+        break;
+    }
+    case vc::io::vc_image_format::jpeg: {
+        result = stbi_write_jpg(p.c_str(), static_cast<int>(image.width()),
+                                static_cast<int>(image.height()),
+                                static_cast<int>(image.channels()), data.data(),
+                                config.jpeg_quality);
+        break;
+    }
+    default:
+        throw vc::vc_exception(vc::vc_error_code::encode_error,
+                               "stb_image_writer::write: unsupported format");
+    }
 
-    throw vc::vc_exception(vc::vc_error_code::encode_error,
-                           "stb_image_writer::write: not yet implemented (" +
-                               p + ")");
+    if (!result) {
+        throw vc::vc_exception(vc::vc_error_code::encode_error,
+                               "stb_image_writer::write: failed to write " + p);
+    }
 }
 
 } // namespace vc::io
