@@ -103,8 +103,9 @@ TEST_CASE("vc_blur_stage: process() publishes a blurred image on its output slot
 
     // Seed the input slot with a source image and drive process() directly.
     std::unordered_map<vc::pipe::slot_name, vc::pipe::vc_pipe_packet> inputs;
-    inputs.emplace(std::string(vc::pipe::vc_blur_stage::slots::in.name),
-                   vc::pipe::vc_pipe_packet{vc::vc_image::zeros(4, 4, 3)});
+    inputs.emplace(
+        std::string(vc::pipe::vc_blur_stage::slots::in.name),
+        vc::pipe::vc_pipe_packet{vc::vc_image::zeros<vc::buf_f32>(4, 4, 3)});
     vc::pipe::vc_pipe_context ctx{std::move(inputs)};
 
     // The shell throws (TODO(you)), so this is RED; a written kernel does not

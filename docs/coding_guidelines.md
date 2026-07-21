@@ -361,17 +361,36 @@ All accessors that only read internal state are marked `const noexcept`.
 
 Validate inputs first, allocate after. No two-phase init, no `init()` method.
 
+`vc_image` itself has no public constructor (§6.5) — it is only ever produced
+by `vc_image_writer::seal()`. The gate lives in `vc_image_writer`'s
+constructor, which validates via a private static helper so validation can
+run in the member-initializer list, before the pixel buffer that depends on
+the validated geometry is allocated:
+
 ```cpp
-vc_image(vc::image_dim w, vc::image_dim h, vc::channel_count c) {
-    if (w == 0 || h == 0 || c == 0 || c > 4)
-        throw vc_exception(vc_error_code::invalid_argument, "invalid dimensions");
-    // cast the FIRST operand to size_t before multiplying — keeps the rest of the
-    // chain in 64-bit and avoids uint32_t overflow for large-but-valid images
-    pixels_ = std::make_shared<vc::vc_pixel_buffer>(
-        static_cast<std::size_t>(w) * h * c, 0.0f);
-    width_ = w; height_ = h; channels_ = c;
+template <vc_pixel_element T>
+vc_image_writer(image_dim width, image_dim height, channel_count channels, T fill)
+    : meta_(validated(width, height, channels)),
+      pixels_(std::make_shared<vc_pixel_buffer>(meta_.element_count(), fill)) {
 }
 ```
+
+`validated()` is kept as a `static` specifically so it can run before
+`pixels_` exists — there is no member left default-constructed while
+validation happens, and no way to reach the allocation with unvalidated
+geometry:
+
+```cpp
+static vc_image_info
+validated(image_dim width, image_dim height, channel_count channels);
+// rejects width == 0 || height == 0 || channels == 0 || channels > 4
+// before the descriptor is ever built
+```
+
+(`validated()` is currently a `TODO(you)` stub that returns the descriptor
+unchecked — the "rejects invalid dimensions" test in `test_vc_image.cpp`
+stays red until it throws. Same "stated now, enforced when the gate lands"
+caveat as §4.4/§6.5.)
 
 ### 6.4 No raw `new` / `delete`
 

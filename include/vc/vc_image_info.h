@@ -67,13 +67,7 @@ class vc_image_info {
     // Total element count for this geometry — the count a vc_pixel_buffer must
     // hold, and what vc_image::pixel_count() reports.
     std::size_t element_count() const noexcept {
-        // TODO(you): width_ * height_ * channels_, overflow-safe — widen the
-        // FIRST operand to std::size_t before the multiply (image_dim /
-        // channel_count are uint32, so the product can exceed 32 bits before a
-        // later cast would help). Until this is written it returns 0, so
-        // vc_image_writer allocates an empty buffer and the "validates and
-        // allocates" test stays red on purpose. See coding_guidelines.md Sec 6.3.
-        return 0;
+        return static_cast<std::size_t>(width_) * height_ * channels_;
     }
 
     // Element offset of channel `ch` at pixel (x, y). THE layout decision, made

@@ -93,7 +93,7 @@ std::vector<vc::bench::bench_case> micro_cases() {
              using stage_t = vc::pipe::vc_passthrough_stage;
              const stage_t stage("bench_passthrough");
              const vc::vc_image image =
-                 vc::vc_image::zeros(kWidth, kHeight, kChannels);
+                 vc::vc_image::zeros<vc::buf_f32>(kWidth, kHeight, kChannels);
 
              const vc::pipe::slot_name in_slot{stage_t::slots::in.name};
              const vc::pipe::slot_name out_slot{stage_t::slots::out.name};
@@ -142,7 +142,7 @@ std::vector<vc::bench::bench_case> micro_cases() {
              using stage_t = vc::pipe::vc_grayscale_stage;
              const stage_t stage("bench_grayscale");
              const vc::vc_image image =
-                 vc::vc_image::zeros(kWidth, kHeight, kChannels);
+                 vc::vc_image::zeros<vc::buf_f32>(kWidth, kHeight, kChannels);
 
              const vc::pipe::slot_name in_slot{stage_t::slots::rgb.name};
 
@@ -167,7 +167,7 @@ std::vector<vc::bench::bench_case> micro_cases() {
              using stage_t = vc::pipe::vc_mean_brightness_stage;
              const stage_t stage("bench_mean");
              const vc::vc_image image =
-                 vc::vc_image::zeros(kWidth, kHeight, kChannels);
+                 vc::vc_image::zeros<vc::buf_f32>(kWidth, kHeight, kChannels);
 
              const vc::pipe::slot_name in_slot{stage_t::slots::image.name};
 

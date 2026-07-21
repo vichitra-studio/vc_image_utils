@@ -199,7 +199,7 @@ std::vector<vc::bench::bench_case> substrate_cases() {
     cases.push_back(
         {"packet", true, [](ankerl::nanobench::Bench& bench) {
              const vc::vc_image image =
-                 vc::vc_image::zeros(kWidth, kHeight, kChannels);
+                 vc::vc_image::zeros<vc::buf_f32>(kWidth, kHeight, kChannels);
 
              // Sanity: a boxed value round-trips back to the same type.
              {

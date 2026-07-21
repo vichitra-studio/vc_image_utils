@@ -34,9 +34,14 @@ class vc_image {
     // vc_image_writer -> seal(), so validation/allocation logic lives in
     // exactly one place (vc_image_writer::validated()).
 
-    // A valid, IMMUTABLE image of the given geometry, every element 0.0f.
+    // A valid, IMMUTABLE image of the given geometry, every element T{0}. T is
+    // constrained by vc_pixel_element, same as with_fill() below — the caller
+    // picks the dtype instead of it being hardcoded to buf_f32.
+    template <vc_pixel_element T>
     [[nodiscard]] static vc_image
-    zeros(image_dim width, image_dim height, channel_count channels);
+    zeros(image_dim width, image_dim height, channel_count channels) {
+        return with_fill(width, height, channels, static_cast<T>(0));
+    }
 
     // A valid, IMMUTABLE image of the given geometry, every element `fill`.
     // T is constrained by vc_pixel_element (vc_pixel_buffer.h) — the SAME

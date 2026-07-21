@@ -8,23 +8,34 @@
 
 #include "vc/vc_image.h"
 
-// TODO(you): once validated() throws, you will want these for the check:
-//   #include "vc/vc_error_code.h"
-//   #include "vc/vc_exception.h"
+#include "vc/vc_error_code.h"
+#include "vc/vc_exception.h"
 
 namespace vc {
 
 vc_image_info vc_image_writer::validated(image_dim width,
                                          image_dim height,
                                          channel_count channels) {
-    // TODO(you): this is the one rep left in the image core — the same
-    // validation the original vc_image constructor owned. Reject a degenerate or
-    // unsupported geometry BEFORE the descriptor is built:
-    //   width == 0 || height == 0 || channels == 0 || channels > 4
-    //     -> throw vc::vc_exception(vc::vc_error_code::invalid_argument, "...")
-    // Until this throws, vc_image_writer{0, 2, 3, ...} constructs a degenerate
-    // image instead of failing — so the "rejects invalid dimensions" test stays
-    // red on purpose. See docs/coding_guidelines.md Sec 6.3.
+    if (width == 0) {
+        throw vc::vc_exception(vc::vc_error_code::invalid_argument,
+                               "vc_image_writer::validated: width "
+                               "must be positive non-zero");
+    }
+    if (height == 0) {
+        throw vc::vc_exception(vc::vc_error_code::invalid_argument,
+                               "vc_image_writer::validated: height "
+                               "must be positive non-zero");
+    }
+    if (channels == 0) {
+        throw vc::vc_exception(vc::vc_error_code::invalid_argument,
+                               "vc_image_writer::validated: channels "
+                               "must be positive non-zero");
+    }
+    if (channels > 4) {
+        throw vc::vc_exception(vc::vc_error_code::invalid_argument,
+                               "vc_image_writer::validated: channels "
+                               "max of 4 channels supported");
+    }
     return vc_image_info{width, height, channels};
 }
 

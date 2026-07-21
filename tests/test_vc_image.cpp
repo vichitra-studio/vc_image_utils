@@ -25,7 +25,7 @@
 #endif
 
 TEST_CASE("vc_image: zeros() validates and allocates") {
-    vc::vc_image img = vc::vc_image::zeros(4, 2, 3);
+    vc::vc_image img = vc::vc_image::zeros<vc::buf_f32>(4, 2, 3);
     CHECK(img.width() == 4);
     CHECK(img.height() == 2);
     CHECK(img.channels() == 3);
@@ -38,9 +38,12 @@ TEST_CASE("vc_image: zeros() rejects invalid dimensions") {
     // zeros() is [[nodiscard]] (it has no other effect); CHECK_THROWS_AS
     // expands to a bare-statement call, so the result is explicitly
     // discarded here — the test cares only that construction throws.
-    CHECK_THROWS_AS((void)vc::vc_image::zeros(0, 2, 3), vc::vc_exception);
-    CHECK_THROWS_AS((void)vc::vc_image::zeros(4, 0, 3), vc::vc_exception);
-    CHECK_THROWS_AS((void)vc::vc_image::zeros(4, 2, 0), vc::vc_exception);
+    CHECK_THROWS_AS((void)vc::vc_image::zeros<vc::buf_f32>(0, 2, 3),
+                    vc::vc_exception);
+    CHECK_THROWS_AS((void)vc::vc_image::zeros<vc::buf_f32>(4, 0, 3),
+                    vc::vc_exception);
+    CHECK_THROWS_AS((void)vc::vc_image::zeros<vc::buf_f32>(4, 2, 0),
+                    vc::vc_exception);
 }
 
 // vc_image_info composes shared_ptr<const vc::edit::i_image_meta>; a mask

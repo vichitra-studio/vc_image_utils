@@ -65,7 +65,7 @@ TEST_CASE("vc_render_request: defaults to full resolution, whole image") {
 }
 
 TEST_CASE("vc_edit_session: composes an immutable source and mutable edits") {
-    const auto img = vc::vc_image::zeros(2, 2, 3);
+    const auto img = vc::vc_image::zeros<vc::buf_f32>(2, 2, 3);
     vc::edit::vc_edit_document doc;
     doc.exposure.ev = 2.0;
 
@@ -211,7 +211,7 @@ TEST_CASE("vc_stage_registry: register_stage -> create(kind,name,session)"
         });
     CHECK(registry.has("blur"));
 
-    const auto img = vc::vc_image::zeros(2, 2, 3);
+    const auto img = vc::vc_image::zeros<vc::buf_f32>(2, 2, 3);
     vc::edit::vc_memory_table backing;
     vc::edit::vc_persistent_edits_table persistent{backing};
     vc::edit::vc_cached_edits_table cache{backing};
@@ -242,7 +242,7 @@ TEST_CASE("build_pipeline: assembles a runnable pipeline from a one-stage"
     // passthrough spine it returns a pipeline and stops throwing -> GREEN. The
     // failure is isolated to build_pipeline (not run(), which has no public stage
     // accessor to observe) — see the throwing-shell rationale in the header.
-    const auto img = vc::vc_image::zeros(2, 2, 3);
+    const auto img = vc::vc_image::zeros<vc::buf_f32>(2, 2, 3);
     vc::edit::vc_memory_table backing;
     vc::edit::vc_persistent_edits_table persistent{backing};
     vc::edit::vc_cached_edits_table cache{backing};
@@ -263,7 +263,7 @@ TEST_CASE("render_image: renders a one-stage session end-to-end (RED until"
     // stage is vc_passthrough_stage (identity — see its worked-reference
     // process()), so a correct render_image reproduces the source's geometry
     // exactly. RED today: the shell throws unconditionally.
-    const auto img = vc::vc_image::zeros(4, 3, 3);
+    const auto img = vc::vc_image::zeros<vc::buf_f32>(4, 3, 3);
     vc::edit::vc_memory_table backing;
     vc::edit::vc_persistent_edits_table persistent{backing};
     vc::edit::vc_cached_edits_table cache{backing};
@@ -288,7 +288,7 @@ TEST_CASE("export_image: renders a session and writes it to a file (RED"
     // entangle this test's red with stb_image_reader's own separate,
     // unimplemented rep (the same throwing-shell isolation reasoning as
     // vc_build_pipeline.h).
-    const auto img = vc::vc_image::zeros(4, 3, 3);
+    const auto img = vc::vc_image::zeros<vc::buf_f32>(4, 3, 3);
     vc::edit::vc_memory_table backing;
     vc::edit::vc_persistent_edits_table persistent{backing};
     vc::edit::vc_cached_edits_table cache{backing};
@@ -397,7 +397,7 @@ TEST_CASE("vc_pipeline: run() observes a PRE-CANCELLED run context and stops"
     std::unordered_map<vc::pipe::stage_port, vc::pipe::vc_pipe_packet> inputs;
     inputs.emplace(
         vc::pipe::stage_port{"a", vc::pipe::vc_passthrough_stage::slots::in},
-        vc::pipe::vc_pipe_packet{vc::vc_image::zeros(2, 2, 3)});
+        vc::pipe::vc_pipe_packet{vc::vc_image::zeros<vc::buf_f32>(2, 2, 3)});
 
     vc::pipe::vc_cancellation_source src;
     src.cancel(); // pre-cancelled before run() is even entered

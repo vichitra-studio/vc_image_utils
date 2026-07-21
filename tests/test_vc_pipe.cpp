@@ -84,7 +84,8 @@ TEST_CASE("vc_pipe_context: reading an unbound input slot throws") {
 
 TEST_CASE("vc_pipe_context: typed slot overloads deduce the payload type") {
     std::unordered_map<vc::pipe::slot_name, vc::pipe::vc_pipe_packet> in;
-    in.emplace("image", vc::pipe::vc_pipe_packet{vc::vc_image::zeros(2, 2, 3)});
+    in.emplace("image", vc::pipe::vc_pipe_packet{
+                            vc::vc_image::zeros<vc::buf_f32>(2, 2, 3)});
     vc::pipe::vc_pipe_context ctx{std::move(in)};
 
     // get_input(slot<vc_image>) deduces vc_image and unboxes without spelling
@@ -164,7 +165,8 @@ TEST_CASE("vc_pipeline: add() returns the stage name for typo-safe wiring") {
 
 TEST_CASE("vc_passthrough_stage: carries a vc_image through its typed slots") {
     std::unordered_map<vc::pipe::slot_name, vc::pipe::vc_pipe_packet> in;
-    in.emplace("in", vc::pipe::vc_pipe_packet{vc::vc_image::zeros(2, 2, 3)});
+    in.emplace("in", vc::pipe::vc_pipe_packet{
+                         vc::vc_image::zeros<vc::buf_f32>(2, 2, 3)});
     vc::pipe::vc_pipe_context ctx{std::move(in)};
 
     const vc::pipe::vc_passthrough_stage stage{"pass"};
@@ -262,7 +264,7 @@ TEST_CASE("vc_pipeline: run() drives a packet through a two-stage chain") {
     std::unordered_map<vc::pipe::stage_port, vc::pipe::vc_pipe_packet> inputs;
     inputs.emplace(
         vc::pipe::stage_port{"a", vc::pipe::vc_passthrough_stage::slots::in},
-        vc::pipe::vc_pipe_packet{vc::vc_image::zeros(2, 2, 3)});
+        vc::pipe::vc_pipe_packet{vc::vc_image::zeros<vc::buf_f32>(2, 2, 3)});
 
     const auto outputs = pipe.run(std::move(inputs)); // TODO(you): run()
 
@@ -286,10 +288,10 @@ TEST_CASE("vc_pipeline: run() rejects an input map that does not cover exactly"
     std::unordered_map<vc::pipe::stage_port, vc::pipe::vc_pipe_packet> inputs;
     inputs.emplace(
         vc::pipe::stage_port{"a", vc::pipe::vc_passthrough_stage::slots::in},
-        vc::pipe::vc_pipe_packet{vc::vc_image::zeros(2, 2, 3)});
+        vc::pipe::vc_pipe_packet{vc::vc_image::zeros<vc::buf_f32>(2, 2, 3)});
     inputs.emplace( // extra: b.in is not an open input
         vc::pipe::stage_port{"b", vc::pipe::vc_passthrough_stage::slots::in},
-        vc::pipe::vc_pipe_packet{vc::vc_image::zeros(2, 2, 3)});
+        vc::pipe::vc_pipe_packet{vc::vc_image::zeros<vc::buf_f32>(2, 2, 3)});
 
     CHECK_THROWS_AS(pipe.run(std::move(inputs)),
                     vc::vc_exception); // TODO(you): run()
@@ -306,10 +308,10 @@ TEST_CASE("vc_pipeline: run() injects and harvests MULTIPLE open ports") {
     std::unordered_map<vc::pipe::stage_port, vc::pipe::vc_pipe_packet> inputs;
     inputs.emplace(
         vc::pipe::stage_port{"a", vc::pipe::vc_passthrough_stage::slots::in},
-        vc::pipe::vc_pipe_packet{vc::vc_image::zeros(2, 2, 3)});
+        vc::pipe::vc_pipe_packet{vc::vc_image::zeros<vc::buf_f32>(2, 2, 3)});
     inputs.emplace(
         vc::pipe::stage_port{"b", vc::pipe::vc_passthrough_stage::slots::in},
-        vc::pipe::vc_pipe_packet{vc::vc_image::zeros(4, 4, 3)});
+        vc::pipe::vc_pipe_packet{vc::vc_image::zeros<vc::buf_f32>(4, 4, 3)});
 
     const auto outputs = pipe.run(std::move(inputs)); // TODO(you): run()
 
