@@ -3,14 +3,10 @@
 
 #pragma once
 
-#include <memory>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "vc/pipe/i_pipe.h"
-#include "vc/pipe/vc_cancellation_token.h"
-#include "vc/pipe/vc_pipe_packet.h"
 #include "vc/pipe/vc_pipe_types.h"
 #include "vc/pipe/vc_render_context.h"
 

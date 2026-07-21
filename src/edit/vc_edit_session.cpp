@@ -14,7 +14,7 @@ vc_edit_session::vc_edit_session(vc_image source, vc_edit_document edits,
                                  std::unique_ptr<i_image_meta> meta,
                                  vc_persistent_edits_table& persistent,
                                  vc_cached_edits_table& cache)
-    : source_(std::move(source)), edits_(std::move(edits)),
+    : source_(std::move(source)), edits_(edits),
       meta_(std::move(meta)), persistent_(persistent), cache_(cache) {
     if (meta_ == nullptr) {
         throw vc::vc_exception(vc::vc_error_code::invalid_argument,
