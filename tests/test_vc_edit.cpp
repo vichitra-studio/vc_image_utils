@@ -8,12 +8,14 @@
 #include <cstddef>
 
 #include "vc/edit/vc_build_pipeline.h"
+#include "vc/edit/vc_export.h"
 #include "vc/edit/vc_table.h"
 #include "vc/edit/vc_edit_document.h"
 #include "vc/edit/vc_edit_session.h"
 #include "vc/edit/vc_edit_settings_store.h"
 #include "vc/edit/vc_edit_table.h"
 #include "vc/edit/vc_image_meta.h"
+#include "vc/edit/vc_render_image.h"
 #include "vc/edit/vc_render_request.h"
 #include "vc/edit/vc_stage_registry.h"
 #include "vc/pipe/stages/vc_blur_stage.h"
@@ -26,10 +28,15 @@
 #include "vc/vc_exception.h"
 #include "vc/vc_image.h"
 
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <utility>
+
+#ifndef VC_TEST_OUTPUT_DIR
+#error "VC_TEST_OUTPUT_DIR must be defined by CMake (see CMakeLists.txt)"
+#endif
 
 // =====================================================================
 // GREEN — the edit-model plumbing that is FULLY WRITTEN (data structs,
@@ -247,6 +254,56 @@ TEST_CASE("build_pipeline: assembles a runnable pipeline from a one-stage"
     CHECK_NOTHROW(
         [[maybe_unused]] auto pipe =
             vc::edit::build_pipeline(session, request)); // TODO(you)
+}
+
+TEST_CASE("render_image: renders a one-stage session end-to-end (RED until"
+          " build_pipeline()/run() are written)") {
+    // Composes build_pipeline + vc_pipeline::run() (the spine diagram,
+    // edit_model_scaffold_plan.md Sec 3, made callable). The spine's one
+    // stage is vc_passthrough_stage (identity — see its worked-reference
+    // process()), so a correct render_image reproduces the source's geometry
+    // exactly. RED today: the shell throws unconditionally.
+    const auto img = vc::vc_image::zeros(4, 3, 3);
+    vc::edit::vc_memory_table backing;
+    vc::edit::vc_persistent_edits_table persistent{backing};
+    vc::edit::vc_cached_edits_table cache{backing};
+    const vc::edit::vc_edit_session session{
+        img, vc::edit::vc_edit_document{},
+        std::make_unique<vc::edit::vc_memory_image_meta>(), persistent, cache};
+    const vc::edit::vc_render_request request; // full-res, whole image
+
+    const auto rendered =
+        vc::edit::render_image(session, request); // TODO(you)
+
+    CHECK(rendered.width() == 4);
+    CHECK(rendered.height() == 3);
+    CHECK(rendered.channels() == 3);
+}
+
+TEST_CASE("export_image: renders a session and writes it to a file (RED"
+          " until render_image()/export_image() are written)") {
+    // The end of the export chain: vc_edit_session -> export_image -> a real
+    // file on disk. Checks only that the file lands
+    // (std::filesystem::exists), not its contents — decoding it back would
+    // entangle this test's red with stb_image_reader's own separate,
+    // unimplemented rep (the same throwing-shell isolation reasoning as
+    // vc_build_pipeline.h).
+    const auto img = vc::vc_image::zeros(4, 3, 3);
+    vc::edit::vc_memory_table backing;
+    vc::edit::vc_persistent_edits_table persistent{backing};
+    vc::edit::vc_cached_edits_table cache{backing};
+    const vc::edit::vc_edit_session session{
+        img, vc::edit::vc_edit_document{},
+        std::make_unique<vc::edit::vc_memory_image_meta>(), persistent, cache};
+
+    const vc::edit::vc_export_config config{
+        .path = std::string(VC_TEST_OUTPUT_DIR) + "/export_test_output.png",
+        .write = {}};
+    std::filesystem::remove(config.path); // clean slate from a prior run
+
+    vc::edit::export_image(session, config); // TODO(you)
+
+    CHECK(std::filesystem::exists(config.path));
 }
 
 TEST_CASE("vc_edit_settings_writer/vc_edit_settings_reader: round-trip a scalar through a"

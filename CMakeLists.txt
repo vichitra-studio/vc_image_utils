@@ -95,6 +95,8 @@ set(VC_LIB_SOURCES
     src/pipe/stages/vc_blur_stage.cpp
     src/edit/vc_edit_session.cpp
     src/edit/vc_build_pipeline.cpp
+    src/edit/vc_render_image.cpp
+    src/edit/vc_export.cpp
     src/edit/vc_table.cpp
     src/edit/vc_edit_settings_store.cpp
     src/edit/vc_edit_table.cpp

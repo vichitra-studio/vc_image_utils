@@ -70,6 +70,10 @@ scalability · 18. The schema/serialization mechanism · 19. Glossary
                                                  vc_image  (immutable pixels)
 ```
 
+`vc::edit::render_image(session, request)` is this whole chain — `build_pipeline`
+then `run()` — collapsed into one callable (§8); `vc::edit::export_image` extends it
+one step further, writing the result to a file.
+
 Two invariants:
 
 1. **Immutable source, rendered on demand.** The source `vc_image` is read-only and
@@ -301,7 +305,10 @@ that view; the stage's hot-path code never sees it.
   binary, as above). **Export is one self-contained bundle**: sidecar + metadata +
   the referenced derived blobs, packaged together. The **evictable** cache (§5) is
   never part of this — it may optionally back a private warm-start mirror, but it
-  is never saved or bundled.
+  is never saved or bundled. (This is the *portability* sense of "export" — a
+  different, unrelated use of the word from `vc::edit::export_image`'s
+  render-pixels-to-a-file sense, §8. The two share a name in this doc by accident
+  of English, not by design; do not conflate them.)
 
 ## 5. Derived data (Kind C) — cache + persistent store [LATER; seam NOW]
 
@@ -572,6 +579,37 @@ satisfy the `vc_optional_reader`/`vc_writer` concepts.
   preview, output profile for export), **not** the edit doc. `build_pipeline` appends it
   per render destination. This keeps "edit" (in the doc) and "view transform" (from the
   target) cleanly separate while both run as stages (§16 L18).
+- **`render_image` / `export_image` [NOW, scaffolded 2026-07-21].** `build_pipeline` →
+  `run()` (the diagram in §1) is composed into one callable,
+  `vc::edit::render_image(session, request) → vc_image` — the ONE place both a future
+  preview path and export call, rather than each re-deriving the composition.
+  `vc::edit::export_image(session, vc_export_config)` renders (always at the default,
+  full-res whole-image request — see below) and writes the result through a
+  `vc::io::stb_image_writer` it constructs itself. Both currently throwing shells.
+
+  `vc_export_config { path; write /* vc::io::write_config */ }` deliberately excludes
+  two things a first pass might expect:
+  - **No render-request field.** `vc_render_request`'s fields are either a no-op today
+    (no stage is resolution-aware yet) or an unsettled coordinate frame (§11) — a
+    resize/crop-on-export knob is a real future feature, but is designed once
+    resolution-awareness and the ROI frame actually land, not pre-baked into the config
+    shape now. `write` covers what export genuinely owns today (destination format);
+    it is the extensibility seam for quality/color-profile knobs later — new fields on
+    `vc::io::write_config`, no signature change.
+  - **No injected writer.** `i_image_writer` fails the substitutability test (§7): one
+    real implementation (`stb_image_writer`), no caller chooses between two — so
+    `export_image` constructs it directly, matching `main.cpp`'s existing read/write
+    round trip. Contrast `i_table` / `i_image_meta`, which DO clear that bar and stay
+    injected.
+
+  **Port discovery is an open question, deliberately not settled here.**
+  `render_image`'s body needs to feed `session.source()` onto the open input of the
+  graph `build_pipeline` returns and harvest its open output, but `vc_pipeline` exposes
+  no public port query today (§4.2's "no public stage accessor" is deliberate), and the
+  SPINE's ports are only knowable because `build_pipeline` currently assembles exactly
+  one `vc_passthrough_stage`. A general mechanism — a port-query API on `vc_pipeline`,
+  or `build_pipeline` returning pre-wired inputs alongside the pipeline — is left for
+  whoever writes `render_image`'s body, not pre-decided now.
 - **Run context [design NOW; B8/B9] / Cancellation** — `run()` takes a
   **`vc_render_context`** (see the note below) that carries a cooperative cancellation
   token, checked between stages and at checkpoints inside long stages. Interactive
@@ -1079,4 +1117,11 @@ material), which is why a pure serialization library (e.g. cereal) wouldn't repl
 - **`vc_render_context`** — the control-only host `run()` takes in place of a bare
   cancellation token: holds cancellation now, a progress seam [LATER]; never the
   cache (§8).
+- **`render_image`** — composes `build_pipeline` + `vc_pipeline::run()` into one
+  callable (§8); both a future preview path and `export_image` call it rather than
+  re-deriving the composition.
+- **`export_image` / `vc_export_config`** — renders via `render_image` and writes the
+  result to a file (§8). Not to be confused with the *portability* sense of "export"
+  (§4.4, §9) — an unrelated bundle format for transferring edit state, which shares
+  the word by accident, not by design.
 ```
