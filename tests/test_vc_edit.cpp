@@ -371,22 +371,20 @@ TEST_CASE("vc_persistent_edits_table: get misses, then hits after set()"
     CHECK(hit->size() == 1);
 }
 
-TEST_CASE("vc_pipeline: run() observes a PRE-CANCELLED run context and stops"
-          " (RED until run()'s cancellation check is written)") {
+TEST_CASE("vc_pipeline: run() observes a PRE-CANCELLED run context and"
+          " stops") {
     // Amendment (a): run(inputs, run_context) checks cancellation BETWEEN
     // stages. The setup mirrors the passing two-stage run() success case in
     // tests/test_vc_pipe.cpp EXACTLY — a two-stage a->b chain with valid,
     // exactly-covering open inputs — so the ONLY delta from a green run is the
-    // pre-cancelled context: red->green tracks cancellation and nothing else.
-    // Two stages (not one) so a pre-cancelled context must be observed under
-    // BOTH readings of "checked between stages" (before-each-stage AND
-    // strictly between a and b). Built with the raw vc_pipeline API, not
-    // build_pipeline, so this does not depend on that separate rep.
+    // pre-cancelled context. Two stages (not one) so a pre-cancelled context
+    // must be observed under BOTH readings of "checked between stages"
+    // (before-each-stage AND strictly between a and b). Built with the raw
+    // vc_pipeline API, not build_pipeline, so this does not depend on that
+    // separate rep.
     //
-    // ASSUMED POLICY: cancel => throw vc::vc_exception. This matches the guiding
-    // comment in vc_pipeline::run()'s body. run() currently returns {} (its body
-    // is a TODO(you) rep), so it does NOT throw today -> RED. A return-empty
-    // cancel policy is equally valid but must flip this expectation.
+    // POLICY: cancel => throw vc::vc_exception (vc_error_code::user_cancelled,
+    // via vc::throw_if_cancelled) — matches vc_pipeline::run()'s own body.
     vc::pipe::vc_pipeline pipe;
     pipe.add(std::make_unique<vc::pipe::vc_passthrough_stage>("a"));
     pipe.add(std::make_unique<vc::pipe::vc_passthrough_stage>("b"));
@@ -403,6 +401,5 @@ TEST_CASE("vc_pipeline: run() observes a PRE-CANCELLED run context and stops"
     src.cancel(); // pre-cancelled before run() is even entered
     const vc::pipe::vc_render_context run_context{src.token()};
 
-    CHECK_THROWS_AS(pipe.run(std::move(inputs), run_context), // TODO(you): run()
-                    vc::vc_exception);
+    CHECK_THROWS_AS(pipe.run(std::move(inputs), run_context), vc::vc_exception);
 }

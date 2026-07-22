@@ -74,7 +74,6 @@ bool produces_output(
 std::vector<vc::bench::bench_case> micro_cases() {
     std::vector<vc::bench::bench_case> cases;
 
-    // ---- passthrough: the real rung ladder (rung 1 vs rung 2a) ----
     // NOT baseline-eligible YET: both rungs copy a vc_image whose pixels_ is a
     // null shared_ptr under the stubbed vc_image_info::element_count() (still a
     // TODO(you) rep, so zeros()/with_fill() allocate a 0-element buffer), so
@@ -135,7 +134,6 @@ std::vector<vc::bench::bench_case> micro_cases() {
              });
          }});
 
-    // ---- grayscale: wired + ready, NOT baselined (stubbed process today) ----
     cases.push_back(
         {"grayscale", /*baseline_eligible=*/false,
          [](ankerl::nanobench::Bench& bench) {
@@ -160,7 +158,6 @@ std::vector<vc::bench::bench_case> micro_cases() {
              });
          }});
 
-    // ---- mean_brightness: wired + ready, NOT baselined (stubbed today) ----
     cases.push_back(
         {"mean_brightness", /*baseline_eligible=*/false,
          [](ankerl::nanobench::Bench& bench) {

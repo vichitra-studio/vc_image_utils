@@ -84,8 +84,6 @@ class vc_image {
         return meta_.element_count();
     }
 
-    // ---- pixels (read-only) ----
-
     // Read-only handle to the pixel buffer. Callers read typed data through
     // pixels()->as<T>() (span<const T>) and locate elements with
     // meta().index(x, y, ch). There is deliberately no mutable counterpart.

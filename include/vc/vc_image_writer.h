@@ -69,8 +69,6 @@ class vc_image_writer {
         return meta_.element_count();
     }
 
-    // ---- metadata (composed descriptor field) ----
-
     // Attach a ready-built i_image_meta to this image's descriptor before
     // seal(). Written plumbing, not a rep: the writer composes a READY
     // vc_image_info and never parses EXIF itself — some loader/backend
@@ -100,8 +98,6 @@ class vc_image_writer {
         assert(pixels_ && "vc_image_writer used after seal() (spent writer)");
         return pixels_->as<T>();
     }
-
-    // ---- seal: the one-way transition to the immutable form ----
 
     // Consume this writer and hand back an immutable vc_image over the SAME
     // pixels — no copy. The buffer is MOVED and its element type qualified to

@@ -24,8 +24,8 @@ namespace vc::pipe {
 // revisited once the real payload set is known.
 //
 // This class is written in full — there is no learning rep in hand-writing an
-// any_cast. The reps live in the stage process() bodies and the pipeline
-// validate()/run() (which are TODO(you)).
+// any_cast. The reps live in the stage process() bodies (vc_pipeline's own
+// validate()/run() are done).
 class vc_pipe_packet {
   public:
     vc_pipe_packet() = default;

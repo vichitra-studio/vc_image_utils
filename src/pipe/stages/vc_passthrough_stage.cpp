@@ -6,7 +6,7 @@
 #include <utility>
 
 #include "vc/pipe/vc_pipe_context.h"
-#include "vc/pipe/vc_pipe_contract_builder.h"
+#include "vc/pipe/vc_pipe_contract.h"
 #include "vc/pipe/vc_pipe_packet.h"
 #include "vc/vc_image.h"
 
@@ -22,11 +22,11 @@ const char* vc_passthrough_stage::kind() const {
     return "passthrough";
 }
 
-void vc_passthrough_stage::declare(contract_builder& contract) const {
+void vc_passthrough_stage::declare(vc_pipe_contract& contract) const {
     // One image in, one image out. The typed slot descriptors carry BOTH the
-    // slot name and its payload type — add_*_slot needs nothing else.
-    // `contract` is a contract_builder: this typed add is the whole surface a
-    // stage sees.
+    // slot name and its payload type — add_*_slot needs nothing else. By
+    // convention (no longer enforced by a write-only view) a stage's
+    // declare() only ever calls add_input_slot/add_output_slot on `contract`.
     contract.add_input_slot(slots::in);
     contract.add_output_slot(slots::out);
 }

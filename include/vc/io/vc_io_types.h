@@ -10,7 +10,7 @@
 
 namespace vc::io {
 
-using path = std::filesystem::path; // filesystem path
+using path = std::filesystem::path;
 
 enum class vc_image_format : std::uint8_t {
     png,  // PNG (lossless, supports all channel counts)

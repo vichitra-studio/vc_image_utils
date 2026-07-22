@@ -46,7 +46,6 @@ using packet_map =
 std::vector<vc::bench::bench_case> macro_cases() {
     std::vector<vc::bench::bench_case> cases;
 
-    // ---- single-stage representative pipeline through run() (rung 2b) ----
     // Assembled once (add/connect are implemented); run() is driven per
     // iteration because it is a move-SINK — it consumes its inputs map, so a
     // fresh map is built each time (that construction + move IS part of the

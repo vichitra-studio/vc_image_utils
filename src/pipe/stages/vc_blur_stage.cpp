@@ -7,7 +7,7 @@
 
 #include "vc/edit/vc_edit_session.h"
 #include "vc/pipe/vc_pipe_context.h"
-#include "vc/pipe/vc_pipe_contract_builder.h"
+#include "vc/pipe/vc_pipe_contract.h"
 #include "vc/pipe/vc_pipe_packet.h"
 #include "vc/vc_error_code.h"
 #include "vc/vc_exception.h"
@@ -23,7 +23,7 @@ const char* vc_blur_stage::kind() const {
     return "blur";
 }
 
-void vc_blur_stage::declare(contract_builder& contract) const {
+void vc_blur_stage::declare(vc_pipe_contract& contract) const {
     // Same contract shape as passthrough: one image in, one image out. The blur
     // reads a neighbourhood but that is a process() concern, not a contract one.
     contract.add_input_slot(slots::in);

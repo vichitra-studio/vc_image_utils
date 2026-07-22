@@ -45,7 +45,7 @@ class vc_pipe_context {
     // A single stage's packet map, keyed by bare slot_name — distinct from
     // vc_pipeline's graph-wide render_io_map (vc_pipe_types.h), which is
     // keyed by stage_port because it spans every stage at once.
-    using packet_map = std::unordered_map<slot_name, vc_pipe_packet>;
+    using slot_packet_map = std::unordered_map<slot_name, vc_pipe_packet>;
 
     vc_pipe_context() = default;
 
@@ -56,7 +56,7 @@ class vc_pipe_context {
     // reaches a stage author. `run_context` defaults to a never-cancelled
     // context, so every existing single-argument call site (all of them,
     // before this milestone) is unaffected.
-    explicit vc_pipe_context(packet_map inputs, vc_render_context run_context = {})
+    explicit vc_pipe_context(slot_packet_map inputs, vc_render_context run_context = {})
         : inputs_(std::move(inputs)), run_context_(std::move(run_context)) {
     }
 
@@ -88,7 +88,7 @@ class vc_pipe_context {
     // Rvalue-qualified: the runner calls it on `std::move(ctx)` after
     // process(), moving the packets out — a stage's outputs are read exactly
     // once.
-    packet_map take_outputs() && {
+    slot_packet_map take_outputs() && {
         return std::move(outputs_);
     }
 
@@ -100,8 +100,8 @@ class vc_pipe_context {
     const vc_pipe_packet& get_input(const slot_name& name) const;
     void set_output(const slot_name& name, vc_pipe_packet packet);
 
-    packet_map inputs_;
-    packet_map outputs_;
+    slot_packet_map inputs_;
+    slot_packet_map outputs_;
     vc_render_context run_context_;
 };
 

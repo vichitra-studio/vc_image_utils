@@ -5,6 +5,7 @@
 
 #include <string>
 
+#include "vc/pipe/vc_render_context.h"
 #include "vc/vc_exception.h"
 
 namespace vc {
@@ -20,6 +21,13 @@ vc_error_code to_error_code(int value) {
     case vc_error_code::decode_error:
     case vc_error_code::encode_error:
     case vc_error_code::invalid_argument:
+    case vc_error_code::stage_not_found:
+    case vc_error_code::stage_already_added:
+    case vc_error_code::slot_not_found:
+    case vc_error_code::slot_already_declared:
+    case vc_error_code::pipe_connection_mismatch:
+    case vc_error_code::pipe_input_already_connected:
+    case vc_error_code::user_cancelled:
         return static_cast<vc_error_code>(value);
     }
     throw vc_exception(vc_error_code::invalid_argument,
@@ -39,8 +47,34 @@ vc::utils::string to_string(vc_error_code code) noexcept {
         return "encode_error";
     case vc_error_code::invalid_argument:
         return "invalid_argument";
+    case vc_error_code::stage_not_found:
+        return "stage_not_found";
+    case vc_error_code::stage_already_added:
+        return "stage_already_added";
+    case vc_error_code::slot_not_found:
+        return "slot_not_found";
+    case vc_error_code::slot_already_declared:
+        return "slot_already_declared";
+    case vc_error_code::pipe_connection_mismatch:
+        return "pipe_connection_mismatch";
+    case vc_error_code::pipe_input_already_connected:
+        return "pipe_input_already_connected";
+    case vc_error_code::user_cancelled:
+        return "user_cancelled";
     }
     return "unknown_error_code";
+}
+
+void throw_if_cancelled(const pipe::vc_render_context& run_context) {
+    if (run_context.cancelled()) {
+        throw vc_exception(vc_error_code::user_cancelled,
+                           "Operation cancelled by user");
+    }
+}
+
+void throw_pipe_run_error(const std::string& message) {
+    throw vc_exception(vc_error_code::invalid_argument,
+                       "vc_pipeline::run() " + message);
 }
 
 } // namespace vc

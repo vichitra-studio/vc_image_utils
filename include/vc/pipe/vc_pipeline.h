@@ -3,10 +3,12 @@
 
 #pragma once
 
+#include <optional>
 #include <utility>
 #include <vector>
 
 #include "vc/pipe/i_pipe.h"
+#include "vc/pipe/vc_pipe_contract.h"
 #include "vc/pipe/vc_pipe_types.h"
 #include "vc/pipe/vc_render_context.h"
 
@@ -20,8 +22,6 @@ namespace vc::pipe {
 // Lifecycle: assemble (add + connect) -> validate() -> run().
 class vc_pipeline {
   public:
-    // ---- assemble (implemented) ----
-
     // Take ownership of a stage. The stage carries its OWN name (i_pipe::name),
     // so there is no separate name argument. Returns that name so wiring can
     // refer to the stage without restating the string literal:
@@ -54,8 +54,6 @@ class vc_pipeline {
                        .to = stage_port{std::move(to_stage), to_slot}});
     }
 
-    // ---- validate (TODO(you)) ----
-    //
     // Run every pipe's declare() to gather its slot contracts, then check every
     // connection's TYPE contract: the upstream output slot's declared type must
     // equal the downstream input slot's expected type. Throw vc::vc_exception
@@ -66,8 +64,6 @@ class vc_pipeline {
     // contract (vc_image_spec) is [LATER]; only the type layer is checked now.
     void validate() const;
 
-    // ---- run (TODO(you)) ----
-    //
     // The MAP VARIANT (Sec 12.2). Inject the caller's packets onto the graph's
     // OPEN INPUTS (input slots no connection feeds), execute stages in
     // insertion order, then harvest the OPEN OUTPUTS (output slots no
@@ -107,10 +103,37 @@ class vc_pipeline {
         stage_port to;   // downstream stage's input port
     };
 
-    const i_pipe* find_stage(const stage_name& name) const;
+    // The upstream (stage, slot) wired into this input port, or nullopt if
+    // nothing connects to it (an open input, fed by run()'s caller instead).
+    [[nodiscard]] std::optional<stage_port>
+    upstream_of(const stage_port& to_port) const;
+
+    // Whether any connection consumes this output port (so it is NOT open).
+    [[nodiscard]] bool has_consumer(const stage_port& from_port) const;
+
+    // `input_slots` is one stage's declared input slot names
+    // (contract.input_slot_names()) — returns just the OPEN ones (no
+    // connection feeds them), as (stage, slot) ports. Named distinctly from
+    // run()'s local open_input_ports/open_output_ports vectors (which these
+    // feed) so nothing shadows a member function of the same name.
+    stage_port_list
+    find_open_inputs(const stage_name& stage,
+                     const std::vector<slot_name>& input_slots) const;
+
+    // Mirrors find_open_inputs for the output side (contract.output_slot_
+    // names()), using has_consumer() instead of upstream_of().
+    stage_port_list
+    find_open_outputs(const stage_name& stage,
+                      const std::vector<slot_name>& output_slots) const;
+
+    // The named stage's contract, or throw stage_not_found. A private query,
+    // like vc_pipe_contract's has_slot()/find_slot_type() — used only by
+    // validate(), never exposed on the public surface.
+    const vc_pipe_contract& require_contract(const stage_name& name) const;
 
     std::vector<stage_ptr> stages_;
     std::vector<connection> connections_;
+    stage_contract_map contracts_;
 };
 
 } // namespace vc::pipe

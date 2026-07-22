@@ -10,10 +10,14 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "vc/pipe/vc_pipe_packet.h"
 
 namespace vc::pipe {
+
+class vc_pipe_contract;
+struct stage_port;
 
 // A slot and a stage are both identified at the framework boundary by a stable
 // text name — the form a CLI or config file can produce (docs/pipe_design.md
@@ -25,13 +29,28 @@ using slot_name = std::string;
 using stage_name = std::string;
 using slot_index = std::uint32_t;
 
+// The pipeline-level, graph-wide map keyed by stage_port: vc_pipeline::run()'s
+// open-inputs argument and open-outputs return value. Distinct from a single
+// stage's own input/output maps (vc_pipe_context), which are keyed by bare
+// slot_name because they only ever concern one stage at a time — a
+// stage_port's extra stage field only matters once packets are being handed
+// across the whole graph, which is exactly what run() does.
+using render_io_map = std::unordered_map<stage_port, vc_pipe_packet>;
+
+using stage_contract_map = std::unordered_map<stage_name, vc_pipe_contract>;
+
+// A plain list of graph coordinates — vc_pipeline's open-input/open-output
+// port lists (find_open_inputs()/find_open_outputs(), vc_pipeline.cpp), used
+// enough times there to be worth a name of its own.
+using stage_port_list = std::vector<stage_port>;
+
 // A slot belongs to one direction. Input and output are SEPARATE name
 // namespaces (Sec 4.2): the same name may appear once as an input and once as
 // an output without colliding. (Which vector of a contract holds a slot already
 // encodes its direction; this enum names the concept for introspection.)
 enum class slot_direction : std::uint8_t {
-    input,  // data the pipe consumes
-    output, // data the pipe produces
+    input,
+    output,
 };
 
 // The one AUTHORING representation of a slot: a name bonded to its payload
@@ -99,15 +118,3 @@ template <> struct std::hash<vc::pipe::stage_port> {
         return p.hash();
     }
 };
-
-namespace vc::pipe {
-
-// The pipeline-level, graph-wide map keyed by stage_port: vc_pipeline::run()'s
-// open-inputs argument and open-outputs return value. Distinct from a single
-// stage's own input/output maps (vc_pipe_context), which are keyed by bare
-// slot_name because they only ever concern one stage at a time — a
-// stage_port's extra stage field only matters once packets are being handed
-// across the whole graph, which is exactly what run() does.
-using render_io_map = std::unordered_map<stage_port, vc_pipe_packet>;
-
-} // namespace vc::pipe

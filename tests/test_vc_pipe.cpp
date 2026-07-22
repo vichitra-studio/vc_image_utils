@@ -17,7 +17,6 @@
 #include "vc/pipe/stages/vc_passthrough_stage.h"
 #include "vc/pipe/vc_pipe_context.h"
 #include "vc/pipe/vc_pipe_contract.h"
-#include "vc/pipe/vc_pipe_contract_builder.h"
 #include "vc/pipe/vc_pipe_packet.h"
 #include "vc/pipe/vc_pipe_types.h"
 #include "vc/pipe/vc_pipeline.h"
@@ -110,8 +109,11 @@ TEST_CASE("vc_pipe_contract: records declared input/output slot types") {
     CHECK(c.input_slot_type("a") == std::type_index(typeid(int)));
     CHECK(c.output_slot_type("b") == std::type_index(typeid(double)));
 
-    // Undeclared slot -> throws (this project's error channel), not a nullopt.
-    CHECK_THROWS_AS(c.input_slot_type("nope"), vc::vc_exception);
+    // Undeclared slot -> throws (this project's error channel), not a
+    // nullopt. input_slot_type() is [[nodiscard]] (there's never a reason to
+    // call it and ignore the result normally); the (void) here is that one
+    // deliberate exception, testing only the throw.
+    CHECK_THROWS_AS((void)c.input_slot_type("nope"), vc::vc_exception);
 
     // run() finds open ports by subtracting connected ports from the declared
     // slot NAMES (types come from the *_slot_type() lookups above), so the
@@ -123,6 +125,22 @@ TEST_CASE("vc_pipe_contract: records declared input/output slot types") {
     const auto out_names = c.output_slot_names();
     REQUIRE(out_names.size() == 1);
     CHECK(out_names[0] == "b");
+}
+
+TEST_CASE("vc_pipe_contract: rejects a second slot with the same name in the"
+          " same direction") {
+    vc::pipe::vc_pipe_contract c;
+    c.add_input_slot(vc::pipe::slot<int>{"a"});
+    CHECK_THROWS_AS(c.add_input_slot(vc::pipe::slot<int>{"a"}),
+                    vc::vc_exception);
+
+    c.add_output_slot(vc::pipe::slot<double>{"b"});
+    CHECK_THROWS_AS(c.add_output_slot(vc::pipe::slot<double>{"b"}),
+                    vc::vc_exception);
+
+    // Input and output are separate namespaces (Sec 4.2) — the same name
+    // reused across directions is NOT a duplicate.
+    CHECK_NOTHROW(c.add_output_slot(vc::pipe::slot<int>{"a"}));
 }
 
 TEST_CASE("stage_port: a typed-slot ctor builds a coordinate that compares + "
@@ -139,6 +157,15 @@ TEST_CASE("stage_port: a typed-slot ctor builds a coordinate that compares + "
     std::unordered_map<vc::pipe::stage_port, int> m;
     m[p1] = 5;
     CHECK(m.at(p2) == 5); // p2 hashes/compares equal to p1
+}
+
+TEST_CASE("vc_pipeline: add() rejects a second stage with an already-used"
+          " name") {
+    vc::pipe::vc_pipeline pipe;
+    pipe.add(std::make_unique<vc::pipe::vc_passthrough_stage>("a"));
+    CHECK_THROWS_AS(
+        pipe.add(std::make_unique<vc::pipe::vc_passthrough_stage>("a")),
+        vc::vc_exception);
 }
 
 TEST_CASE("vc_pipeline: add() returns the stage name for typo-safe wiring") {
@@ -179,9 +206,8 @@ TEST_CASE("vc_passthrough_stage: carries a vc_image through its typed slots") {
 
 TEST_CASE("vc_passthrough_stage: declares one image-in, one image-out slot") {
     vc::pipe::vc_pipe_contract c;
-    vc::pipe::contract_builder b{c};
     const vc::pipe::vc_passthrough_stage stage{"pass"};
-    stage.declare(b);
+    stage.declare(c);
 
     CHECK(c.input_slot_type("in") == std::type_index(typeid(vc::vc_image)));
     CHECK(c.output_slot_type("out") == std::type_index(typeid(vc::vc_image)));
@@ -205,9 +231,8 @@ TEST_CASE("i_pipe: name() is per-instance, kind() is per-type") {
 
 TEST_CASE("vc_grayscale_stage: declares rgb-in -> grey-out (image->image)") {
     vc::pipe::vc_pipe_contract c;
-    vc::pipe::contract_builder b{c};
     const vc::pipe::vc_grayscale_stage stage{"grey"};
-    stage.declare(b); // TODO(you): vc_grayscale_stage::declare()
+    stage.declare(c); // TODO(you): vc_grayscale_stage::declare()
 
     // RED until declare() is written: the lookup throws on the undeclared slot,
     // which doctest reports as a failure — exactly the "fail loudly"
@@ -219,9 +244,8 @@ TEST_CASE("vc_grayscale_stage: declares rgb-in -> grey-out (image->image)") {
 TEST_CASE("vc_mean_brightness_stage: declares a NON-IMAGE (double) output"
           " — the heterogeneous type contract this design exists for") {
     vc::pipe::vc_pipe_contract c;
-    vc::pipe::contract_builder b{c};
     const vc::pipe::vc_mean_brightness_stage stage{"mean"};
-    stage.declare(b); // TODO(you): vc_mean_brightness_stage::declare()
+    stage.declare(c); // TODO(you): vc_mean_brightness_stage::declare()
 
     CHECK(c.input_slot_type("image") == std::type_index(typeid(vc::vc_image)));
     // The point of this stage: a NON-image (double) output slot.
@@ -229,18 +253,19 @@ TEST_CASE("vc_mean_brightness_stage: declares a NON-IMAGE (double) output"
 }
 
 TEST_CASE("vc_pipeline: validate() accepts a matched image->image chain") {
-    // NOTE: with validate() still an empty TODO(you) stub this passes for the
-    // WRONG reason (nothing is checked). It self-corrects: the moment
-    // validate() is written but the stages' declare() are not, an empty
-    // contract makes it throw on the missing slot. The mismatch case below is
-    // the real red driver.
+    // RED until vc_grayscale_stage::declare() is written: validate() itself
+    // is done, but grey's declare() is still a TODO(you) stub, so it never
+    // declares the "grey" output slot validate() looks up here — the throw
+    // this produces today is "no output slot named 'grey' was declared", not
+    // a connection type mismatch. The mismatch case below is the real driver
+    // for validate()'s own type-comparison logic.
     vc::pipe::vc_pipeline pipe;
     pipe.add(std::make_unique<vc::pipe::vc_grayscale_stage>("grey"));
     pipe.add(std::make_unique<vc::pipe::vc_mean_brightness_stage>("mean"));
     pipe.connect(
         "grey", vc::pipe::vc_grayscale_stage::slots::grey, "mean",
         vc::pipe::vc_mean_brightness_stage::slots::image); // image->img
-    CHECK_NOTHROW(pipe.validate()); // TODO(you): declares + validate()
+    CHECK_NOTHROW(pipe.validate()); // TODO(you): vc_grayscale_stage::declare()
 }
 
 TEST_CASE("vc_pipeline: validate() rejects a type-mismatched connection") {
@@ -250,7 +275,22 @@ TEST_CASE("vc_pipeline: validate() rejects a type-mismatched connection") {
     // Wire mean's `double` output into grayscale's image input -> mismatch.
     pipe.connect("mean", vc::pipe::vc_mean_brightness_stage::slots::mean,
                  "grey", vc::pipe::vc_grayscale_stage::slots::rgb);
-    CHECK_THROWS_AS(pipe.validate(), vc::vc_exception); // TODO(you): validate()
+    CHECK_THROWS_AS(pipe.validate(), vc::vc_exception);
+}
+
+TEST_CASE("vc_pipeline: validate() rejects two connections wired into the"
+          " same input slot") {
+    // A declared input slot holds exactly one packet, so b.in can't be fed
+    // by both a1 and a2 — this is a malformed graph, not a merge.
+    vc::pipe::vc_pipeline pipe;
+    pipe.add(std::make_unique<vc::pipe::vc_passthrough_stage>("a1"));
+    pipe.add(std::make_unique<vc::pipe::vc_passthrough_stage>("a2"));
+    pipe.add(std::make_unique<vc::pipe::vc_passthrough_stage>("b"));
+    pipe.connect("a1", vc::pipe::vc_passthrough_stage::slots::out, "b",
+                 vc::pipe::vc_passthrough_stage::slots::in);
+    pipe.connect("a2", vc::pipe::vc_passthrough_stage::slots::out, "b",
+                 vc::pipe::vc_passthrough_stage::slots::in); // same to-port
+    CHECK_THROWS_AS(pipe.validate(), vc::vc_exception);
 }
 
 TEST_CASE("vc_pipeline: run() drives a packet through a two-stage chain") {
@@ -266,12 +306,53 @@ TEST_CASE("vc_pipeline: run() drives a packet through a two-stage chain") {
         vc::pipe::stage_port{"a", vc::pipe::vc_passthrough_stage::slots::in},
         vc::pipe::vc_pipe_packet{vc::vc_image::zeros<vc::buf_f32>(2, 2, 3)});
 
-    const auto outputs = pipe.run(std::move(inputs)); // TODO(you): run()
+    const auto outputs = pipe.run(std::move(inputs));
 
     const auto it = outputs.find(
         vc::pipe::stage_port{"b", vc::pipe::vc_passthrough_stage::slots::out});
     REQUIRE(it != outputs.end());
     CHECK(it->second.type() == typeid(vc::vc_image));
+}
+
+TEST_CASE("vc_pipeline: run() fans one output out to TWO downstream inputs"
+          " without corrupting either copy") {
+    // a.out feeds both b.in and c.in — a legitimate fan-out (nothing
+    // restricts a connection's `from` to a single use). Regression test for
+    // the bug where the first consumer's std::move left the second with an
+    // empty (moved-from) packet.
+    vc::pipe::vc_pipeline pipe;
+    pipe.add(std::make_unique<vc::pipe::vc_passthrough_stage>("a"));
+    pipe.add(std::make_unique<vc::pipe::vc_passthrough_stage>("b"));
+    pipe.add(std::make_unique<vc::pipe::vc_passthrough_stage>("c"));
+    pipe.connect("a", vc::pipe::vc_passthrough_stage::slots::out, "b",
+                 vc::pipe::vc_passthrough_stage::slots::in);
+    pipe.connect("a", vc::pipe::vc_passthrough_stage::slots::out, "c",
+                 vc::pipe::vc_passthrough_stage::slots::in);
+
+    std::unordered_map<vc::pipe::stage_port, vc::pipe::vc_pipe_packet> inputs;
+    inputs.emplace(
+        vc::pipe::stage_port{"a", vc::pipe::vc_passthrough_stage::slots::in},
+        vc::pipe::vc_pipe_packet{vc::vc_image::zeros<vc::buf_f32>(3, 2, 3)});
+
+    const auto outputs = pipe.run(std::move(inputs));
+
+    const auto b_it = outputs.find(
+        vc::pipe::stage_port{"b", vc::pipe::vc_passthrough_stage::slots::out});
+    const auto c_it = outputs.find(
+        vc::pipe::stage_port{"c", vc::pipe::vc_passthrough_stage::slots::out});
+    REQUIRE(b_it != outputs.end());
+    REQUIRE(c_it != outputs.end());
+
+    // Both branches must see the SAME, intact image — not one moved-from and
+    // the other valid.
+    CHECK(b_it->second.has_value());
+    CHECK(c_it->second.has_value());
+    const auto& b_image = b_it->second.get<vc::vc_image>();
+    const auto& c_image = c_it->second.get<vc::vc_image>();
+    CHECK(b_image.width() == 3);
+    CHECK(b_image.height() == 2);
+    CHECK(c_image.width() == 3);
+    CHECK(c_image.height() == 2);
 }
 
 TEST_CASE("vc_pipeline: run() rejects an input map that does not cover exactly"
@@ -293,8 +374,7 @@ TEST_CASE("vc_pipeline: run() rejects an input map that does not cover exactly"
         vc::pipe::stage_port{"b", vc::pipe::vc_passthrough_stage::slots::in},
         vc::pipe::vc_pipe_packet{vc::vc_image::zeros<vc::buf_f32>(2, 2, 3)});
 
-    CHECK_THROWS_AS(pipe.run(std::move(inputs)),
-                    vc::vc_exception); // TODO(you): run()
+    CHECK_THROWS_AS(pipe.run(std::move(inputs)), vc::vc_exception);
 }
 
 TEST_CASE("vc_pipeline: run() injects and harvests MULTIPLE open ports") {
@@ -313,7 +393,7 @@ TEST_CASE("vc_pipeline: run() injects and harvests MULTIPLE open ports") {
         vc::pipe::stage_port{"b", vc::pipe::vc_passthrough_stage::slots::in},
         vc::pipe::vc_pipe_packet{vc::vc_image::zeros<vc::buf_f32>(4, 4, 3)});
 
-    const auto outputs = pipe.run(std::move(inputs)); // TODO(you): run()
+    const auto outputs = pipe.run(std::move(inputs));
 
     CHECK(outputs.size() == 2);
     CHECK(outputs.count(vc::pipe::stage_port{

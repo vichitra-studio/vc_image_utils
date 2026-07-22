@@ -997,3 +997,111 @@ correctness fix. The §12.6 surface is already more than sufficient to write `va
 stages against; nothing downstream is blocked on this closure either way.
 
 This resolves the §12.6 `[OPEN]` item: **deferred, by choice.**
+
+### 12.8 `contract_builder` removed (2026-07-22)
+
+**Reverses the §12.6 `contract_builder` decision.** `vc_pipe_contract_builder` (the narrow,
+write-only, non-copyable view described in §12.6/§12.7) is deleted. `i_pipe::declare()` now takes
+`vc_pipe_contract&` directly (`include/vc/pipe/vc_pipe_contract_builder.h` is gone; every
+`declare()` override, `vc_pipeline::validate()`, and the pipe tests were updated to pass the
+contract itself).
+
+The §12.6/§12.7 rationale for the view — "no name-keyed method sits on the author-facing surface,"
+achieved without a `friend` — stands as a documented, considered position; it was not wrong, it was
+traded off. The type-safety split it enforced (an author can only *add* slots; only
+`vc_pipeline::validate()`/`run()` can *query* them by name) is now a **convention**, not a
+compile-time guarantee: `declare()`'s doc comment on `vc_pipe_contract` (`vc_pipe_contract.h`) says
+a stage author is expected to call only `add_input_slot`/`add_output_slot`, but nothing stops a
+`declare()` override from also calling `input_slot_type()` or the like. §12.7's own closure
+question — is this the load-bearing residual-string-surface concern, deferred "until a real caller
+reveals friction"? — did not materialize the friction; the removal is a straightforward complexity
+cut (one less type, one less indirection in every `declare()` call site), made directly by the
+project owner.
+
+**Resolved (same day):** a stage's contract is built ONCE, cached on `vc_pipeline` itself. `add()`
+calls `declare()` right after taking ownership of the stage (the object is fully constructed by
+then, so virtual dispatch is safe — unlike calling `declare()` from inside `i_pipe`'s own
+constructor, which cannot reach a derived override) and stores the result in `contracts_`
+(`stage_contract_map`, `vc_pipe_types.h`); `validate()` and `run()` both read it, neither rebuilds
+it. This is why `vc_pipeline.h` now `#include`s `vc_pipe_contract.h` directly rather than relying on
+the forward declaration in `vc_pipe_types.h`: `contracts_` is a genuine value member
+(`std::unordered_map<stage_name, vc_pipe_contract>`), and `unordered_map` — unlike `vector`/`list`/
+`forward_list` — was not given the C++17 incomplete-value-type relaxation, so `vc_pipe_contract`
+must be complete wherever `vc_pipeline`'s own special members (ctor/dtor) get instantiated, not just
+in the `.cpp` that implements its methods.
+
+`validate()` also now rejects a second connection wired into an already-connected input slot
+(`vc_error_code::pipe_input_already_connected`) — a declared input slot holds exactly one packet,
+so two connections targeting the same `(stage, slot)` port is a malformed graph, not a merge/fan-in
+feature; a real list-valued fan-in slot is the still-undecided idea from the merge-stage discussion,
+not two independent connections into a scalar slot.
+
+### 12.9 Graph representation for the non-linear runner — evaluated, deferred (2026-07-22)
+
+**The bug this section starts from, and its fix.** `vc_pipeline::run()`'s per-stage input-gathering
+step read a shared upstream value out of `outputs` via `std::move`. `outputs` lives for the whole
+`run()` call, and nothing prevents fan-out (one output feeding two or more downstream inputs — no
+restriction analogous to the §12.8 input-side duplicate-connection rejection applies to the output
+side, nor should it: fan-out is legitimate). The first consumer's move left the map's entry
+moved-from; a second consumer reading the same port later got an empty `vc_pipe_packet` and threw
+`"requested type does not match the stored payload type"` — a real, if misleadingly-labelled,
+failure. **Fixed** with `remaining_reads` (`std::unordered_map<stage_port, std::size_t>`,
+`vc_pipeline.cpp`): built fresh at the top of `run()` by counting each `from` port's occurrences in
+`connections_`, then decremented on every read; only the read that brings the count to zero moves,
+every earlier one copies. Copying is cheap for the actual payload (`vc_image` holds its buffer via
+`shared_ptr` — a refcount bump, not a pixel copy). This is local to one `run()` call, exactly like
+`open_input_ports`/`open_output_ports` already are — nothing persistent, nothing that can go stale.
+Regression test: `tests/test_vc_pipe.cpp`, *"run() fans one output out to TWO downstream inputs
+without corrupting either copy"* — empirically confirmed to fail (with the exact exception above)
+against the pre-fix code, and pass against the fix.
+
+**The broader question this bug provoked: should `vc_pipeline`'s storage become a real graph/node
+structure**, instead of the current `stages_` / `connections_` / `contracts_` triad plus scattered
+linear-scan helpers (`upstream_of`, `has_consumer`)? Evaluated in depth; **deferred, not adopted**.
+The reasoning, for whoever picks this up when the non-linear DAG runner (§7, §8.2) actually gets
+built:
+
+- **Scale kills the performance argument outright.** A `std::vector` linear scan is cache-friendly —
+  contiguous memory, no pointer chasing, hardware prefetch stays ahead of a sequential read. An
+  `unordered_map` lookup pays a hash (reading every byte of both strings in a `stage_port`) plus at
+  least one pointer-chase into a separately heap-allocated, likely-cold node. At this pipeline's real
+  scale (single-digit to a few dozen stages/connections), the vector's better constant factors beat
+  the map's better asymptotics — Big-O describes the trend as N→∞, and N here never gets there.
+- **A naive "embed adjacency in each node" design was tried and rejected in discussion** — a
+  `stage_node` holding its own `upstream`/`downstream` maps stores each edge's data *twice* (once at
+  the source's `downstream`, once at the destination's `upstream`), which is the exact "same fact,
+  two places, can silently disagree" shape behind several of this session's real bugs (the harvest-
+  key mismatch, the `open_ports` insert-vs-assign regression, the missing `break` in the fan-in
+  lookup). A correct graph representation keeps each edge's data in exactly one place (a canonical
+  edge list — which is just `connections_`, already) and represents direction via *indices* into
+  that one place, not copies of it.
+- **This graph is not a tree, and "start at the root" doesn't fit it.** A stage with two-or-more
+  input slots fed by different upstream stages (a merge/compose stage — the still-undecided
+  list-valued-fan-in idea referenced above, or simpler, just two ordinary scalar input slots) has
+  more than one parent; independent open-input stages give more than one simultaneous root. "Start
+  at the root and follow direct node pointers" is really Kahn's-algorithm-style topological
+  traversal over a DAG with possibly many roots — which is precisely the "Non-linear DAG runner"
+  line already sitting in §8.2's `[LATER]` list, not a data-structure preference. Adopting it is a
+  genuine **behaviour** change (execution order becomes graph-derived instead of `add()`-order-
+  specified, and needs its own new concerns — cycle detection chief among them, since a malformed
+  graph could otherwise stall a ready-queue scheduler forever) — a bigger, deliberate step than a
+  storage refactor, and one to take deliberately, not as a side effect of one.
+- **Adjacency matrix vs. adjacency list, evaluated and both set aside for now.** A matrix is `O(V²)`
+  regardless of how sparse the real wiring is, and — worse — a plain `stage × stage` cell can't
+  represent this graph's actual edges, which are **slot-to-slot**, not stage-to-stage (two different
+  slot-level connections can exist between the same pair of stages); representing that needs a
+  matrix-of-lists, which is an adjacency list wearing a matrix's clothes, minus the one thing a
+  matrix is actually good at (`O(1)` generic "are these two connected", a query this runner never
+  makes — it only ever asks "who feeds *this specific slot*"). An adjacency list grouped by source
+  node is the textbook-correct structure for a sparse, typed-edge graph like this one — and is not
+  fundamentally different from what already exists: `connections_` **is** a minimal (ungrouped)
+  adjacency list. Grouping it by source node is a real, valid upgrade — the day E is large enough,
+  or the day the topological runner needs to walk "all of this node's downstream neighbours"
+  repeatedly during traversal, for the grouping to pay for itself. Neither condition holds today.
+
+**The takeaway, for next time this gets reopened:** don't rebuild the storage speculatively. The
+concrete problem (fan-out corrupting a shared value) got a concrete, local, zero-new-persistent-
+state fix. The day the non-linear/topological runner is actually being built is the day a real
+graph representation (canonical edge list + adjacency built as *indices*, grouped by source node;
+per-node status for cycle detection during traversal) earns its cost — build it then, informed by
+that runner's actual traversal pattern, not preemptively now.

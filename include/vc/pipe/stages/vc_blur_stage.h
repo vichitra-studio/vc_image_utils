@@ -62,7 +62,7 @@ class vc_blur_stage : public i_pipe {
     };
 
     const char* kind() const override;
-    void declare(contract_builder& contract) const override;
+    void declare(vc_pipe_contract& contract) const override;
     void process(vc_pipe_context& context) const override;
 
     // The resolved config this instance was built with (read in process()).

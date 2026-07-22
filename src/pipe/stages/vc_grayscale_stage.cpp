@@ -6,7 +6,7 @@
 #include <utility>
 
 // TODO(you): you will need these to implement declare()/process():
-//   #include "vc/pipe/vc_pipe_contract_builder.h"  // declare() adds slots here
+//   #include "vc/pipe/vc_pipe_contract.h"  // declare() adds slots here
 //   #include "vc/pipe/vc_pipe_context.h"
 //   #include "vc/pipe/vc_pipe_packet.h"
 //   #include "vc/vc_image.h"
@@ -22,7 +22,7 @@ const char* vc_grayscale_stage::kind() const {
     return "grayscale";
 }
 
-void vc_grayscale_stage::declare(contract_builder& contract) const {
+void vc_grayscale_stage::declare(vc_pipe_contract& contract) const {
     // TODO(you): follow vc_passthrough_stage. Declare the image input and image
     // output using this stage's typed slots (the tests expect names "rgb" and
     // "grey"):
