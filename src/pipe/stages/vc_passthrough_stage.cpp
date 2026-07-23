@@ -31,7 +31,14 @@ void vc_passthrough_stage::declare(vc_pipe_contract& contract) const {
     contract.add_output_slot(slots::out);
 }
 
-void vc_passthrough_stage::process(vc_pipe_context& context) const {
+void vc_passthrough_stage::validate_inputs(
+    const vc_pipe_context& context) const {
+    // No domain invariant beyond type: an identity copy has nothing to check
+    // that declare()'s type contract doesn't already guarantee.
+    (void)context;
+}
+
+void vc_passthrough_stage::do_process(vc_pipe_context& context) const {
     // Read the input as a vc_image (get_input() deduces the type from the
     // descriptor; throws if the packet is not one), then republish it unchanged
     // on the output slot. The copy is shallow — vc_image holds a shared_ptr to

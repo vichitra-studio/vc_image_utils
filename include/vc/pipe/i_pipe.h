@@ -53,12 +53,34 @@ class i_pipe {
     virtual const char* kind() const = 0;
 
     virtual void declare(vc_pipe_contract& contract) const = 0;
-    virtual void process(vc_pipe_context& context) const = 0;
+
+    // The pipeline's one per-stage, per-run entry point. NON-virtual, so this
+    // ordering cannot be bypassed by a stage: validate_inputs() always runs
+    // before do_process(), because a stage only ever overrides the two
+    // protected steps below, never this wrapper.
+    void process(vc_pipe_context& context) const {
+        validate_inputs(context);
+        do_process(context);
+    }
 
   protected:
     // Only a concrete stage (forwarding its own ctor arg) can name an instance.
     explicit i_pipe(stage_name name) : name_(std::move(name)) {
     }
+
+    // Domain-specific input invariants beyond type — e.g. a blur radius must
+    // be positive, or two image inputs must share dimensions. PURE: every
+    // stage must say explicitly whether it has one, even if the answer is an
+    // empty body — no stage inherits a silent default. Read inputs here via
+    // context.get_input(slot<T>) exactly as in do_process() — its typed
+    // extraction proves a slot's type as a side effect of checking its value,
+    // for whichever slots this override reads.
+    virtual void validate_inputs(const vc_pipe_context& context) const = 0;
+
+    // The stage's actual work: read inputs, publish outputs. What a concrete
+    // stage overrides; renamed from `process`, now this class's non-virtual
+    // wrapper above.
+    virtual void do_process(vc_pipe_context& context) const = 0;
 
   private:
     stage_name name_;

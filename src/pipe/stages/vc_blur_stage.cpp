@@ -30,7 +30,14 @@ void vc_blur_stage::declare(vc_pipe_contract& contract) const {
     contract.add_output_slot(slots::out);
 }
 
-void vc_blur_stage::process(vc_pipe_context& context) const {
+void vc_blur_stage::validate_inputs(const vc_pipe_context& context) const {
+    // TODO(you): this is the stage validate_inputs() was designed for — check
+    // params_.radius (and anything else this kernel needs, e.g. > 0) before
+    // do_process() runs.
+    (void)context;
+}
+
+void vc_blur_stage::do_process(vc_pipe_context& context) const {
     // TODO(you): the blur kernel — YOUR rep to write and test. A sketch of the
     // shape (delete this and implement):
     //

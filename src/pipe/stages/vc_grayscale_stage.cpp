@@ -31,7 +31,14 @@ void vc_grayscale_stage::declare(vc_pipe_contract& contract) const {
     (void)contract;
 }
 
-void vc_grayscale_stage::process(vc_pipe_context& context) const {
+void vc_grayscale_stage::validate_inputs(const vc_pipe_context& context) const {
+    // TODO(you): add a domain invariant here if this stage ever needs one
+    // beyond what declare()'s type contract already guarantees (e.g. a
+    // non-empty image); leave as a no-op if it doesn't.
+    (void)context;
+}
+
+void vc_grayscale_stage::do_process(vc_pipe_context& context) const {
     // TODO(you): read the "rgb" input image (ctx.get_input(slots::rgb) -> const
     // vc_image&), then BUILD the output through a vc_image_writer (the only way
     // to write pixels; #include "vc/vc_image_writer.h"):

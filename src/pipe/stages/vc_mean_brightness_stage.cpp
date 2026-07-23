@@ -34,7 +34,15 @@ void vc_mean_brightness_stage::declare(vc_pipe_contract& contract) const {
     (void)contract;
 }
 
-void vc_mean_brightness_stage::process(vc_pipe_context& context) const {
+void vc_mean_brightness_stage::validate_inputs(
+    const vc_pipe_context& context) const {
+    // TODO(you): add a domain invariant here if this stage ever needs one
+    // beyond what declare()'s type contract already guarantees; leave as a
+    // no-op if it doesn't.
+    (void)context;
+}
+
+void vc_mean_brightness_stage::do_process(vc_pipe_context& context) const {
     // TODO(you): read the "image" input (ctx.get_input(slots::image)), average
     // its f32 buffer, and publish a double: ctx.set_output(slots::mean,
     // vc_pipe_packet{mean}). This is where a non-image packet enters the flow.

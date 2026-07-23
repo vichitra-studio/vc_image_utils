@@ -26,7 +26,10 @@ class vc_grayscale_stage : public i_pipe {
 
     const char* kind() const override;
     void declare(vc_pipe_contract& contract) const override;
-    void process(vc_pipe_context& context) const override;
+
+  private:
+    void validate_inputs(const vc_pipe_context& context) const override;
+    void do_process(vc_pipe_context& context) const override;
 };
 
 } // namespace vc::pipe
