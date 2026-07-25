@@ -35,22 +35,22 @@ class vc_image {
     // exactly one place (vc_image_writer::validated()).
 
     // A valid, IMMUTABLE image of the given geometry, every element T{0}. T is
-    // constrained by vc_pixel_element, same as with_fill() below — the caller
+    // constrained by vc_pixel_element_req, same as with_fill() below — the caller
     // picks the dtype instead of it being hardcoded to buf_f32.
-    template <vc_pixel_element T>
+    template <vc_pixel_element_req T>
     [[nodiscard]] static vc_image
     zeros(image_dim width, image_dim height, channel_count channels) {
         return with_fill(width, height, channels, static_cast<T>(0));
     }
 
     // A valid, IMMUTABLE image of the given geometry, every element `fill`.
-    // T is constrained by vc_pixel_element (vc_pixel_buffer.h) — the SAME
+    // T is constrained by vc_pixel_element_req (vc_pixel_buffer.h) — the SAME
     // concept vc_pixel_buffer's and vc_image_writer's constructors are
     // constrained by, so an unsupported fill type (anything other than
     // buf_f32/buf_u8/buf_u16) is a compile error with a clear
     // constraints-not-satisfied diagnostic. The concept IS the compile-time
     // type check here — no separate static_assert needed.
-    template <vc_pixel_element T>
+    template <vc_pixel_element_req T>
     [[nodiscard]] static vc_image with_fill(image_dim width,
                                             image_dim height,
                                             channel_count channels,

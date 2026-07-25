@@ -34,7 +34,7 @@ using buf_u16 = std::uint16_t;
 // pixel_buffer catch an enum/variant order mismatch, but not a missing or
 // extra concept entry).
 template <typename T>
-concept vc_pixel_element = std::same_as<T, buf_f32> ||
+concept vc_pixel_element_req = std::same_as<T, buf_f32> ||
                            std::same_as<T, buf_u8> || std::same_as<T, buf_u16>;
 
 // Fixed-size, runtime-typed pixel storage. Composes a variant of vectors but
@@ -50,7 +50,7 @@ class vc_pixel_buffer {
   public:
     // dtype is inferred from fill's type — no separate enum parameter that
     // could disagree with it.
-    template <vc_pixel_element T>
+    template <vc_pixel_element_req T>
     vc_pixel_buffer(std::size_t count, T fill)
         : data_(std::vector<T>(count, fill)) {
     }
@@ -71,7 +71,7 @@ class vc_pixel_buffer {
     // work identically across dtypes. Returns a span, not vector<T>&, so a
     // caller gets element access but not resize()/clear() on the backing
     // storage — same invariant this class exists to enforce, one layer in.
-    template <vc_pixel_element T> std::span<T> as() {
+    template <vc_pixel_element_req T> std::span<T> as() {
         if (!std::holds_alternative<std::vector<T>>(data_)) {
             throw vc::vc_exception(vc::vc_error_code::invalid_argument,
                                    "vc_pixel_buffer::as<T>(): requested dtype "
@@ -79,7 +79,7 @@ class vc_pixel_buffer {
         }
         return std::span<T>{std::get<std::vector<T>>(data_)};
     }
-    template <vc_pixel_element T> std::span<const T> as() const {
+    template <vc_pixel_element_req T> std::span<const T> as() const {
         if (!std::holds_alternative<std::vector<T>>(data_)) {
             throw vc::vc_exception(vc::vc_error_code::invalid_argument,
                                    "vc_pixel_buffer::as<T>(): requested dtype "

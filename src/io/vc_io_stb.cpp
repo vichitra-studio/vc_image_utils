@@ -27,11 +27,7 @@ vc::vc_image stb_image_reader::read(const path& p, const read_config& config) {
     // Checked before stbi_load() so a missing/unreadable input reports
     // file_not_found — distinct from decode_error below, which now
     // genuinely means "the file exists but stb couldn't decode it".
-    if (!file_exists(p)) {
-        throw vc::vc_exception(vc::vc_error_code::file_not_found,
-                               "stb_image_reader::read: " + p.string() +
-                                   ": file does not exist");
-    }
+    require_file_exists(p, "stb_image_reader::read");
 
     int w = 0, h = 0, channels_in_file = 0;
     unsigned char* data = stbi_load(p.c_str(), &w, &h, &channels_in_file, 0);
@@ -92,10 +88,7 @@ void stb_image_writer::write(const path& p,
     // it already exists (ensure_directory()'s own semantics).
     // vc::utils::debug::write_dump() relies on this: it no longer creates
     // its own output directory, since this already covers it.
-    const auto parent = p.parent_path();
-    if (!parent.empty()) {
-        ensure_directory(parent);
-    }
+    ensure_parent_directory(p);
 
     auto buf = image.pixels();
     std::vector<unsigned char> data(buf->size());

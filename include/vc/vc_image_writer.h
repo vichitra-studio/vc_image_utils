@@ -36,7 +36,7 @@ class vc_image_writer {
     // from the fill value's type (mirrors vc_pixel_buffer's ctor — no separate
     // enum that could disagree). Every element starts at `fill`.
     //   vc_image_writer w{width, height, channels, vc::buf_f32{0.0f}};
-    template <vc_pixel_element T>
+    template <vc_pixel_element_req T>
     vc_image_writer(image_dim width,
                     image_dim height,
                     channel_count channels,
@@ -85,7 +85,7 @@ class vc_image_writer {
     // throws vc::vc_exception — the same contract as vc_pixel_buffer. Scattered
     // writes use at(); a hot loop normally takes pixels<T>() below and indexes
     // via meta().index(...).
-    template <vc_pixel_element T>
+    template <vc_pixel_element_req T>
     T& at(image_dim x, image_dim y, channel_count ch) {
         assert(pixels_ && "vc_image_writer used after seal() (spent writer)");
         return pixels_->as<T>()[meta_.index(x, y, ch)];
@@ -93,7 +93,7 @@ class vc_image_writer {
 
     // Whole-buffer typed span — the fast path for pixel loops. Mutable: this is
     // the writer.
-    template <vc_pixel_element T>
+    template <vc_pixel_element_req T>
     std::span<T> pixels() {
         assert(pixels_ && "vc_image_writer used after seal() (spent writer)");
         return pixels_->as<T>();

@@ -103,6 +103,7 @@ set(VC_LIB_SOURCES
     src/edit/vc_edit_table.cpp
     src/edit/vc_stage_registry.cpp
     src/edit/vc_image_meta.cpp
+    src/edit/vc_edit_document_io.cpp
 )
 
 add_library(vc_image_utils_lib STATIC ${VC_LIB_SOURCES})

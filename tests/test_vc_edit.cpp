@@ -11,6 +11,7 @@
 #include "vc/edit/vc_export.h"
 #include "vc/edit/vc_table.h"
 #include "vc/edit/vc_edit_document.h"
+#include "vc/edit/vc_edit_document_io.h"
 #include "vc/edit/vc_edit_session.h"
 #include "vc/edit/vc_edit_settings_store.h"
 #include "vc/edit/vc_edit_table.h"
@@ -29,6 +30,7 @@
 #include "vc/vc_image.h"
 
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -52,6 +54,82 @@ TEST_CASE("vc_edit_document: default settings match the design defaults") {
     CHECK(doc.exposure.enabled == true);
     CHECK(doc.exposure.ev == doctest::Approx(0.0));
     CHECK(doc.exposure.black == doctest::Approx(0.0));
+}
+
+// =====================================================================
+// GREEN — vc_edit_document_io.h: save_edit_document()/load_edit_document()
+// are the actual deliverable (persist a document across phases as a real
+// file). JSON is an implementation detail of vc_edit_document_io.cpp — these
+// tests never mention nlohmann, only files, matching the public surface.
+// =====================================================================
+
+TEST_CASE("save_edit_document()/load_edit_document(): round-trip a full"
+          " document through a real file") {
+    vc::edit::vc_edit_document doc;
+    doc.capture.bracket_count = 7;
+    doc.capture.ev_spacing = 1.5;
+    doc.exposure.enabled = false;
+    doc.exposure.ev = 2.25;
+    doc.exposure.black = -0.1;
+
+    const std::filesystem::path path =
+        std::string(VC_TEST_OUTPUT_DIR) + "/edit_document_test_output.json";
+    std::filesystem::remove(path); // clean slate from a prior run
+
+    vc::edit::save_edit_document(path, doc);
+    CHECK(std::filesystem::exists(path));
+
+    const auto restored = vc::edit::load_edit_document(path);
+    CHECK(restored.capture.bracket_count == 7);
+    CHECK(restored.capture.ev_spacing == doctest::Approx(1.5));
+    CHECK(restored.exposure.enabled == false);
+    CHECK(restored.exposure.ev == doctest::Approx(2.25));
+    CHECK(restored.exposure.black == doctest::Approx(-0.1));
+}
+
+TEST_CASE("load_edit_document(): a missing file throws file_not_found") {
+    const std::filesystem::path path =
+        std::string(VC_TEST_OUTPUT_DIR) + "/does_not_exist.json";
+    std::filesystem::remove(path);
+
+    CHECK_THROWS_AS(vc::edit::load_edit_document(path), vc::vc_exception);
+}
+
+TEST_CASE("load_edit_document(): a file missing an entire slice loads it at"
+          " its defaults (back-compat: a document saved before that slice"
+          " existed)") {
+    const std::filesystem::path path =
+        std::string(VC_TEST_OUTPUT_DIR) + "/edit_document_missing_slice.json";
+    {
+        std::ofstream out(path);
+        // "exposure" is absent, as if saved before that slice existed.
+        out << R"({"version": 1, "capture": {"bracket_count": 3,)"
+               R"( "ev_spacing": 1.0}})";
+    }
+
+    const auto restored = vc::edit::load_edit_document(path);
+
+    CHECK(restored.capture.bracket_count == 3);
+    CHECK(restored.exposure.enabled == true);            // untouched default
+    CHECK(restored.exposure.ev == doctest::Approx(0.0)); // untouched default
+}
+
+TEST_CASE("load_edit_document(): an unknown extra key is ignored"
+          " (forward-compat: a document saved by newer code, read by older"
+          " code)") {
+    const std::filesystem::path path =
+        std::string(VC_TEST_OUTPUT_DIR) + "/edit_document_extra_key.json";
+    {
+        std::ofstream out(path);
+        out << R"({"version": 1,)"
+               R"( "capture": {"bracket_count": 5, "ev_spacing": 2.0},)"
+               R"( "exposure": {"enabled": true, "ev": 0.0, "black": 0.0},)"
+               R"( "white_balance": {"temp": 5500}})"; // unknown to this build
+    }
+
+    vc::edit::vc_edit_document restored;
+    CHECK_NOTHROW(restored = vc::edit::load_edit_document(path));
+    CHECK(restored.capture.bracket_count == 5);
 }
 
 TEST_CASE("vc_render_request: defaults to full resolution, whole image") {

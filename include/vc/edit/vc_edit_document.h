@@ -14,8 +14,12 @@ namespace vc::edit {
 // It is what undo/redo snapshots, what portability bundles, what the UI binds
 // to, and what build_pipeline reads slices from to derive stages. There are
 // no reps here — it is data; the reps are the DERIVATIONS in build_pipeline
-// that read these slices. Serialization is hand-written JSON, added later;
-// nothing here is serialized yet.
+// that read these slices.
+//
+// Serialization (vc_edit_document_io.h) is kept OUT of this header on
+// purpose: these structs stay plain/dependency-free, and JSON — including
+// the ~900KB nlohmann header — is opt-in only for a TU that actually needs
+// to save/load a document.
 
 // One HOME for a cross-cutting value many stages read. bracket_count lives
 // here ONCE rather than being threaded per-stage; build_pipeline reads it to
@@ -38,10 +42,11 @@ struct vc_exposure_settings {
 // SEPARATE axis and lives on render_engine_version (vc_engine_version.h), not
 // here.
 struct vc_edit_document {
-    int version = 1;                // doc_version — reserved, unused now
-    vc_capture_settings capture;    // cross-cutting values (bracket_count, ...)
-    vc_exposure_settings exposure;  // one member per tool; grows additively
-    // more tool slices added as stages arrive; hand-written JSON later.
+    int version = 1;               // doc_version — reserved, unused now
+    vc_capture_settings capture;   // cross-cutting values (bracket_count, ...)
+    vc_exposure_settings exposure; // one member per tool; grows additively
+    // more tool slices added as stages arrive — see vc_edit_document_io.h
+    // for the one line each needs there.
 };
 
 } // namespace vc::edit

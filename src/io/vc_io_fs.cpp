@@ -16,6 +16,14 @@ bool file_exists(const path& p) noexcept {
     return std::filesystem::is_regular_file(p, ec);
 }
 
+void require_file_exists(const path& p, std::string_view caller) {
+    if (!file_exists(p)) {
+        throw vc::vc_exception(vc::vc_error_code::file_not_found,
+                               std::string(caller) + ": " + p.string() +
+                                   ": file does not exist");
+    }
+}
+
 bool directory_exists(const path& p) noexcept {
     std::error_code ec;
     return std::filesystem::is_directory(p, ec);
@@ -29,6 +37,33 @@ void ensure_directory(const path& p) {
                                "vc::io::ensure_directory: " + p.string() +
                                    ": " + ec.message());
     }
+}
+
+void ensure_parent_directory(const path& p) {
+    const auto parent = p.parent_path();
+    if (!parent.empty()) {
+        ensure_directory(parent);
+    }
+}
+
+std::ofstream open_for_write(const path& p, std::string_view caller) {
+    std::ofstream out(p);
+    if (!out) {
+        throw vc::vc_exception(vc::vc_error_code::encode_error,
+                               std::string(caller) + ": failed to open " +
+                                   p.string() + " for writing");
+    }
+    return out;
+}
+
+std::ifstream open_for_read(const path& p, std::string_view caller) {
+    std::ifstream in(p);
+    if (!in) {
+        throw vc::vc_exception(vc::vc_error_code::file_not_found,
+                               std::string(caller) + ": failed to open " +
+                                   p.string() + " for reading");
+    }
+    return in;
 }
 
 } // namespace vc::io

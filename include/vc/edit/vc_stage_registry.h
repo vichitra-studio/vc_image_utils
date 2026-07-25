@@ -21,7 +21,7 @@ namespace vc::edit {
 // time (register_stage below), not at USE time (create): it must be
 // invocable with `const vc_edit_session&` (the translation build_pipeline
 // performs — e.g. `&vc_blur_stage::from_session`, a pointer to a static
-// member function on the stage itself; the vc_stage_builder concept below
+// member function on the stage itself; the vc_stage_builder_req concept below
 // accepts this identically to a free function, since both just satisfy
 // `std::invocable<const Builder&, const vc_edit_session&>`), and its
 // result must be exactly what StageT's constructor needs alongside the
@@ -30,7 +30,7 @@ namespace vc::edit {
 // params-builder + ctor behind one uniform `create(kind, name, session)`.
 // No casts anywhere in the call path.
 template <typename Builder, typename StageT>
-concept vc_stage_builder =
+concept vc_stage_builder_req =
     std::invocable<const Builder&, const vc_edit_session&> &&
     std::constructible_from<
         StageT, vc::pipe::stage_name,
@@ -84,12 +84,12 @@ class vc_stage_registry {
 
     // Register `StageT` under `kind`, erasing its concrete type and
     // `builder` (a session -> params translation) behind one uniform
-    // session_factory. Concept-enforced at THIS call site (vc_stage_builder
+    // session_factory. Concept-enforced at THIS call site (vc_stage_builder_req
     // above) — an ill-shaped builder/StageT pairing fails to compile here,
     // never at create()'s call site. A later registration for the same kind
     // overwrites the earlier one (last-wins), matching register_kind.
     template <typename StageT, typename Builder>
-        requires vc_stage_builder<Builder, StageT>
+        requires vc_stage_builder_req<Builder, StageT>
     void register_stage(const stage_kind& kind, Builder builder) {
         session_factories_[kind] =
             [builder = std::move(builder)](

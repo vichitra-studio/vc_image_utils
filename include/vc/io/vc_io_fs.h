@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include <fstream>
+#include <string_view>
+
 #include "vc/io/vc_io_types.h"
 
 namespace vc::io {
@@ -26,13 +29,19 @@ namespace vc::io {
 // a distinct name sidesteps the collision entirely rather than relying on
 // callers to remember to qualify it.
 
-// Does `p` name an existing, readable regular file? Meant to be called by
-// read() before stbi_load(), so a missing/unreadable input reports
-// vc::vc_error_code::file_not_found instead of the same decode_error a
-// corrupt-but-present file would produce. That error code is already
-// declared (vc_error_code.h) and already has a to_string() mapping and a
-// pinning test — it is just never thrown anywhere yet.
+// Does `p` name an existing, readable regular file? A plain, noexcept query
+// — require_file_exists() below is the throwing check most readers actually
+// want.
 [[nodiscard]] bool file_exists(const path& p) noexcept;
+
+// Throws vc::vc_exception(file_not_found) unless `p` names an existing,
+// readable regular file — the check every reader (stb_image_reader::read,
+// load_edit_document, ...) needs before attempting to decode, so a missing/
+// unreadable input reports file_not_found instead of the same decode_error a
+// corrupt-but-present file would produce. `caller` is folded into the
+// message (matching every other throw site in this file) so a failure still
+// names which reader tripped it.
+void require_file_exists(const path& p, std::string_view caller);
 
 // Does `p` name an existing directory? A plain existence check — not
 // currently called anywhere in this codebase (write() calls
@@ -50,5 +59,31 @@ namespace vc::io {
 // bad path, disk full, permissions") already covers directory-creation
 // failure the same way.
 void ensure_directory(const path& p);
+
+// Create `p`'s parent directory (a no-op if `p` has no parent, e.g. a bare
+// filename) — the ensure_directory()-before-writing prep every writer
+// (stb_image_writer::write, save_edit_document, ...) needs, factored out so
+// it is written once rather than re-derived (parent_path() + empty-check +
+// ensure_directory()) at each call site.
+void ensure_parent_directory(const path& p);
+
+// Open `p` for writing (truncating any existing content), throwing
+// vc::vc_exception(encode_error) if the stream fails to open — the same
+// open-or-throw check any std::ofstream-based writer needs (image I/O goes
+// through stb's own C API and its integer return codes instead, so this has
+// no caller there today; save_edit_document is the first of what is meant to
+// be several text/binary writers built directly on std::ofstream).
+[[nodiscard]] std::ofstream open_for_write(const path& p,
+                                           std::string_view caller);
+
+// Open `p` for reading, throwing vc::vc_exception(file_not_found) if the
+// stream fails to open. A companion to require_file_exists(): that call
+// catches the common case (the path does not exist at all) with a clean
+// message; this one catches the rarer case where a path that DOES exist
+// still can't be opened (permissions, a race between the two checks, ...) —
+// distinct failure, same error code (file_not_found's own comment already
+// covers "process lacks read permission").
+[[nodiscard]] std::ifstream open_for_read(const path& p,
+                                          std::string_view caller);
 
 } // namespace vc::io
