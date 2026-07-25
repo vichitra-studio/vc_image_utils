@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <utility>
 
@@ -51,6 +52,16 @@ class i_pipe {
 
     // The stage TYPE's stable identifier (a literal). Per-type, not per-run.
     virtual const char* kind() const = 0;
+
+    // This instance's params identity, as a hand-written hash combine (see
+    // e.g. vc_blur_stage::params_hash()) — PER-INSTANCE, unlike kind(), since
+    // two stages of the same kind can carry different params. PURE, matching
+    // validate_inputs()'s "no stage inherits a silent default" rationale: a
+    // paramless stage still states its answer explicitly (a fixed 0), rather
+    // than inheriting one. No consumer yet — kept as the seam a future
+    // content-hash cache will need, mirroring kind()'s own "no consumer yet"
+    // framing above.
+    virtual std::size_t params_hash() const = 0;
 
     virtual void declare(vc_pipe_contract& contract) const = 0;
 

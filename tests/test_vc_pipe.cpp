@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "vc/pipe/stages/vc_blur_stage.h"
 #include "vc/pipe/stages/vc_grayscale_stage.h"
 #include "vc/pipe/stages/vc_mean_brightness_stage.h"
 #include "vc/pipe/stages/vc_passthrough_stage.h"
@@ -222,6 +223,16 @@ TEST_CASE("i_pipe: name() is per-instance, kind() is per-type") {
     CHECK(std::string{a.kind()} == std::string{b.kind()}); // same type -> same
 }
 
+TEST_CASE("i_pipe: paramless stages' params_hash() is a fixed 0") {
+    const vc::pipe::vc_passthrough_stage pass{"pass"};
+    const vc::pipe::vc_grayscale_stage grey{"grey"};
+    const vc::pipe::vc_mean_brightness_stage mean{"mean"};
+
+    CHECK(pass.params_hash() == 0);
+    CHECK(grey.params_hash() == 0);
+    CHECK(mean.params_hash() == 0);
+}
+
 // =====================================================================
 // SPEC (RED until you implement the TODO(you) bodies). These define the
 // target behaviour for the stage declare()/process() and the pipeline
@@ -250,6 +261,69 @@ TEST_CASE("vc_mean_brightness_stage: declares a NON-IMAGE (double) output"
     CHECK(c.input_slot_type("image") == std::type_index(typeid(vc::vc_image)));
     // The point of this stage: a NON-image (double) output slot.
     CHECK(c.output_slot_type("mean") == std::type_index(typeid(double)));
+}
+
+// =====================================================================
+// GREEN — the worked-example stage's STRUCTURE (ctor stores params,
+// kind(), name()) and its hand-written params_hash(). The kernel itself
+// is the RED spec below.
+// =====================================================================
+
+TEST_CASE("vc_blur_stage: is constructed with its params and exposes them") {
+    vc::pipe::vc_blur_params cfg;
+    cfg.radius = 2.0;
+    const vc::pipe::vc_blur_stage blur{"blur", cfg};
+
+    CHECK(std::string{blur.kind()} == "blur");
+    CHECK(blur.name() == "blur");
+    CHECK(blur.params().radius == doctest::Approx(2.0));
+    CHECK(blur.params().normalize == true);
+}
+
+TEST_CASE("vc_blur_stage: params_hash() is deterministic and varies with radius,"
+          " not with name") {
+    vc::pipe::vc_blur_params a;
+    a.radius = 2.0;
+    vc::pipe::vc_blur_params b;
+    b.radius = 3.0;
+
+    const vc::pipe::vc_blur_stage blur_a{"blur", a};
+    const vc::pipe::vc_blur_stage blur_a_again{"blur", a};
+    const vc::pipe::vc_blur_stage blur_a_renamed{"blur2", a};
+    const vc::pipe::vc_blur_stage blur_b{"blur", b};
+
+    CHECK(blur_a.params_hash() == blur_a_again.params_hash());   // deterministic
+    CHECK(blur_a.params_hash() == blur_a_renamed.params_hash()); // name-independent
+    CHECK(blur_a.params_hash() != blur_b.params_hash());         // radius varies it
+}
+
+// =====================================================================
+// SPEC (RED until you implement the kernel). Driven DIRECTLY through a
+// vc_pipe_context — NOT through run() (a separate TODO) — so this is red
+// for exactly ONE reason: vc_blur_stage::process() is unwritten.
+// =====================================================================
+
+TEST_CASE("vc_blur_stage: process() publishes a blurred image on its output slot"
+          " (RED until you implement the kernel)") {
+    const vc::pipe::vc_blur_stage blur{"blur", vc::pipe::vc_blur_params{}};
+
+    // Seed the input slot with a source image and drive process() directly.
+    std::unordered_map<vc::pipe::slot_name, vc::pipe::vc_pipe_packet> inputs;
+    inputs.emplace(
+        std::string(vc::pipe::vc_blur_stage::slots::in.name),
+        vc::pipe::vc_pipe_packet{vc::vc_image::zeros<vc::buf_f32>(4, 4, 3)});
+    vc::pipe::vc_pipe_context ctx{std::move(inputs)};
+
+    // The shell throws (TODO(you)), so this is RED; a written kernel does not
+    // throw and publishes on slots::out -> GREEN.
+    CHECK_NOTHROW(blur.process(ctx));
+
+    const auto outputs = std::move(ctx).take_outputs();
+    CHECK(outputs.count(std::string(vc::pipe::vc_blur_stage::slots::out.name)) ==
+          1);
+    // TODO(you): once your kernel is written, strengthen this beyond "an output
+    // exists" — e.g. feed a sharp edge and assert interior pixels move toward the
+    // local mean (a normalized blur, box or gaussian, satisfies that).
 }
 
 TEST_CASE("vc_pipeline: validate() accepts a matched image->image chain") {

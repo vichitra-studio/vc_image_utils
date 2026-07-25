@@ -99,7 +99,6 @@ set(VC_LIB_SOURCES
     src/edit/vc_render_image.cpp
     src/edit/vc_export.cpp
     src/edit/vc_table.cpp
-    src/edit/vc_edit_settings_store.cpp
     src/edit/vc_edit_table.cpp
     src/edit/vc_stage_registry.cpp
     src/edit/vc_image_meta.cpp
@@ -140,8 +139,6 @@ add_executable(vc_image_utils_tests
     tests/test_vc_perf.cpp
     tests/test_vc_pipe.cpp
     tests/test_vc_edit.cpp
-    tests/test_vc_param_schema.cpp
-    tests/support/recording_store.h
 )
 
 target_include_directories(vc_image_utils_tests SYSTEM PRIVATE third_party)

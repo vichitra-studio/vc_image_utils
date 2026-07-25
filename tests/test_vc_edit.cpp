@@ -13,7 +13,6 @@
 #include "vc/edit/vc_edit_document.h"
 #include "vc/edit/vc_edit_document_io.h"
 #include "vc/edit/vc_edit_session.h"
-#include "vc/edit/vc_edit_settings_store.h"
 #include "vc/edit/vc_edit_table.h"
 #include "vc/edit/vc_image_meta.h"
 #include "vc/edit/vc_render_image.h"
@@ -384,32 +383,15 @@ TEST_CASE("export_image: renders a session and writes it to a file (RED"
     CHECK(std::filesystem::exists(config.path));
 }
 
-TEST_CASE("vc_edit_settings_writer/vc_edit_settings_reader: round-trip a scalar through a"
-          " vc_memory_table (RED until set()/get() are written)") {
-    // Typed adapter over the byte store: a set() then get() must round-trip.
-    // The shells throw, so this is RED; when the hand-rolled JSON mapping is
-    // written the value survives the trip -> GREEN. vc_edit_settings_reader is
-    // a TOTAL get — a miss yields the fallback, so this also pins the
-    // miss-hiding half of the split.
-    vc::edit::vc_memory_table store;
-    vc::edit::vc_edit_settings_writer writer{store};
-    const vc::edit::vc_edit_settings_reader reader{store};
-
-    writer.set("exposure.ev", 1.5);                       // TODO(you): set()
-    CHECK(reader.get("exposure.ev", 0.0) ==               // TODO(you): get()
-          doctest::Approx(1.5));
-    CHECK(reader.get("missing.key", -2.0) ==              // total get: default
-          doctest::Approx(-2.0));
-}
-
 TEST_CASE("vc_cached_edits_table: get misses, then hits after set()"
           " (RED until get()/set() are written)") {
     // Content-hash adapter over the byte store: a miss returns nullopt
     // (=> recompute), and a set() then makes the same hash hit. The shells
     // throw, so this is RED; when written, the miss-then-hit sequence holds
-    // -> GREEN. vc_cached_edits_table EXPOSES misses (opposite of
-    // vc_edit_settings_reader) — this is the reproducible, content-hash-keyed
-    // store; this failure traces to exactly vc_cached_edits_table::get/set, not
+    // -> GREEN. vc_cached_edits_table EXPOSES misses (a TOTAL-get reader
+    // would instead hide a miss behind a default) — this is the
+    // reproducible, content-hash-keyed store; this failure traces to
+    // exactly vc_cached_edits_table::get/set, not
     // vc_persistent_edits_table's (see the sibling test below).
     vc::edit::vc_memory_table backing;
     vc::edit::vc_cached_edits_table cache{backing};

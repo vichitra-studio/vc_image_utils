@@ -3,11 +3,8 @@
 
 #pragma once
 
-#include <tuple>
-
 #include "vc/pipe/i_pipe.h"
 #include "vc/pipe/vc_pipe_types.h"
-#include "vc/vc_param_schema.h"
 
 namespace vc {
 class vc_image; // named only in the typed slot descriptors below
@@ -22,28 +19,13 @@ namespace vc::pipe {
 // The config a blur stage reads — a plain typed params struct, held by the
 // stage and read directly in process() (`params_.radius` — zero indirection,
 // no variant bag). These are a TOY algorithm's knobs, NOT a user-facing edit
-// setting: the point is a worked reference for giving ANY stage serializable
-// params. (A user-facing knob would instead live in vc_edit_document.)
+// setting: the point is a worked reference for giving ANY stage a
+// `params_hash()` identity via a hand-written combine (see the .cpp).
+// (A user-facing knob would instead live in vc_edit_document.)
 struct vc_blur_params {
     double radius = 1.0;     // blur radius / sigma, in source pixels
     bool normalize = true;   // divide by the kernel weight (energy-preserving)
-
-    // The schema is a static member FUNCTION (not a data member): a static
-    // data member initializer would need `&vc_blur_params::radius` while the
-    // class is still mid-definition (incomplete), which is ill-formed; a
-    // member-function BODY is only instantiated after the class is complete,
-    // so it sees a fully-defined vc_blur_params.
-    static constexpr auto schema() {
-        return std::tuple{
-            vc::params::vc_param_field{"radius", &vc_blur_params::radius, 0.0, 100.0},
-            vc::params::vc_param_field{"normalize", &vc_blur_params::normalize},
-        };
-    }
 };
-
-// Pin the contract at compile time: vc_blur_params must satisfy
-// vc::params::vc_param_struct (i.e. it has a schema()).
-static_assert(vc::params::vc_param_struct<vc_blur_params>);
 
 // A TOY blur stage (image -> image) — the WORKED REFERENCE for a stage that OWNS
 // params. Its structure (ctor stores params, kind(), declare()) is written;
@@ -62,6 +44,7 @@ class vc_blur_stage : public i_pipe {
     };
 
     const char* kind() const override;
+    std::size_t params_hash() const override;
     void declare(vc_pipe_contract& contract) const override;
 
     // The resolved config this instance was built with (read in process()).

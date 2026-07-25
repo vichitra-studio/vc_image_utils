@@ -22,6 +22,10 @@ const char* vc_mean_brightness_stage::kind() const {
     return "mean_brightness";
 }
 
+std::size_t vc_mean_brightness_stage::params_hash() const {
+    return 0; // paramless — nothing to vary
+}
+
 void vc_mean_brightness_stage::declare(vc_pipe_contract& contract) const {
     // TODO(you): the key line that makes this stage worth having — the OUTPUT
     // is a scalar, not an image. slots::mean is a slot<double>, so

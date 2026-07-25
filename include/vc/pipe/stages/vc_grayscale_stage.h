@@ -25,6 +25,7 @@ class vc_grayscale_stage : public i_pipe {
     };
 
     const char* kind() const override;
+    std::size_t params_hash() const override;
     void declare(vc_pipe_contract& contract) const override;
 
   private:

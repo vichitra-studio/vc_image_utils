@@ -6,6 +6,7 @@
 #include <concepts>
 #include <optional>
 #include <string>
+#include <utility>
 
 #include "vc/edit/vc_table.h"
 
@@ -16,18 +17,33 @@ namespace vc::edit {
 // written this way "in spirit": the concrete stores below use a runtime
 // interface (i_edit_table), not this concept, as their calling convention;
 // the concept documents and checks that their METHOD SHAPE matches it (see
-// the static_asserts below). Lives here, not in a shared concepts file,
-// because i_edit_table's stores are its only conformers.
+// the static_asserts in vc_edit_table.cpp). Lives here, not in a shared
+// concepts file, because i_edit_table's stores are its only conformers.
 //
-// Its sibling, vc_defaulted_reader (vc_edit_settings_store.h), covers the
-// OPPOSITE flavor — `get(key, fallback) -> V`, a miss silently hidden behind
-// a default. The two differ in ARITY (one arg vs two) as well as return
-// type, so one concept cannot honestly cover both without force-fitting one
-// shape onto the other — do not collapse them, and do not force-fit
-// vc_edit_settings_reader into this one.
+// This is the MISS-EXPOSING flavor — a miss returns `optional`, so the
+// caller can decide to recompute. A TOTAL-GET flavor (a miss silently
+// returns a default) existed as a sibling concept, `vc_defaulted_reader_req`,
+// but its sole conformer was removed; the two differed in ARITY (one arg vs
+// two) as well as return type, so if a total-get reader returns, it should
+// get its own concept rather than being force-fit into this one.
 template <typename R, typename K, typename V>
-concept vc_optional_reader = requires(const R& r, const K& key) {
+concept vc_optional_reader_req = requires(const R& r, const K& key) {
     { r.get(key) } -> std::same_as<std::optional<V>>;
+};
+
+// WRITER concept: `R&` exposes `set(key, value) -> void` — checked at
+// compile time (matching the `vc_pixel_element_req` style already used
+// elsewhere) instead of one inherited interface every backend derives from.
+// Relocated here (2026-07-25) from the shared `vc_table.h`: it used to serve
+// two consumer families (this file's two stores, plus a settings-writer
+// class since removed); with only one family left, it belongs beside its
+// sole conformers rather than in the shared low-level byte-store header.
+// Each conformance is pinned with a static_assert next to its concrete type,
+// not here, since the checked type must already be complete (see
+// `vc_edit_table.cpp`).
+template <typename W, typename K, typename V>
+concept vc_writer_req = requires(W& w, const K& key, V value) {
+    { w.set(key, std::move(value)) } -> std::same_as<void>;
 };
 
 // An edit-table content-hash key: hash(own param slice + input hash). This
@@ -60,9 +76,10 @@ class i_edit_table {
     virtual ~i_edit_table() = default;
 
     // MISS-EXPOSING get: a hit returns the bytes, a miss returns
-    // std::nullopt so the caller can decide to recompute — the opposite of
-    // vc_edit_settings_reader's total-get (vc_edit_settings_store.h). See
-    // vc_optional_reader (the miss-exposing concept flavor) above.
+    // std::nullopt so the caller can decide to recompute — a TOTAL-get
+    // reader would instead hide a miss behind a default (no conformer of
+    // that flavor currently exists in this codebase). See
+    // vc_optional_reader_req (the miss-exposing concept flavor) above.
     [[nodiscard]] virtual std::optional<data_bytes>
     get(const std::string& key) const = 0;
     virtual void set(const std::string& key, data_bytes value) = 0;
@@ -90,13 +107,6 @@ class vc_cached_edits_table : public i_edit_table {
     i_table& backing_;
 };
 
-// Pin the contract at compile time: vc_cached_edits_table conforms "in spirit"
-// to the shared vc_optional_reader (MISS-EXPOSING flavor)/vc_writer concepts — the
-// same METHOD SHAPE the interface above declares, keyed by std::string over
-// data_bytes.
-static_assert(vc_optional_reader<vc_cached_edits_table, std::string, data_bytes>);
-static_assert(vc_writer<vc_cached_edits_table, std::string, data_bytes>);
-
 // Non-reproducible derived data (AI/ML object masks, non-deterministic
 // embeddings). Id-keyed; PINNED (never evicted); travels with the edit —
 // SAVED/bundled — because a loss here IS data loss, so it behaves like
@@ -114,12 +124,5 @@ class vc_persistent_edits_table : public i_edit_table {
   private:
     i_table& backing_;
 };
-
-// Pin the contract at compile time: vc_persistent_edits_table conforms "in
-// spirit" to the shared vc_optional_reader (MISS-EXPOSING flavor)/vc_writer concepts
-// — the same METHOD SHAPE the interface above declares, keyed by
-// std::string over data_bytes.
-static_assert(vc_optional_reader<vc_persistent_edits_table, std::string, data_bytes>);
-static_assert(vc_writer<vc_persistent_edits_table, std::string, data_bytes>);
 
 } // namespace vc::edit

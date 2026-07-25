@@ -10,6 +10,18 @@
 
 namespace vc::edit {
 
+// Pin the contract at compile time: vc_cached_edits_table conforms "in
+// spirit" to the shared vc_optional_reader_req (MISS-EXPOSING flavor)/
+// vc_writer_req concepts — the same METHOD SHAPE the i_edit_table interface
+// declares, keyed by std::string over data_bytes.
+static_assert(vc_optional_reader_req<vc_cached_edits_table, std::string, data_bytes>);
+static_assert(vc_writer_req<vc_cached_edits_table, std::string, data_bytes>);
+
+// Pin the contract at compile time: vc_persistent_edits_table conforms "in
+// spirit" to the same two concepts.
+static_assert(vc_optional_reader_req<vc_persistent_edits_table, std::string, data_bytes>);
+static_assert(vc_writer_req<vc_persistent_edits_table, std::string, data_bytes>);
+
 vc_cached_edits_table::vc_cached_edits_table(i_table& backing)
     : backing_(backing) {
 }

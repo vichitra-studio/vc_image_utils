@@ -22,6 +22,10 @@ const char* vc_grayscale_stage::kind() const {
     return "grayscale";
 }
 
+std::size_t vc_grayscale_stage::params_hash() const {
+    return 0; // paramless — nothing to vary
+}
+
 void vc_grayscale_stage::declare(vc_pipe_contract& contract) const {
     // TODO(you): follow vc_passthrough_stage. Declare the image input and image
     // output using this stage's typed slots (the tests expect names "rgb" and

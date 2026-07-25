@@ -23,6 +23,13 @@ const char* vc_blur_stage::kind() const {
     return "blur";
 }
 
+std::size_t vc_blur_stage::params_hash() const {
+    const std::size_t h1 = std::hash<double>{}(params_.radius);
+    const std::size_t h2 = std::hash<bool>{}(params_.normalize);
+    // Boost-style combine — same formula as stage_port::hash() (vc_pipe_types.h).
+    return h1 ^ (h2 + 0x9e3779b9U + (h1 << 6U) + (h1 >> 2U));
+}
+
 void vc_blur_stage::declare(vc_pipe_contract& contract) const {
     // Same contract shape as passthrough: one image in, one image out. The blur
     // reads a neighbourhood but that is a process() concern, not a contract one.
@@ -48,7 +55,7 @@ void vc_blur_stage::do_process(vc_pipe_context& context) const {
     //   //     gaussian); if params_.normalize, divide by the kernel weight ...
     //   context.set_output(slots::out, vc_pipe_packet{std::move(dst).seal()});
     //
-    // Until then this throws, so the blur spec in test_vc_param_schema.cpp is
+    // Until then this throws, so the blur spec in test_vc_pipe.cpp is
     // RED-by-design (and red for exactly THIS one reason — the test drives
     // process() directly through a context, not through run()).
     (void)context;

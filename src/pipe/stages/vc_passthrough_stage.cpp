@@ -22,6 +22,10 @@ const char* vc_passthrough_stage::kind() const {
     return "passthrough";
 }
 
+std::size_t vc_passthrough_stage::params_hash() const {
+    return 0; // paramless — nothing to vary
+}
+
 void vc_passthrough_stage::declare(vc_pipe_contract& contract) const {
     // One image in, one image out. The typed slot descriptors carry BOTH the
     // slot name and its payload type — add_*_slot needs nothing else. By

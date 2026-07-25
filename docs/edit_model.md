@@ -241,9 +241,11 @@ graph to *data* is [LATER].
 registry, not `new`-chained directly: `register_stage<StageT>(kind, builder)`
 captures, at registration, the concrete stage type together with its edit-layer
 params-builder and constructor, behind one uniform call
-`create(kind, name, session) -> stage_ptr`. No casts anywhere in the call path; the
-`vc_param_struct` concept (§4.3) is enforced at registration, not at use. This is
-what `build_pipeline` calls to get each stage it wires.
+`create(kind, name, session) -> stage_ptr`. No casts anywhere in the call path —
+each stage's params type is fixed at compile time via the template itself, not
+checked by an additional params-shape concept at registration (the schema
+concept that once served this role, `vc_param_struct`, is superseded — §18).
+This is what `build_pipeline` calls to get each stage it wires.
 
 > **[REVERTED]** An intermediate shape moved each stage's `from_session` out to a
 > free builder function living in the edit layer, supplied to `register_stage` at
@@ -252,7 +254,7 @@ what `build_pipeline` calls to get each stage it wires.
 > produces. `vc_stage_registry::register_stage` accepts either shape identically —
 > it only requires something invocable with `const vc_edit_session&`, so a pointer
 > to a static member function (`&vc_blur_stage::from_session`) satisfies the same
-> `vc_stage_builder` concept a free function would. The stage itself stays
+> `vc_stage_builder_req` concept a free function would. The stage itself stays
 > session-blind either way (§4.3) — `from_session` derives params from a
 > session, but nothing in `process()` ever sees one.
 
@@ -268,13 +270,14 @@ construction, at the factory boundary the `kind()` seam already anticipates
 depends on it).
 
 **Concrete params, not a runtime base class.** Params stay concrete per-stage
-types (Design A) — the `vc_param_struct` concept (§4.2, §18) is the
-*standardization* (every params type shapes up the same way, checkable at compile
-time), **not** a virtual/runtime params base class. Generic consumers that need a
-type-erased view — UI, serialization — go through the **schema** (§18), which is
-that view; the stage's hot-path code never sees it.
+types (Design A), **not** a virtual/runtime params base class — a schema concept
+once stood in for that standardization (§18, superseded). The one generic
+consumer that materialized is a future runner computing a cache key, which goes
+through `i_pipe::params_hash()` (§18's superseding note) instead; there is no
+current generic UI/serialization consumer, and the stage's hot-path code never
+sees `params_hash()` either.
 
-### 4.4 Serialization [NOW: hand-written; NOW: schema-driven framework BUILT — see §18; persistent-store wiring LATER]
+### 4.4 Serialization [NOW: hand-written]
 - **Format: JSON.** Human-readable, diffable, nests (masks = arrays of strokes),
   versionable. Purpose is **reliable representation + import/export + own-ecosystem
   consumption** — *not* cross-app edit interop, which is impossible anyway (every
@@ -289,13 +292,16 @@ that view; the stage's hot-path code never sees it.
 - **Binary in JSON**: possible via base64 (reliable), but reserve for *small* binary
   (a hash, a tiny mask). Large blobs (mask pixels, embeddings) go to the derived store
   (Kind C), never JSON.
-- **[NOW, framework BUILT — see §18] schema-driven serialization**: declare each
-  field once as a descriptor; one generic `save`/`load`/`describe` walks it, so
-  save/load/UI/CLI/cache-key all derive from a single source (escapes
-  RawTherapee's per-field duplication, §15.2). Wiring the schema through the
-  *persistent* doc store is still **[LATER]** (awaits the `doc_writer`/
-  `doc_reader` bodies, §7); broader adoption for user-facing settings remains
-  **when hand-written boilerplate hurts**, not before.
+- **[SUPERSEDED 2026-07-25] schema-driven serialization**: a generic
+  descriptor-based `save`/`load` mechanism (§18) was built, pulled forward from
+  [LATER] by request, then removed after tracing its only real consumer
+  (cache-keying) through in full — once `i_pipe::params_hash()` became a
+  per-stage virtual method, it already gave the "uniform access across
+  concrete types" the schema was meant to provide, and the schema's remaining
+  contribution (saving a hand-written hash per params struct) didn't clear
+  this codebase's own bar for keeping a mechanism. Hand-written JSON
+  (`vc_edit_document_io.h`/`.cpp`, above) is the durable serialization path,
+  not a stepping stone to something more generic (§18's superseding note).
 - **Portability shape [design NOW; build LATER — see also §9]:** the source image
   stays pristine — never touched by serialization. What actually saves is a JSON
   **sidecar** holding the edit document + the edited-metadata overlay (§6) + **ids**
@@ -355,17 +361,26 @@ pure stages, product-tuned schedule.
 **Runner memoization, mechanically [design NOW; B7].** Stages themselves are pure
 and never touch the cache (§4.3) — memoization is entirely the runner's job. At the
 start of a `run()`, a cheap **chained-hash pre-pass** walks the graph and computes
-each node's `hash(params-via-`schema()` + input-hashes)` (§18 for `schema()`),
-deciding hit/miss for every node before any pixels move; a changed upstream hash
-automatically propagates downstream, so the pre-pass alone detects everything that
-must recompute. Only the misses actually run. Running is **demand-driven**: a miss
-on some slot causes the runner to run *that slot's producer* — the upstream stage
-wired to it — which is the same mechanism §5.2's tap/injection design already
-describes from the inject side (inject ⇒ skip the producer; here, a genuine miss ⇒
-*run* the producer). Params reach the cache only **via `schema()`, as the cache
-key** — the params object itself is never stored *in* the cache; the store holds
-outputs, keyed by hash. (Store access itself is spelled `get`/`set` uniformly,
-per the Q2 naming decision — §7, §19.)
+each node's `hash(params-via-i_pipe::params_hash() + input-hashes)` (§18's
+superseding note), deciding hit/miss for every node before any pixels move; a
+changed upstream hash automatically propagates downstream, so the pre-pass alone
+detects everything that must recompute. Only the misses actually run. Running is
+**demand-driven**: a miss on some slot causes the runner to run *that slot's
+producer* — the upstream stage wired to it — which is the same mechanism §5.2's
+tap/injection design already describes from the inject side (inject ⇒ skip the
+producer; here, a genuine miss ⇒ *run* the producer). Params reach the cache only
+**via `i_pipe::params_hash()`, a per-stage hand-written combine** (§18's
+superseding note) — the params object itself is never stored *in* the cache; the
+store holds outputs, keyed by hash. (Store access itself is spelled `get`/`set`
+uniformly, per the Q2 naming decision — §7, §19.)
+
+**[DECIDED 2026-07-25] A cache-table instance is never shared across two different source
+images.** Each `vc_cached_edits_table`/`vc_persistent_edits_table` instance's
+lifecycle is 1:1 with one editing session (§3's "each outlives the session"
+language is about non-owning-reference safety, a related but distinct point).
+This is *why* no source-image hash is needed anywhere in the cache key: the
+table itself already scopes every key to one source image, so folding a
+source-image hash into the key would be redundant.
 
 ### 5.2 Taps & injections — a `run()` extension [LATER; design NOW]
 The pipeline needs keyed read/write of **any** slot, not just open ones:
@@ -468,9 +483,17 @@ have opposite miss- and durability-semantics), so they are **not** one caller-fa
 interface. What they *share* is the storage engine beneath:
 
 - **`kv_store`** — shared low-level `put(key, bytes)` / `get(key) → optional<bytes>`.
-  Backends: `file_store`, `sqlite_store`, `memory_store` (tests). Both roles build on it.
-- **`doc_writer`/`doc_reader`** — *typed* adapter over `kv_store` for Kind A; the schema
-  save/load program against this; hides misses behind defaults (total get).
+  Backends: `file_store`, `sqlite_store`, `memory_store` (tests). **[SUPERSEDED
+  2026-07-25]** Originally both roles built on it; Kind A's role (`doc_writer`/
+  `doc_reader` below) is removed, so `kv_store` (shipped as `i_table`) is now
+  Kind C's storage engine only.
+- **`doc_writer`/`doc_reader`** — this doc's illustrative names for what shipped
+  as `vc_edit_settings_writer`/`vc_edit_settings_reader`: a typed adapter over
+  `kv_store` for Kind A, hiding misses behind defaults (total get).
+  **[SUPERSEDED 2026-07-25]** — removed along with the schema mechanism that
+  was their sole reason to exist (§18's superseding note); Kind A's only
+  surviving persistence path is the hand-written JSON in
+  `vc_edit_document_io.h`/`.cpp` (§4.4).
 - **`derived_store`** — *content-hash* adapter over `kv_store` for Kind C; **exposes**
   misses (⇒ recompute). **Separate instance, different durability** (may-evict vs the
   document's never-evict) — the one distinction to preserve.
@@ -487,18 +510,20 @@ interface. What they *share* is the storage engine beneath:
 > access** (§5).
 
 **Reader/writer standardized as concepts, not one inherited interface
-[design NOW; B11].** `vc_optional_reader`/`vc_writer` are **concepts**, checked at compile
-time, not a base class every backend derives from — this matches the `vc_pixel_
-element`/`vc_param_struct` style already used elsewhere in this codebase (§4.3, §18)
-rather than introducing virtual dispatch where it isn't needed. There are **two
-reader flavors**, and they stay distinct rather than collapsing to one shape:
-**total-get** (settings-style: a miss silently returns a default — this is what
-`doc_reader` above does) vs **miss-exposing** (cache-style: a miss returns
-`optional`, so the caller can decide to recompute — this is what the derived-store
-read side does, §5.1). `vc_edit_settings_reader`/`vc_edit_settings_writer` **stay split** (a read-view
-over a `const` store vs a write-view over a mutable store — least-privilege/CQS,
-§16 L19) — they are **not** merged into one reader-writer type even though both
-satisfy the `vc_optional_reader`/`vc_writer` concepts.
+[design NOW; B11].** `vc_optional_reader_req`/`vc_writer_req` are **concepts**,
+checked at compile time, not a base class every backend derives from — this
+matches the `vc_pixel_element_req` style already used elsewhere in this
+codebase rather than introducing virtual dispatch where it isn't needed.
+**[SUPERSEDED 2026-07-25]** This section originally described **two reader
+flavors**: total-get (settings-style: a miss silently returns a default —
+what the now-removed `doc_reader`/`vc_edit_settings_reader` did) vs
+miss-exposing (cache-style: a miss returns `optional`, so the caller can
+decide to recompute — what `vc_optional_reader_req`/`vc_cached_edits_table`
+do, §5.1). With `vc_edit_settings_reader`/`vc_edit_settings_writer` removed
+(§18's superseding note), miss-exposing is the only flavor with a living
+conformer in this codebase; total-get remains a documented *possibility* (a
+future settings-writer could still need it) rather than a currently-embodied
+one.
 
 `edit_session` (§3) composes these; it is a facade (has-a), not a shared interface (is-a).
 
@@ -532,12 +557,33 @@ satisfy the `vc_optional_reader`/`vc_writer` concepts.
 > three concepts (`vc_optional_reader`, `vc_defaulted_reader`, `vc_writer`)
 > move out of the shared `vc_store_concepts.h` (deleted) into the header of
 > their sole or primary consumer — `vc_optional_reader` into
-> `vc_edit_table.h`, `vc_defaulted_reader` into `vc_edit_settings_store.h`,
-> and `vc_writer` (shared by both) into `vc_table.h`, the common dependency
-> both already had. A concept cannot be a class member (C++20 restricts
-> `concept` declarations to namespace scope), so "under the relevant class"
-> was not on the table — this is the closest equivalent, no concept left
-> owned by a dedicated concepts-only file.
+> `vc_edit_table.h`, `vc_defaulted_reader` into `vc_edit_settings_store.h`
+> (both since removed — see the follow-up note below), and `vc_writer`
+> (shared by both) into `vc_table.h`, the common dependency both already had
+> (also since relocated further — see below). A concept cannot be a class
+> member (C++20 restricts `concept` declarations to namespace scope), so
+> "under the relevant class" was not on the table — this is the closest
+> equivalent, no concept left owned by a dedicated concepts-only file.
+>
+> **Follow-up [SUPERSEDED 2026-07-25].** `vc_defaulted_reader` (by then
+> `vc_defaulted_reader_req`) and its host `vc_edit_settings_store.h` are both
+> removed — their sole reason to exist (serving the schema mechanism's write
+> target) no longer applies (§18's superseding note). `vc_writer` (by then
+> `vc_writer_req`) has moved again, out of `vc_table.h` and into
+> `vc_edit_table.h`: with `vc_edit_settings_writer` gone, only one consumer
+> family remains (`vc_cached_edits_table`/`vc_persistent_edits_table`), so by
+> this same blockquote's own reasoning it belongs beside its sole conformers,
+> not in the shared byte-store header.
+
+> **[DECIDED 2026-07-25] `_req` suffix convention.** Every concept in this
+> codebase now carries a `_req` suffix (`vc_optional_reader_req`,
+> `vc_writer_req`, `vc_pixel_element_req`, `vc_stage_builder_req`) — the
+> suffix marks a name as a compile-time *requirement* check (a concept),
+> distinguishing it at a glance from an ordinary type. This note names the
+> four concepts that survive the schema-removal cleanup; two others that
+> also gained the suffix in code (`vc_param_struct_req`,
+> `vc_defaulted_reader_req`) are omitted since both are deleted in the same
+> cleanup (§18's superseding note) and never had a lasting home in this doc.
 
 ## 8. Relationship to the render pipeline
 
@@ -558,8 +604,9 @@ satisfy the `vc_optional_reader`/`vc_writer` concepts.
   params, never the session, the runner, or the cache (§4.3). This is the invariant
   the rest of this list (buffers, caching, concurrency) leans on.
 - **Runner memoization [design NOW; B7]** — before any stage runs, a cheap
-  chained-hash **pre-pass** computes every node's `hash(params-via-schema() +
-  input-hashes)` and decides hit/miss for the whole graph; a miss causes the
+  chained-hash **pre-pass** computes every node's
+  `hash(params-via-i_pipe::params_hash() + input-hashes)` and decides
+  hit/miss for the whole graph; a miss causes the
   runner to run that slot's **producer** on demand. Mechanics, and the relation to
   §5.2's tap/injection design, are in §5.1 — this is the runner-level summary.
 - **Buffers** — pipeline-owned; stages are pure and produce their output (private
@@ -713,8 +760,8 @@ transforms in play, so the reference-frame discipline starts now.
 
 **[NOW]** immutable `vc_image` (done); `edit_document` (typed, user-facing) +
 narrow-slice stage params; hand-written JSON serialization (`nlohmann/json`);
-schema-driven serialization framework (`vc::params`, BUILT — see §18;
-persistent-store wiring still LATER); `build_pipeline` (hand-written assembly);
+`i_pipe::params_hash()` (per-stage hand-written cache-key seam — see §18's
+superseding note); `build_pipeline` (hand-written assembly);
 construction `kind()` registry; `edit_session` aggregate (thin); `vc_render_context`
 hosting cancellation on `run()` (§8, B8/B9); reserved version fields
 (doc/module/engine); fatal-error model with stage-context wrapping;
@@ -742,12 +789,20 @@ undo/redo mechanics; `vc_image_spec` semantic axes; region-scoped invalidation.
 6. **[OPEN]** Coordinate-space/geometry full model, and the reference-frame choice — §11.
 7. **[DECIDED 2026-07-18, built]** Aggregate name: **`vc_edit_session`** (namespace `vc::edit`).
 8. **[PARKED]** Derived-store eviction/GC/invalidation policy; exact cache-key hashing;
-   tap/injection API shape; schema-adoption trigger; preview↔export parity details;
+   tap/injection API shape; preview↔export parity details;
    `vc_image_spec` field set (`pipe_design.md §11 #4`). Related: neither
    `vc_cached_edits_table`'s key nor `vc_persistent_edits_table`'s stored payload currently folds
    in `render_engine_version` (`vc_engine_version.h`) — so a cache hit or a persisted
    artifact from a superseded engine version could currently look valid when it may not
    be. The real hashing/serialization mechanism (still unbuilt) needs to account for this.
+   Related: `i_pipe::params_hash()` is per-**stage**, not per-slot — a stage with two
+   output slots invalidates both together on any params change, even if only one slot's
+   value actually depends on the changed param; over-conservative, never incorrect.
+   Related: `std::hash` is only stable within one process's lifetime (no cross-run
+   guarantee), so a persisted cache key computed via `params_hash()` cannot be compared
+   across separate runs of the program without a stable hash function — fine for the
+   in-memory `vc_cached_edits_table`, a real constraint if `params_hash()`'s value is
+   ever persisted.
 
 ## 14. Linkage & learning-build split
 
@@ -759,9 +814,13 @@ a progress seam [LATER] — §8), **(b)** `taps` + `injections` (read/write any 
 **(c)** a resolution/ROI render request.
 
 **Learning-build split:** Claude scaffolds interfaces and framework plumbing
-(`edit_session`, `kv_store`/adapters, `metadata` interface, registry, the serialization
-framework); the user writes the rep logic (settings→stage derivations in
-`build_pipeline`, stage `params`/`process` bodies, validation).
+(`edit_session`, `kv_store`/adapters, `metadata` interface, registry); the user
+writes the rep logic (settings→stage derivations in `build_pipeline`, stage
+`params`/`process` bodies, validation). Nothing generic remains to scaffold on
+the serialization side — a schema/descriptor framework was tried there and
+removed (§18's superseding note); what's left is per-stage hand-written code
+(`params_hash()`, and the hand-written JSON in `vc_edit_document_io.h`/`.cpp`),
+which is the user's rep, not scaffolded plumbing.
 
 ### 14.1 Naming & aliasing convention [design NOW; B16]
 Two, and only two, spellings: **classes/structs/enums/concepts carry a `vc_`
@@ -807,9 +866,13 @@ Two bad poles, and a shared escape hatch:
 - **The escape (GEGL, vkdt; and what darktable's introspection would enable if not
   binary):** a **declarative per-parameter descriptor** as the single source of truth —
   from it, serialize + deserialize + default + range + UI + CLI are all *generated*, and
-  output stays readable. All five agents independently recommended this for us. It is
-  our §18 mechanism, and it is the reason named-field JSON collapses most of darktable's
-  `legacy_params` cascade into "unknown field ⇒ default."
+  output stays readable. All five agents independently recommended this for us. A
+  mechanism built on this principle (§18) was tried and then removed (§18's
+  superseding note) after its only real consumer turned out to be cache-keying,
+  which a per-stage hand-written hash serves just as well; named-field JSON
+  (hand-written, §4.4) still collapses most of darktable's `legacy_params`
+  cascade into "unknown field ⇒ default" on its own, without a generic
+  descriptor layer.
 
 ### 15.2 Params & serialization, per engine
 - **RawTherapee** — `ProcParams` = one master struct of ~30 per-*tool* sub-structs
@@ -818,32 +881,43 @@ Two bad poles, and a shared escape hatch:
   distinct from app version; back-compat via inline `if (ppVersion < N)` migrations
   scattered through `load()`. `ParamsEdited` tracks "was this field set" (powers partial
   presets/paste/batch). `ImProcCoordinator` reads across `ProcParams` to drive processing
-  stages that are **not** 1:1 with tools. **We adopt** the user-facing per-tool document;
-  **we fix** the whole-`ProcParams` coupling (narrow slices) and the hand-written
-  duplication (§18); **we defer** `ParamsEdited` (§17.4).
+  stages that are **not** 1:1 with tools. **We adopt** the user-facing per-tool document
+  and **fix** the whole-`ProcParams` coupling (narrow slices); the hand-written
+  duplication itself we now **accept** as a hand-written cost rather than solve
+  generically (a schema mechanism aimed at solving it was tried and removed —
+  §18's superseding note); **we defer** `ParamsEdited` (§17.4).
 - **darktable** — `dt_iop_params_t` per module; `DT_MODULE_INTROSPECTION(version, type)`
   + `$MIN/$MAX/$DEFAULT/$DESCRIPTION` field comments; a build-time Perl pass
   (`tools/introspection/parser.pl`) generates an introspection table
   (`dt_introspection_field_t`, offset-based). `legacy_params()` migrates old param blobs
   version-to-version. History serialized to XMP (`darktable:history`) as gzip+hex blob.
-  **We adopt** introspection-as-metadata + version-keyed migration + the (operation,
-  instance) stable key; **we avoid** hex blobs (named JSON) and the C-preprocessor
-  codegen (type-safe C++ descriptors instead).
+  **We adopt** version-keyed migration + the (operation, instance) stable key;
+  **we avoid** hex blobs — named JSON, hand-written, instead. (A schema-descriptor
+  mechanism — this doc's rough analogue of darktable's introspection-as-metadata
+  and its type-safe-descriptor alternative to C-preprocessor codegen — was tried,
+  as `vc_param_field`, and removed; see §18's superseding note.)
 - **GEGL** — every op is a GObject class; every param a **`GParamSpec`** (name, GType,
   default, min/max, nick/blurb) queryable via `gegl_operation_list_properties` — one
   reflection layer drives serialize + UI + CLI, *no per-op code*. Authoring via
   `gegl-op.h` "chant" X-macros; `ui_meta` string k/v for extensibility. Serializes to
   readable XML and a terse one-line "chain". **No versioning** (a named gap they told us
-  to close). **We adopt** the reflection-first principle (rebuilt as plain C++ `PropDesc`
-  without GObject); **we add** explicit `doc_version` + migration from day one.
+  to close). **We add** explicit `doc_version` + migration from day one. (A
+  reflection-first descriptor layer — this doc's rough analogue of GEGL's
+  `GParamSpec` reflection, rebuilt as plain C++ `PropDesc` without GObject — was
+  tried and removed; see §18's superseding note.)
 - **vkdt** — module *class* = a directory of declarative files: `params`
   (`name:type:count:default`), `params.ui` (widget + ranges, **separate** from data),
   `connectors` (typed named ports). Graph is a line-oriented token `.cfg`
   (`module:` / `connect:` / `param:`). Order is **derived** by topological sort, not
   stored. Module→node expansion (authoring graph vs execution graph). **We adopt** the
-  data-schema-vs-UI split and the authoring-vs-execution-graph idea. **vkdt's own
-  self-critique we heed:** put min/max in the *data* schema too (not UI-only), else
-  headless validation can't clamp.
+  authoring-vs-execution-graph idea. (A data-schema-vs-UI split — this doc's rough
+  analogue of vkdt's `params`/`params.ui` separation — was tried and removed; see
+  §18's superseding note.) **vkdt's own self-critique, heeded while the data schema
+  existed:** put min/max in the *data* schema too (not UI-only), else headless
+  validation can't clamp — moot now that there is no data schema to put it in
+  (§18's superseding note: no range-validation code exists anywhere in this
+  codebase); if range checking returns, it will be hand-written directly in a
+  stage's `validate_inputs()`, not sourced from a shared descriptor.
 
 ### 15.3 Buffer & cache models — the comparison
 | | Owns buffers | Stage sees | In-place | Cross-graph reuse | Cache |
@@ -898,12 +972,12 @@ For each fork: the choice, the lever that tipped it, and the status.
 | L2 | interaction order vs processing order | **canonical in code; doc stores no order** | order carries color-science correctness; configurable parts are *params*, structure is stable |
 | L3 | document = stage params vs user settings | **user settings; stages get narrow slices** | RT whole-`ProcParams` coupling; cache precision; testability |
 | L4 | params: variant bag vs typed struct | **typed struct, narrow slice** | hot-path directness; avoid stringly-typed; codebase consistency (`slot<T>`) |
-| L5 | serialization: hand-written vs schema-driven | **hand-written now, schema later** | few stages now; surface friction; schema is the end-state (§18) |
+| L5 | serialization: hand-written vs schema-driven | **hand-written, durably** | schema was tried and removed (§18's superseding note) — its only real consumer (cache-keying) is served just as well by a per-stage hand-written hash |
 | L6 | format: JSON vs XMP vs INI | **JSON (nlohmann)** | interop matters only for metadata; XMP RDF + GPL cost; edits are app-specific |
 | L7 | buffers: in-place vs new vs pooled | **pipeline-owned, pure stages, pooling later** | purity enables it; memory-budget headroom; in-place safety is *global* |
 | L8 | cache key: params-only vs +input-hash | **params slice + input hash (chained)** | correctness — params-only returns stale downstream ("metaphysical dependency") |
 | L9 | Kind A/C: unified vs separate stores | **separate stores, unified access (`edit_session`)** | different durability/format/interop; false-abstraction test |
-| L10 | interface: one store vs role-specific | **shared `kv_store`; typed + blob adapters** | substitutability test; the byte-KV is the real shared seam |
+| L10 | interface: one store vs role-specific | **`kv_store` (now Kind-C-only); blob adapters** | substitutability test; the byte-KV was the shared seam until Kind A's typed adapter was removed (§7, §18) |
 | L11 | assembly: hardcoded vs registry vs data | **construction registry now; code assembly; data-graph later** | wiring is always explicit; dynamic structure resists pure data |
 | L12 | determinism: automatic vs engineered | **engineered** | IEEE ops deterministic, but source ≠ computation (FMA/reassoc/transcendentals) |
 | L13 | immutability: convention vs type-guarantee | **type-guarantee (`vc_image_writer`/`seal`)** | greenfield C++ affords it; stronger than all four studied engines |
@@ -933,18 +1007,21 @@ scales; build against the real merge at P4.
 Execution already supports it (`i_pipe::name()` per-instance; the pipe design names "N
 align stages" explicitly). The homogeneous case needs *no* document multiplicity — one
 `align_settings` + `bracket_count`, and `build_pipeline` instantiates N. Heterogeneous
-instances become a `vector<settings>` field, handled by the container serializer (§18).
+instances become a `vector<settings>` field, hand-written like any other JSON array of
+custom objects (§4.4) — no generic container serializer is needed for this.
 **Verdict:** scales; document representation deferred to P4.
 
 ### 17.3 Custom config types (matrix, curve, structured mask) [scales]
 Cost is **per distinct type, written once, reused everywhere** (O(types), not O(uses)):
-a per-type serializer (a `mat3` writes as 9 numbers) and/or a nested sub-schema (a
-curve = a struct with its own schema; recursion), plus a container serializer for
-variable-length (`vector<brush_stroke>`). This is the cereal/boost.serialization pattern
-— proven to scale. The complexity concentrates in **one write-once generic serializer**
-(dispatch across scalar/custom/nested/container); per-stage code stays trivial. **Does
-not** hold opaque bulk (embeddings, raster pixels) — those are Kind C blobs, correctly
-not in the schema/document.
+a per-type `to_json`/`from_json` pair (nlohmann's ADL-based macro, already the
+mechanism behind `vc_edit_document_io.h`) handles a nested struct or a
+`vector<CustomType>` automatically once the type itself has its pair defined —
+verified empirically to nest and to serialize containers of custom objects
+correctly. This is hand-written, not schema-generated (a generic schema mechanism
+was tried and removed — §18's superseding note), but the *cost* still
+concentrates per-type, not per-use: a `mat3` gets one `to_json`/`from_json` pair,
+reused everywhere a `mat3` appears. **Does not** hold opaque bulk (embeddings,
+raster pixels) — those are Kind C blobs, correctly not in the document.
 
 ### 17.4 Masks — parametric / rasterized / AI [scales; two homes]
 - **Parametric mask** (brush strokes, curve nodes, feather) = **Kind A intent** →
@@ -988,7 +1065,7 @@ All ride the `std::any` packet on typed slots (§5.3); expensive/shared ones bec
 stage outputs → independently cacheable, tappable, persistable, inspectable. Uniform
 with pixels; no special-casing.
 
-## 18. The schema / serialization mechanism [BUILT — pulled forward 2026-07-17 by request]
+## 18. The schema / serialization mechanism [BUILT 2026-07-17, SUPERSEDED 2026-07-25 — see note below]
 
 Captures the §15.1 escape hatch as a concrete C++ design. Declare each field **once**;
 generate save/load/describe.
@@ -1005,6 +1082,28 @@ generate save/load/describe.
 > `doc_reader` bodies (still `TODO(you)`); `save`/`load` already work against any
 > conforming sink today. The hand-written per-field baseline remains valid for
 > user-facing settings — adopt the schema where it helps.
+
+> **[SUPERSEDED 2026-07-25].** The entire mechanism below — `vc_param_field`,
+> the `vc_param_struct_req`/`vc_param_writer_req`/`vc_param_reader_req`
+> concepts, `save()`/`load()`, and their host file
+> `include/vc/vc_param_schema.h` — is **removed**, after tracing its only
+> real downstream consumer (cache-keying) through in full. Its own stated
+> justification above ("more than serialization — ranges, UI hints,
+> cache-key material") rested on three legs; two never materialized (no
+> range-validation code exists anywhere in this codebase, and no UI exists
+> or is concretely planned), and the third — cache-key hashing — stopped
+> needing the schema's genericity once `i_pipe::params_hash()` became a
+> per-stage virtual method: that already gives the "uniform access across
+> concrete types" the schema was meant to provide. Hash-keying now uses a
+> direct hand-written combine per stage (e.g. `vc_blur_stage::params_hash()`),
+> mirroring `stage_port::hash()` — an established pattern in this codebase,
+> not a new one. `vc_edit_settings_writer`/`vc_edit_settings_reader`
+> (`doc_writer`/`doc_reader` above) are removed too, not "still gated" —
+> their entire reason to exist was serving as this mechanism's write target.
+> Everything below this note is preserved as a historical record of what
+> was built and why, not a description of current code. Not a one-way door:
+> cheap to reintroduce from git history if a second real params struct later
+> makes hand-written duplication genuinely painful.
 
 ```cpp
 // One schema entry: templated on the owning struct C and the field type T,
@@ -1080,7 +1179,10 @@ material), which is why a pure serialization library (e.g. cereal) wouldn't repl
   single `derived_store` shape is superseded by the two-store `i_edit_table`
   design (`vc_cached_edits_table` + `vc_persistent_edits_table`); see the
   `i_edit_table` / `vc_cached_edits_table` / `vc_persistent_edits_table` entry below
-  and §5/§7.
+  and §5/§7. **[SUPERSEDED 2026-07-25]** — `doc_writer`/`doc_reader` (Kind A's
+  typed adapter) are themselves removed along with the schema mechanism that
+  was their sole reason to exist (§18's superseding note); `kv_store` (shipped
+  as `i_table`) now serves Kind C only.
 - **narrow slice** — the small, per-stage subset of config a stage depends on (vs the
   whole document).
 - **purity** — a stage's output depends only on (inputs, params); no hidden state, no
@@ -1102,9 +1204,11 @@ material), which is why a pure serialization library (e.g. cereal) wouldn't repl
   matches export (§17.6).
 - **naming convention (B16, §14.1)** — classes/structs/enums/concepts: `vc_` prefix;
   type aliases: lowercase, no prefix, `using` only (never a strong wrapper type).
-- **`vc_param_field`** — Q2 rename of the schema field descriptor (`vc_field →
-  vc_param_field`, §18); applies to the shipped `struct vc_field`
-  (`include/vc/vc_param_schema.h:47`).
+- **`vc_param_field`** — **[SUPERSEDED 2026-07-25, see §18]** Q2 rename of the
+  schema field descriptor (`vc_field → vc_param_field`); the type itself, and
+  its host file `include/vc/vc_param_schema.h`, are removed along with the
+  rest of the schema mechanism (§18's superseding note). Historical entry,
+  kept for the naming-decision record.
 - **`i_table` family** — Q2 rename of the byte-store family: `vc_kv_store →
   i_table`, `vc_memory_kv_store → vc_memory_table`, `kv_bytes →
   data_bytes` (alias, no prefix) (§7).
