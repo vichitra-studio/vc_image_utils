@@ -39,19 +39,11 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(vc_edit_document, version,
 void save_edit_document(const std::filesystem::path& path,
                         const vc_edit_document& doc) {
     vc::io::ensure_parent_directory(path);
-    auto out = vc::io::open_for_write(path, "save_edit_document");
-
     const edit_user_setting_doc j = doc; // ADL to_json, generated above
-    out << j.dump(2);
-    out.flush(); // force the OS-level write now, so a failure (e.g. disk
-                 // full) surfaces here — operator<< alone only fills the
-                 // stream's internal buffer and may not fail even when the
-                 // underlying write eventually will.
-    if (!out) {
-        throw vc::vc_exception(vc::vc_error_code::encode_error,
-                               "save_edit_document: failed to write " +
-                                   path.string());
-    }
+    // Durable, atomic write: a failure partway through never truncates or
+    // corrupts a document that was already saved at `path` — see
+    // vc::io::write_file_atomically's own comment.
+    vc::io::write_file_atomically(path, j.dump(2), "save_edit_document");
 }
 
 vc_edit_document load_edit_document(const std::filesystem::path& path) {

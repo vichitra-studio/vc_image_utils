@@ -20,9 +20,12 @@
 namespace vc::edit {
 
 // Write `doc` to `path`, creating missing parent directories (mirrors
-// vc::io::stb_image_writer::write()). Throws vc::vc_exception(encode_error)
-// if `path` cannot be opened for writing, or if the write itself fails
-// partway (e.g. disk full).
+// vc::io::stb_image_writer::write()). Written durably and atomically
+// (vc::io::write_file_atomically): a failure at any point never truncates
+// or corrupts a document already saved at `path` — either the old content
+// stays exactly as it was, or the new content lands there whole. Throws
+// vc::vc_exception(encode_error) if the write fails or the file cannot be
+// put in place.
 void save_edit_document(const std::filesystem::path& path,
                         const vc_edit_document& doc);
 
