@@ -110,7 +110,6 @@
   .members li .k { color: var(--accent); }
   .members li .c { color: var(--muted); }
   .members li.done { background: color-mix(in srgb, var(--run) 12%, transparent); }
-  .members li.todo { background: color-mix(in srgb, var(--assembly) 13%, transparent); }
   .tag { font-family: var(--mono); font-size: .62rem; letter-spacing: .05em; padding: .05rem .35rem; border-radius: 4px; margin-left: .4rem; vertical-align: middle; }
   .tag.live { color: var(--run); border: 1px solid var(--run); }
   .tag.later { color: var(--assembly); border: 1px solid var(--assembly); }
@@ -276,8 +275,8 @@
       <ul class="members">
         <li>stage_name add(unique_ptr&lt;i_pipe&gt;) <span class="c">// takes ownership; returns the stage's own name()</span></li>
         <li><span class="k">template</span>&lt;Tout,Tin&gt; <span class="k">void</span> connect(stage_name, <span class="ty">slot&lt;Tout&gt;</span>, stage_name, <span class="ty">slot&lt;Tin&gt;</span>) <span class="c">// wire output slot → input slot</span></li>
-        <li><span class="k">void</span> validate() <span class="c">const</span> <span class="tag later">TODO(you)</span> <span class="c">— assembly-time type check</span></li>
-        <li>unordered_map&lt;<span class="ty">stage_port</span>, vc_pipe_packet&gt; run(unordered_map&lt;<span class="ty">stage_port</span>, vc_pipe_packet&gt;) <span class="c">const</span> <span class="tag later">TODO(you)</span></li>
+        <li><span class="k">void</span> validate() <span class="c">const</span> <span class="c">— assembly-time type check (implemented)</span></li>
+        <li>unordered_map&lt;<span class="ty">stage_port</span>, vc_pipe_packet&gt; run(unordered_map&lt;<span class="ty">stage_port</span>, vc_pipe_packet&gt;) <span class="c">const</span> <span class="c">(implemented)</span></li>
         <li class="sub"><span class="c">private struct</span> connection { <span class="ty">stage_port</span> from; <span class="ty">stage_port</span> to }</li>
         <li class="sub"><span class="c">private:</span> vector&lt;unique_ptr&lt;i_pipe&gt;&gt; stages_;&nbsp; vector&lt;connection&gt; connections_</li>
       </ul>
@@ -293,17 +292,17 @@
     </div>
 
     <div class="card" style="--tone:var(--assembly)">
-      <div class="card-head"><span class="name">vc_grayscale_stage</span><span class="stereotype">stage · TODO</span></div>
+      <div class="card-head"><span class="name">vc_sample_grayscale_stage</span><span class="stereotype">stage · sample (implemented)</span></div>
       <ul class="members">
-        <li class="todo">in <span class="slot">"rgb"</span> : <span class="ty">vc_image</span> <span class="arrow-h">→</span> out <span class="slot">"grey"</span> : <span class="ty">vc_image</span></li>
+        <li>in <span class="slot">"rgb"</span> : <span class="ty">vc_image</span> <span class="arrow-h">→</span> out <span class="slot">"grey"</span> : <span class="ty">vc_image</span></li>
       </ul>
       <div class="card-note">image → image. A plain Transform. <code class="inline">declare()</code> / <code class="inline">process()</code> are yours to write.</div>
     </div>
 
     <div class="card" style="--tone:var(--assembly)">
-      <div class="card-head"><span class="name">vc_mean_brightness_stage</span><span class="stereotype">stage · TODO</span></div>
+      <div class="card-head"><span class="name">vc_sample_mean_brightness_stage</span><span class="stereotype">stage · sample (implemented)</span></div>
       <ul class="members">
-        <li class="todo">in <span class="slot">"image"</span> : <span class="ty">vc_image</span> <span class="arrow-h">→</span> out <span class="slot">"mean"</span> : <span class="ty">double</span></li>
+        <li>in <span class="slot">"image"</span> : <span class="ty">vc_image</span> <span class="arrow-h">→</span> out <span class="slot">"mean"</span> : <span class="ty">double</span></li>
       </ul>
       <div class="card-note">image → <b>scalar</b>. The output is <em>not</em> an image — the exact case a plain <code class="inline">apply(image)→image</code> can't express. <b>This is why the whole design exists.</b></div>
     </div>
@@ -336,7 +335,7 @@
     <div class="phase-head"><span class="n">1</span><span class="t">Assembly &amp; validation<small>no pixels move — declarations only</small></span></div>
     <div class="phase-body">
       <div class="step"><div class="idx">1</div><div class="body">
-        <code>const auto grey = pipe.add(make_unique&lt;vc_grayscale_stage&gt;("grey"));</code>
+        <code>const auto grey = pipe.add(make_unique&lt;vc_sample_grayscale_stage&gt;("grey"));</code>
         <p>Stations mounted on the belt. Each stage carries its <em>own</em> name; <code class="inline">add()</code> returns it for typo-safe wiring. (Same for <code class="inline">"mean"</code>.)</p>
       </div></div>
       <div class="step"><div class="idx">2</div><div class="body">
@@ -411,9 +410,9 @@
         <tr><td>the interface</td><td><span class="f">include/vc/pipe/i_pipe.h</span></td><td>done</td></tr>
         <tr><td>contract + author-facing builder view</td><td><span class="f">…/vc_pipe_contract.h · vc_pipe_contract_builder.h · src/pipe/vc_pipe_contract.cpp</span></td><td>done</td></tr>
         <tr><td>per-run tray</td><td><span class="f">…/vc_pipe_context.h · src/pipe/vc_pipe_context.cpp</span></td><td>done</td></tr>
-        <tr><td>belt + foreman</td><td><span class="f">…/vc_pipeline.h · src/pipe/vc_pipeline.cpp</span></td><td>add/connect done · validate/run <b>TODO</b></td></tr>
+        <tr><td>belt + foreman</td><td><span class="f">…/vc_pipeline.h · src/pipe/vc_pipeline.cpp</span></td><td>add/connect · validate/run — all implemented</td></tr>
         <tr><td>worked reference stage</td><td><span class="f">…/stages/vc_passthrough_stage.*</span></td><td>done</td></tr>
-        <tr><td>grayscale, mean-brightness</td><td><span class="f">…/stages/vc_grayscale_stage.* · vc_mean_brightness_stage.*</span></td><td><b>TODO(you)</b></td></tr>
+        <tr><td>grayscale, mean-brightness</td><td><span class="f">tests/samples/vc_sample_grayscale_stage.* · vc_sample_mean_brightness_stage.*</span></td><td>implemented — <b>moved to tests/samples/</b> (not in the library)</td></tr>
         <tr><td>tests (14 green + 6 red-spec)</td><td><span class="f">tests/test_vc_pipe.cpp</span></td><td>done</td></tr>
       </tbody>
     </table>

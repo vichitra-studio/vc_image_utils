@@ -25,16 +25,19 @@ class vc_pipeline {
     // Take ownership of a stage. The stage carries its OWN name (i_pipe::name),
     // so there is no separate name argument. Returns that name so wiring can
     // refer to the stage without restating the string literal:
-    //   const auto grey =
-    //   pipe.add(std::make_unique<vc_grayscale_stage>("grey"));
-    //   pipe.connect(grey, vc_grayscale_stage::slots::grey,
-    //                mean, vc_mean_brightness_stage::slots::image);
+    //   const auto a = pipe.add(std::make_unique<vc_passthrough_stage>("a"));
+    //   const auto b = pipe.add(std::make_unique<vc_passthrough_stage>("b"));
+    //   pipe.connect(a, vc_passthrough_stage::slots::out,
+    //                b, vc_passthrough_stage::slots::in);
     stage_name add(stage_ptr pipe);
 
     // Wire an upstream OUTPUT slot to a downstream INPUT slot, each named by
     // its stage plus a typed slot descriptor:
-    //   pipe.connect(grey, vc_grayscale_stage::slots::grey,
-    //                mean, vc_mean_brightness_stage::slots::image);
+    //   pipe.connect(a, vc_passthrough_stage::slots::out,
+    //                b, vc_passthrough_stage::slots::in);
+    // (For a HETEROGENEOUS example — an image->image stage feeding an
+    // image->double analyzer — see the vc_sample_* stages in tests/samples/;
+    // vc_passthrough_stage is the only stage the library itself ships.)
     // Taking slot<T> (not a raw slot name) keeps the wiring typo-safe and keeps
     // the name-keyed stage_port ctor off the assembly surface — every wire is
     // spelled through a stage's `slots::` members (Sec 12.5).
@@ -89,8 +92,9 @@ class vc_pipeline {
     // i_pipe::process()/vc_pipe_context (each per-stage vc_pipe_context is
     // built with a copy of `run_context`), so a stage MAY add an
     // in-process cancellation checkpoint by reading
-    // context.run_context().cancelled() — no stage does yet
-    // (vc_blur_stage::process() stays a rep shell).
+    // context.run_context().cancelled() — no stage does yet (not even the
+    // longest-running one, vc_sample_blur_stage in tests/samples/, whose
+    // kernel IS implemented but checks cancellation only between stages).
     render_io_map run(render_io_map inputs,
                       const vc_render_context& run_context = {}) const;
 

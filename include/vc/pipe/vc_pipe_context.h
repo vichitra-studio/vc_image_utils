@@ -36,7 +36,8 @@ namespace vc::pipe {
 //
 // Also carries the run's vc_render_context: a stage MAY read cancelled()
 // from its context to add an in-process checkpoint, though no stage does
-// yet (vc_blur_stage::process() stays a throwing rep shell regardless). The
+// yet — including tests/samples/vc_sample_blur_stage, whose kernel is
+// implemented but relies on run()'s between-stage check alone. The
 // context is held BY VALUE (it is a cheap, copyable value type wrapping one
 // token) rather than by reference, so a vc_pipe_context never outlives the
 // run_context it was built with.

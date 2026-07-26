@@ -54,7 +54,8 @@ class i_pipe {
     virtual const char* kind() const = 0;
 
     // This instance's params identity, as a hand-written hash combine (see
-    // e.g. vc_blur_stage::params_hash()) — PER-INSTANCE, unlike kind(), since
+    // e.g. tests/samples/vc_sample_blur_stage.cpp) — PER-INSTANCE, unlike
+    // kind(), since
     // two stages of the same kind can carry different params. PURE, matching
     // validate_inputs()'s "no stage inherits a silent default" rationale: a
     // paramless stage still states its answer explicitly (a fixed 0), rather

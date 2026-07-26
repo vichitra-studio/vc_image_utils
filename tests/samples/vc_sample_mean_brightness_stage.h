@@ -12,16 +12,18 @@ class vc_image; // named only in the typed slot descriptors below
 
 namespace vc::pipe {
 
-// image -> image. Collapses an RGB image to a single-channel luminance image.
-// A representative P1-era Transform stage. declare() and process() are
-// TODO(you) — follow vc_passthrough_stage as the pattern.
-class vc_grayscale_stage : public i_pipe {
+// A SAMPLE stage: image -> a NON-image (double) output — the heterogeneous
+// type contract the pipe framework exists to support. Lives in
+// tests/samples/, not the library — a worked example, not a production
+// filter; no dependency on vc_edit_session/vc_edit_document.
+class vc_sample_mean_brightness_stage : public i_pipe {
   public:
-    explicit vc_grayscale_stage(stage_name name);
+    explicit vc_sample_mean_brightness_stage(stage_name name);
 
+    // This stage's typed slots — the ONE place its ports are named and typed.
     struct slots {
-        static constexpr slot<vc::vc_image> rgb{"rgb"};
-        static constexpr slot<vc::vc_image> grey{"grey"};
+        static constexpr slot<vc::vc_image> image{"image"};
+        static constexpr slot<double> mean{"mean"};
     };
 
     const char* kind() const override;

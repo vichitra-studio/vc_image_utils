@@ -751,8 +751,8 @@ restated-string cost the deferred `add()`-returns-a-handle ergonomics in §12.4 
 
 > **`make_port(stage_name, slot<T>) → port`** [DECIDED] closes this — `run()`'s map keys are built
 > typo-safely from a slot descriptor, matching `connect()`'s safety:
-> `make_port("grey", vc_grayscale_stage::slots::rgb)` instead of hand-assembling
-> `port{ "grey", vc_grayscale_stage::slots::rgb.name }`. Used both to build the input map and to
+> `make_port("grey", vc_sample_grayscale_stage::slots::rgb)` instead of hand-assembling
+> `port{ "grey", vc_sample_grayscale_stage::slots::rgb.name }`. Used both to build the input map and to
 > look results up in the returned map.
 
 **`validate`.** Build each stage's contract via `declare()`, then per connection compare
@@ -760,9 +760,16 @@ restated-string cost the deferred `add()`-returns-a-handle ergonomics in §12.4 
 Type layer only; the data layer is `[LATER]`. Body is `TODO(you)`.
 
 **Stages.** Each: ctor takes a `stage_name` → forwards to `i_pipe(name)`; implements `kind()`;
-defines its `slots`. `vc_passthrough_stage` is the fully-implemented **worked reference**;
-`vc_grayscale_stage` (image → image) and `vc_mean_brightness_stage` (image → `double` analyzer, the
-heterogeneous case) have `declare()` / `process()` as `TODO(you)`.
+defines its `slots`. `vc_passthrough_stage` is the fully-implemented **worked reference** and the
+only stage in the library.
+
+> **Superseded (2026-07-26).** `vc_grayscale_stage` (image → image) and `vc_mean_brightness_stage`
+> (image → `double` analyzer, the heterogeneous case) were once library stages with `declare()` /
+> `process()` left as `TODO(you)`. They — plus `vc_blur_stage` — now live in **`tests/samples/`**
+> as `vc_sample_grayscale_stage`, `vc_sample_mean_brightness_stage`, and `vc_sample_blur_stage`,
+> with their kernels **fully implemented** and their params hardcoded at construction. They are
+> worked examples of the framework's mechanics, not production filters, so they are compiled into
+> the test binary only and the library no longer links them.
 
 **Input access is read-only by construction.** `ctx.in(...)` returns `const T&`, so a stage reads
 its input image through `vc_image::pixels()` (const) and **produces a new image** rather than
@@ -780,7 +787,7 @@ an ownership check (`use_count() == 1`) is `[LATER]`.
 | D | `slot_builder` deferred to the data-contract phase; `add_*` returns `void` for now | me |
 | E | `port` + `operator==` / `std::hash` + `make_port(name, slot<T>)`; `connect(name, slot<T>, name, slot<U>)` | me |
 | F | `vc_pipeline`: `run()` → **map variant**; `validate()` uses type projections | signatures me · **bodies you** |
-| G | Stages: name / kind / `slots`; passthrough implemented; grayscale + mean-brightness `TODO(you)` | me (shells) · **bodies you** |
+| G | Stages: name / kind / `slots`; passthrough implemented; grayscale + mean-brightness `TODO(you)` — ⚠️ **superseded 2026-07-26**: those two (and blur) moved to `tests/samples/` as `vc_sample_*` with kernels now written; see the note in §12.2 | me (shells) · **bodies you** |
 | H | Tests updated to the new API; green primitives + red-spec (incl. a multi-input map-`run` case) | me |
 
 Also in this batch (me): `vc_pipe_context` gains the author-facing `in(slot<T>)` /

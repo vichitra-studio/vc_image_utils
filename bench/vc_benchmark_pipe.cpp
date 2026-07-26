@@ -8,16 +8,13 @@
 // Rung 2b (pipeline.run()) is the sibling vc_benchmark_pipeline suite, per the
 // one-binary-per-category split (Sec 7).
 //
-// REALITY GATE (Sec 9): EVERY case in this suite runs and prints (each calls
-// the REAL stage API and is wired to light up untouched the moment its rep
-// lands), but NONE is baseline-eligible yet, so nothing here enters the
-// committed timeseries today. `passthrough` process() is implemented, but both
-// its ladder rungs copy a vc_image whose buffer is null under the stubbed ctor
-// (see the case comment) — a "partial floor", gated on the vc_image ctor.
-// `grayscale` / `mean_brightness` process() bodies are still your TODO reps,
-// gated on those kernels. The vc_benchmark_harness suite carries the real
-// baselines today; this suite's cases land as each rep is implemented and its
-// case flipped to eligible.
+// REALITY GATE (Sec 9): the one case in this suite runs and prints (it calls
+// the REAL stage API), but it is not baseline-eligible yet — see the case
+// comment. The vc_benchmark_harness suite carries the real baselines today.
+//
+// grayscale/mean_brightness (and blur) moved to tests/samples/ — worked
+// examples for pipe-framework mechanics, not production stages the library
+// links, so they are no longer benchmark subjects here.
 //
 // Run:  vc_benchmark_pipe
 //       vc_benchmark_pipe passthrough --baseline
@@ -31,8 +28,6 @@
 #include "nanobench.h"
 #include "vc_bench_support.h"
 
-#include "vc/pipe/stages/vc_grayscale_stage.h"
-#include "vc/pipe/stages/vc_mean_brightness_stage.h"
 #include "vc/pipe/stages/vc_passthrough_stage.h"
 #include "vc/pipe/vc_pipe_context.h"
 #include "vc/pipe/vc_pipe_packet.h"
@@ -129,51 +124,6 @@ std::vector<vc::bench::bench_case> micro_cases() {
              // anchored without a per-iteration harvest that would pollute the
              // timing (take_outputs() moves the whole map out).
              bench.run("rung2a stage.process()", [&] {
-                 stage.process(ctx);
-                 ankerl::nanobench::doNotOptimizeAway(&ctx);
-             });
-         }});
-
-    cases.push_back(
-        {"grayscale", /*baseline_eligible=*/false,
-         [](ankerl::nanobench::Bench& bench) {
-             using stage_t = vc::pipe::vc_grayscale_stage;
-             const stage_t stage("bench_grayscale");
-             const vc::vc_image image =
-                 vc::vc_image::zeros<vc::buf_f32>(kWidth, kHeight, kChannels);
-
-             const vc::pipe::slot_name in_slot{stage_t::slots::rgb.name};
-
-             vc::pipe::vc_pipe_context ctx{one_input(in_slot, image)};
-
-             // No correctness gate yet: process() is a no-op stub, so there is
-             // no output to assert. Add a check() here when you implement the
-             // luminance kernel (and flip baseline_eligible to true).
-             bench.unit("pixel")
-                 .batch(static_cast<double>(kWidth) * kHeight)
-                 .relative(false);
-             bench.run("grayscale stage.process() [STUB]", [&] {
-                 stage.process(ctx);
-                 ankerl::nanobench::doNotOptimizeAway(&ctx);
-             });
-         }});
-
-    cases.push_back(
-        {"mean_brightness", /*baseline_eligible=*/false,
-         [](ankerl::nanobench::Bench& bench) {
-             using stage_t = vc::pipe::vc_mean_brightness_stage;
-             const stage_t stage("bench_mean");
-             const vc::vc_image image =
-                 vc::vc_image::zeros<vc::buf_f32>(kWidth, kHeight, kChannels);
-
-             const vc::pipe::slot_name in_slot{stage_t::slots::image.name};
-
-             vc::pipe::vc_pipe_context ctx{one_input(in_slot, image)};
-
-             bench.unit("pixel")
-                 .batch(static_cast<double>(kWidth) * kHeight)
-                 .relative(false);
-             bench.run("mean_brightness stage.process() [STUB]", [&] {
                  stage.process(ctx);
                  ankerl::nanobench::doNotOptimizeAway(&ctx);
              });

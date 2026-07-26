@@ -3,38 +3,18 @@
 
 #pragma once
 
-#include <concepts>
 #include <functional>
 #include <memory>
 #include <string>
-#include <type_traits>
 #include <unordered_map>
 #include <utility>
 
 #include "vc/edit/vc_edit_session.h"
+#include "vc/edit/vc_stage_params.h"
 #include "vc/pipe/i_pipe.h"
 #include "vc/pipe/vc_pipe_types.h"
 
 namespace vc::edit {
-
-// A builder is concept-enforced (not merely duck-typed) at REGISTRATION
-// time (register_stage below), not at USE time (create): it must be
-// invocable with `const vc_edit_session&` (the translation build_pipeline
-// performs — e.g. `&vc_blur_stage::from_session`, a pointer to a static
-// member function on the stage itself; the vc_stage_builder_req concept below
-// accepts this identically to a free function, since both just satisfy
-// `std::invocable<const Builder&, const vc_edit_session&>`), and its
-// result must be exactly what StageT's constructor needs alongside the
-// per-instance name: `StageT(stage_name, Builder-result)`.
-// `register_stage<StageT>(kind, builder)` captures the concrete type + its
-// params-builder + ctor behind one uniform `create(kind, name, session)`.
-// No casts anywhere in the call path.
-template <typename Builder, typename StageT>
-concept vc_stage_builder_req =
-    std::invocable<const Builder&, const vc_edit_session&> &&
-    std::constructible_from<
-        StageT, vc::pipe::stage_name,
-        std::invoke_result_t<const Builder&, const vc_edit_session&>>;
 
 // The construction `kind()` registry. It fulfils the i_pipe::kind() seam,
 // removes hardcoded `new`-chains, and enables CLI introspection. It maps a
@@ -44,16 +24,30 @@ concept vc_stage_builder_req =
 // to STATE it; a data-driven graph template is [LATER].
 //
 // TWO registration/construction paths coexist:
-//   - register_kind/create(kind,name) — the ORIGINAL, name-only path, kept
-//     for paramless stages (e.g. a passthrough/plumbing stage) that need no
-//     session-derived params.
-//   - register_stage<StageT>(kind,builder)/create(kind,name,session) — the
-//     session-aware path: the builder derives StageT's params FROM the
-//     session (the translation build_pipeline performs), so a caller never
-//     `new`-chains a concrete stage type or restates its ctor signature.
+//   - register_kind/create(kind,name) — the name-only path, for PARAMLESS
+//     stages (e.g. a passthrough/plumbing stage) that need no session-derived
+//     params. Takes a factory callable because there is no params type to
+//     look up.
+//   - register_stage<StageT>(kind)/create(kind,name,session) — the
+//     session-aware path for stages that DO carry params. The translation is
+//     looked up from vc_stage_params<StageT> (vc_stage_params.h), not passed
+//     in, so a caller never `new`-chains a concrete stage type, restates its
+//     ctor signature, or re-invents its session mapping.
+//
+// A session -> params BUILDER ARGUMENT used to be passed to register_stage
+// instead. It was removed in favour of the type-keyed trait: a builder
+// argument could not enforce that a stage HAS a translation (a caller could
+// always pass an ad-hoc lambda), and let one stage type acquire a different
+// mapping at every call site. The trait makes the mapping a property of the
+// stage type — one canonical translation, enforced at compile time. The
+// deliberate trade-off is that the registry can no longer give one stage type
+// two different session mappings; a graph that genuinely needs that
+// constructs those stages directly in build_pipeline rather than through
+// this registry.
+//
 // Every method here is map-operation PLUMBING — there is no rep; the stage
-// kind() REGISTRATIONS (which stages exist, and their builders) are
-// populated in build_pipeline, the user's rep.
+// kind() REGISTRATIONS (which stages exist) are populated in build_pipeline,
+// the user's rep.
 class vc_stage_registry {
   public:
     // A registered kind string (e.g. "blur", "passthrough") — the same
@@ -82,21 +76,28 @@ class vc_stage_registry {
     vc::pipe::stage_ptr create(const stage_kind& kind,
                                vc::pipe::stage_name name) const;
 
-    // Register `StageT` under `kind`, erasing its concrete type and
-    // `builder` (a session -> params translation) behind one uniform
-    // session_factory. Concept-enforced at THIS call site (vc_stage_builder_req
-    // above) — an ill-shaped builder/StageT pairing fails to compile here,
-    // never at create()'s call site. A later registration for the same kind
-    // overwrites the earlier one (last-wins), matching register_kind.
-    template <typename StageT, typename Builder>
-        requires vc_stage_builder_req<Builder, StageT>
-    void register_stage(const stage_kind& kind, Builder builder) {
+    // Register `StageT` under `kind`, erasing its concrete type behind one
+    // uniform session_factory. The session -> params translation is NOT
+    // passed in: it is looked up from vc_stage_params<StageT> (see
+    // vc_stage_params.h), so a stage type has exactly ONE canonical
+    // translation rather than one per call site, and a stage that never
+    // stated its translation cannot be registered at all.
+    //
+    // Concept-enforced at THIS call site (vc_stage_params_req) — a missing or
+    // ill-shaped specialization fails to compile HERE, naming StageT, never
+    // at create()'s call site and never at runtime. A later registration for
+    // the same kind overwrites the earlier one (last-wins), matching
+    // register_kind.
+    template <typename StageT>
+        requires vc_stage_params_req<StageT>
+    void register_stage(const stage_kind& kind) {
+        require_not_registered_as_paramless(kind);
         session_factories_[kind] =
-            [builder = std::move(builder)](
-                vc::pipe::stage_name name,
-                const vc_edit_session& session) -> vc::pipe::stage_ptr {
-                return std::make_unique<StageT>(std::move(name),
-                                                builder(session));
+            [](vc::pipe::stage_name name,
+               const vc_edit_session& session) -> vc::pipe::stage_ptr {
+                return std::make_unique<StageT>(
+                    std::move(name),
+                    vc_stage_params<StageT>::from_session(session));
             };
     }
 
@@ -112,6 +113,17 @@ class vc_stage_registry {
     bool has(const stage_kind& kind) const noexcept;
 
   private:
+    // Cross-path collision guards. The two registration paths own SEPARATE
+    // maps, so register_kind's last-wins rule does not reach across them:
+    // without these, one kind string could be registered on both and then
+    // resolve to a DIFFERENT stage type depending on which create() overload
+    // a caller happened to use, with has() unable to tell them apart. That is
+    // a silently-wrong stage rather than an error, so each path rejects a
+    // kind the other already claims. (Re-registering on the SAME path is
+    // still last-wins — only the cross-path case is a contradiction.)
+    void require_not_registered_as_paramless(const stage_kind& kind) const;
+    void require_not_registered_as_session_aware(const stage_kind& kind) const;
+
     std::unordered_map<stage_kind, factory> factories_;
     std::unordered_map<stage_kind, session_factory> session_factories_;
 };

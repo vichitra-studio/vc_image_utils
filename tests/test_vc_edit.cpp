@@ -18,9 +18,11 @@
 #include "vc/edit/vc_render_image.h"
 #include "vc/edit/vc_render_request.h"
 #include "vc/edit/vc_stage_registry.h"
-#include "vc/pipe/stages/vc_blur_stage.h"
+#include "samples/vc_sample_blur_stage.h"
+#include "vc/pipe/i_pipe.h"
 #include "vc/pipe/stages/vc_passthrough_stage.h"
 #include "vc/pipe/vc_cancellation_token.h"
+#include "vc/pipe/vc_pipe_contract.h"
 #include "vc/pipe/vc_pipe_packet.h"
 #include "vc/pipe/vc_pipe_types.h"
 #include "vc/pipe/vc_pipeline.h"
@@ -28,6 +30,7 @@
 #include "vc/vc_exception.h"
 #include "vc/vc_image.h"
 
+#include <concepts>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -269,40 +272,193 @@ TEST_CASE("vc_stage_registry: register -> has -> create round-trips a kind") {
     CHECK_THROWS_AS(registry.create("nope", "x"), vc::vc_exception);
 }
 
+// Fill in the session -> params slot for the sample stage. A LIBRARY stage
+// declares its specialization in vc/edit/vc_stage_params.h and defines it in
+// src/edit/vc_stage_params.cpp; vc_sample_blur_stage is a tests/samples/
+// worked example, so its specialization lives here in the one TU that uses
+// it — which also demonstrates the trait's OPEN-SET property: a translation
+// can be added from any file, without editing the framework header. Defined
+// inline in the struct (hence implicitly inline), so this stays ODR-safe.
+namespace vc::edit {
+template <>
+struct vc_stage_params<vc::pipe::vc_sample_blur_stage> {
+    static vc::pipe::vc_sample_blur_params
+    from_session(const vc_edit_session& session) {
+        // DERIVED from a session slice rather than returning defaults, so the
+        // test below can prove two things a constant could not: that the
+        // trait is really consulted (a default-valued result is
+        // indistinguishable from "never called"), and that the session
+        // reaching it is the very one handed to create(). A real stage would
+        // read its own knob; the sample stage has none, so exposure.ev
+        // stands in as an arbitrary observable input.
+        vc::pipe::vc_sample_blur_params params;
+        params.radius = 1.0 + session.edits().exposure.ev;
+        return params;
+    }
+};
+} // namespace vc::edit
+
+// The ENFORCEMENT itself, pinned at compile time — the whole point of
+// replacing the builder argument with this trait. A stage that never stated
+// its session -> params translation does NOT satisfy the concept, so
+// register_stage<X>() will not compile for it. Asserted rather than merely
+// documented so that accidentally making the concept vacuously true (e.g.
+// giving the primary template a definition) fails the build here.
+namespace {
+// A stage type that is params-SHAPED — its ctor takes (stage_name, params),
+// so std::constructible_from is satisfiable — but that deliberately has NO
+// vc_stage_params specialization.
+//
+// The subject has to be shaped this way for the negative assert to mean
+// anything. Using vc_passthrough_stage here (an earlier revision did) makes
+// the assert OVERDETERMINED: its ctor takes only a name, so the concept is
+// false whether or not a specialization exists — verified by compiling a
+// probe that specialized the trait for it and watching the assert still
+// pass. With this type, "missing specialization" is the ONLY reason left,
+// so the assert genuinely pins the enforcement.
+struct unregistered_params {
+    double v = 0.0;
+};
+class unregistered_stage : public vc::pipe::i_pipe {
+  public:
+    unregistered_stage(vc::pipe::stage_name name, unregistered_params)
+        : i_pipe(std::move(name)) {
+    }
+    const char* kind() const override {
+        return "unregistered";
+    }
+    std::size_t params_hash() const override {
+        return 0;
+    }
+    void declare(vc::pipe::vc_pipe_contract&) const override {
+    }
+
+  private:
+    void validate_inputs(const vc::pipe::vc_pipe_context&) const override {
+    }
+    void do_process(vc::pipe::vc_pipe_context&) const override {
+    }
+};
+} // namespace
+
+// Sanity: the type really IS constructible from (name, params), so the
+// negative assert below cannot be passing for that reason.
+static_assert(std::constructible_from<unregistered_stage, vc::pipe::stage_name,
+                                      unregistered_params>);
+static_assert(!vc::edit::vc_stage_params_req<unregistered_stage>,
+              "a stage with no vc_stage_params specialization must NOT "
+              "satisfy vc_stage_params_req");
+
+// This also pins that naming the undefined primary inside the concept is
+// SFINAE-friendly (evaluates to false) rather than a hard error — the
+// property that makes register_stage()'s clean diagnostic possible, and the
+// one most at risk of differing on another toolchain.
+
+// ...and the positive half: the specialization above really does satisfy it.
+static_assert(vc::edit::vc_stage_params_req<vc::pipe::vc_sample_blur_stage>,
+              "vc_sample_blur_stage's vc_stage_params specialization should "
+              "satisfy vc_stage_params_req");
+
 TEST_CASE("vc_stage_registry: register_stage -> create(kind,name,session)"
-          " round-trips a kind through the session-aware path (GREEN —"
-          " create() is map-lookup plumbing; the builder here is a"
-          " non-throwing STUB, not vc_blur_stage::from_session, which is a"
-          " separate rep)") {
+          " round-trips a kind through the session-aware path, taking its"
+          " params from the vc_stage_params<StageT> trait") {
     vc::edit::vc_stage_registry registry;
-    CHECK_FALSE(registry.has("blur")); // nothing registered yet
+    CHECK_FALSE(registry.has("sample_blur")); // nothing registered yet
 
-    // A stub builder (NOT vc_blur_stage::from_session — that is a TODO(you)
-    // rep and would make this structural test red for the wrong reason).
-    // Concept-enforced at THIS call: the builder is invocable with `const
-    // vc_edit_session&` and its result constructs vc::pipe::vc_blur_stage
-    // alongside a stage_name.
-    registry.register_stage<vc::pipe::vc_blur_stage>(
-        "blur", [](const vc::edit::vc_edit_session&) {
-            return vc::pipe::vc_blur_params{};
-        });
-    CHECK(registry.has("blur"));
+    // No builder argument: the translation comes from the specialization
+    // above. Concept-enforced at THIS call (vc_stage_params_req) — had the
+    // specialization been missing, this line would not compile.
+    registry.register_stage<vc::pipe::vc_sample_blur_stage>("sample_blur");
+    CHECK(registry.has("sample_blur"));
 
+    // A NON-default slice value, so the radius the trait derives from it
+    // (1.0 + ev = 4.0) is distinguishable both from the params default (1.0)
+    // and from "the trait was never called".
     const auto img = vc::vc_image::zeros<vc::buf_f32>(2, 2, 3);
+    vc::edit::vc_edit_document doc;
+    doc.exposure.ev = 3.0;
     vc::edit::vc_memory_table backing;
     vc::edit::vc_persistent_edits_table persistent{backing};
     vc::edit::vc_cached_edits_table cache{backing};
     const vc::edit::vc_edit_session session{
-        img, vc::edit::vc_edit_document{},
-        std::make_unique<vc::edit::vc_memory_image_meta>(), persistent, cache};
+        img, doc, std::make_unique<vc::edit::vc_memory_image_meta>(),
+        persistent, cache};
 
-    const auto stage = registry.create("blur", "b", session);
+    const auto stage = registry.create("sample_blur", "b", session);
     REQUIRE(stage != nullptr);
-    CHECK(std::string{stage->kind()} == "blur"); // per-type identity
+    CHECK(std::string{stage->kind()} == "sample_blur"); // per-type identity
     CHECK(stage->name() == "b");                 // per-instance name
+
+    // THE point of the trait: the params the stage was built with really came
+    // out of vc_stage_params<StageT>::from_session(), fed by THIS session.
+    // Without this the test would pass even if create() default-constructed
+    // the params and never consulted the trait at all.
+    const auto* blur =
+        dynamic_cast<const vc::pipe::vc_sample_blur_stage*>(stage.get());
+    REQUIRE(blur != nullptr);
+    CHECK(blur->params().radius == doctest::Approx(4.0)); // 1.0 + ev(3.0)
 
     // An unknown kind throws (map-lookup-or-throw plumbing) on this path too.
     CHECK_THROWS_AS(registry.create("nope", "x", session), vc::vc_exception);
+}
+
+TEST_CASE("vc_stage_registry: one kind cannot be claimed by BOTH registration"
+          " paths") {
+    // The two paths own separate maps, so without an explicit guard the same
+    // kind string could live in both and resolve to a DIFFERENT stage type
+    // depending on which create() overload the caller used — a silently wrong
+    // stage, with has() unable to distinguish them. Rejected at registration
+    // instead, in both directions.
+    auto paramless = [](vc::pipe::stage_name name) {
+        return std::make_unique<vc::pipe::vc_passthrough_stage>(
+            std::move(name));
+    };
+
+    SUBCASE("paramless first, then session-aware") {
+        vc::edit::vc_stage_registry registry;
+        registry.register_kind("clash", paramless);
+        CHECK_THROWS_AS(
+            registry.register_stage<vc::pipe::vc_sample_blur_stage>("clash"),
+            vc::vc_exception);
+
+        // STRONG guarantee: the rejected registration must leave NO residue.
+        // Throwing but still having inserted into session_factories_ would
+        // reintroduce the very split-brain this guard exists to prevent, and
+        // a bare CHECK_THROWS_AS cannot tell the two apart.
+        CHECK(registry.create("clash", "n")->kind() == std::string{"passthrough"});
+        const auto img = vc::vc_image::zeros<vc::buf_f32>(2, 2, 3);
+        vc::edit::vc_memory_table backing;
+        vc::edit::vc_persistent_edits_table persistent{backing};
+        vc::edit::vc_cached_edits_table cache{backing};
+        const vc::edit::vc_edit_session session{
+            img, vc::edit::vc_edit_document{},
+            std::make_unique<vc::edit::vc_memory_image_meta>(), persistent,
+            cache};
+        CHECK_THROWS_AS(registry.create("clash", "n", session),
+                        vc::vc_exception);
+    }
+
+    SUBCASE("session-aware first, then paramless") {
+        vc::edit::vc_stage_registry registry;
+        registry.register_stage<vc::pipe::vc_sample_blur_stage>("clash");
+        CHECK_THROWS_AS(registry.register_kind("clash", paramless),
+                        vc::vc_exception);
+
+        // Same strong guarantee in the other direction: the name-only map
+        // must be untouched, so create(kind,name) still reports unknown kind.
+        CHECK_THROWS_AS(registry.create("clash", "n"), vc::vc_exception);
+    }
+
+    SUBCASE("re-registering on the SAME path is still last-wins, not an error") {
+        vc::edit::vc_stage_registry registry;
+        registry.register_kind("same", paramless);
+        CHECK_NOTHROW(registry.register_kind("same", paramless));
+
+        registry.register_stage<vc::pipe::vc_sample_blur_stage>("also_same");
+        CHECK_NOTHROW(
+            registry.register_stage<vc::pipe::vc_sample_blur_stage>(
+                "also_same"));
+    }
 }
 
 // =====================================================================

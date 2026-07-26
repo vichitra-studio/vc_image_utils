@@ -31,6 +31,12 @@ Landed + verified earlier this session (build clean, tests 70/43/27):
    interface + two impls `vc_evictable_cache` + `vc_persistent_store` (Part C-2).
 3. **[SUPERSEDES]** `vc_blur_stage::from_session` static shell → free builder function in the
    **edit** layer, supplied at registration; the static is REMOVED from the stage (Part C-4).
+   → ⚠️ **Itself superseded (2026-07-26).** The builder-supplied-at-registration step was
+   removed too. The session → params translation is now a **type-keyed trait**,
+   `vc::edit::vc_stage_params<StageT>::from_session()` (`include/vc/edit/vc_stage_params.h`),
+   looked up by `register_stage<StageT>(kind)` — which no longer takes a builder argument.
+   Rationale: a builder argument could not *enforce* that a stage has a translation, and let
+   one stage type acquire a different mapping at every call site.
 4. **[SUPERSEDES]** `vc_pipeline::run(inputs, const vc_cancellation_token& = {})` → takes the
    run context instead (Part C-3).
 5. **Still valid, unchanged:** `stage_ptr`, `content_hash` (now the cache key), `doc_key`,
@@ -84,6 +90,8 @@ The blueprint of record. None of these are "build now" unless also listed in Par
 10. **Registry-erased construction:** `register_stage<StageT>(kind, builder)` captures the
     concrete type + its edit-layer params builder + ctor into a uniform
     `create(kind, name, session) -> stage_ptr`. No casts; concept-enforced at registration.
+    → ⚠️ **Amended (2026-07-26):** the `builder` argument was dropped; the translation is
+    looked up from the `vc_stage_params<StageT>` trait. Everything else here still holds.
     Params stay concrete (Design A); the `vc_param_struct` concept is the standardization,
     NOT a runtime params base class. The **schema** is the type-erased view for generic
     consumers (UI, serialization).
@@ -152,6 +160,9 @@ learning-build split (interfaces + plumbing + throwing `TODO(you)` shells; user 
    - `register_stage<StageT>(kind, builder)` + `create(kind, name, session)`, concept-enforced.
    - Move `blur_params_from_session` to a free function in the **edit** layer as a [REP]
      throwing shell; REMOVE `vc_blur_stage::from_session` static.
+   - ⚠️ **Superseded (2026-07-26):** LANDED, then replaced. The builder argument is gone;
+     `register_stage<StageT>(kind)` reads `vc_stage_params<StageT>::from_session(session)`
+     instead, enforced by the `vc_stage_params_req` concept. No free builder function exists.
 
 5. **`vc_reader`/`vc_writer` concepts** — in a shared header; existing adapters made to
    conform; two reader flavors documented.
@@ -188,6 +199,12 @@ learning-build split (interfaces + plumbing + throwing `TODO(you)` shells; user 
 Existing (retype/relocate as noted): `build_pipeline`; `vc_doc_writer::set`/`vc_doc_reader::get`;
 `i_derived_store` impls' get/set; `vc_pipeline::run()` cancellation check; `vc_blur_stage::process()`.
 New/moved: `blur_params_from_session` (edit-layer builder). No rep body written by agents.
+
+> ⚠️ **Stale (2026-07-26).** Of this list: `vc_pipeline::run()` (incl. the cancellation check) is
+> implemented; `vc_blur_stage::process()` moved to `tests/samples/vc_sample_blur_stage.cpp` with
+> its kernel written; `blur_params_from_session` was never created — the builder mechanism it
+> belonged to was replaced by the `vc_stage_params<StageT>` trait. Still open reps:
+> `build_pipeline`, the doc writer/reader set/get, and the two edit-table stores' get/set.
 
 ---
 

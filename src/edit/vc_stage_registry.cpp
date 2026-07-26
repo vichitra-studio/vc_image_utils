@@ -10,7 +10,32 @@
 
 namespace vc::edit {
 
+void vc_stage_registry::require_not_registered_as_paramless(
+    const stage_kind& kind) const {
+    if (factories_.find(kind) != factories_.end()) {
+        throw vc::vc_exception(
+            vc_error_code::invalid_argument,
+            "vc_stage_registry: kind '" + kind +
+                "' is already registered as a PARAMLESS stage "
+                "(register_kind); it cannot also be registered as a "
+                "session-aware stage");
+    }
+}
+
+void vc_stage_registry::require_not_registered_as_session_aware(
+    const stage_kind& kind) const {
+    if (session_factories_.find(kind) != session_factories_.end()) {
+        throw vc::vc_exception(
+            vc_error_code::invalid_argument,
+            "vc_stage_registry: kind '" + kind +
+                "' is already registered as a SESSION-AWARE stage "
+                "(register_stage); it cannot also be registered as a "
+                "paramless stage");
+    }
+}
+
 void vc_stage_registry::register_kind(const stage_kind& kind, factory make) {
+    require_not_registered_as_session_aware(kind);
     factories_[kind] = std::move(make);
 }
 

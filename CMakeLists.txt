@@ -5,6 +5,16 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Emit compile_commands.json so clangd (and therefore the VS Code C++ tooling,
+# which .vscode/settings.json delegates to it) resolves real flags and include
+# paths. Without this NO compilation database is ever produced: `.clangd` points
+# at `build/debug`, finds nothing there, and falls back to guessed flags — which
+# reports the whole C++20 surface as errors (`concept` unknown, every angle-
+# bracket include "not found", nested namespaces flagged as a C++17 extension)
+# even though the CMake build itself is clean. Configure a build at the path
+# `.clangd` names to pick it up:  cmake -S . -B build/debug -G Ninja
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # ---------- ccache ----------
 find_program(CCACHE_PROGRAM ccache)
 if(CCACHE_PROGRAM)
@@ -91,9 +101,6 @@ set(VC_LIB_SOURCES
     src/pipe/vc_pipe_context.cpp
     src/pipe/vc_pipeline.cpp
     src/pipe/stages/vc_passthrough_stage.cpp
-    src/pipe/stages/vc_grayscale_stage.cpp
-    src/pipe/stages/vc_mean_brightness_stage.cpp
-    src/pipe/stages/vc_blur_stage.cpp
     src/edit/vc_edit_session.cpp
     src/edit/vc_build_pipeline.cpp
     src/edit/vc_render_image.cpp
@@ -139,6 +146,9 @@ add_executable(vc_image_utils_tests
     tests/test_vc_perf.cpp
     tests/test_vc_pipe.cpp
     tests/test_vc_edit.cpp
+    tests/samples/vc_sample_grayscale_stage.cpp
+    tests/samples/vc_sample_mean_brightness_stage.cpp
+    tests/samples/vc_sample_blur_stage.cpp
 )
 
 target_include_directories(vc_image_utils_tests SYSTEM PRIVATE third_party)
@@ -198,7 +208,7 @@ if(VC_BUILD_BENCHMARKS)
     # A benchmark-only COPY of the library, compiled with the pinned bench flags.
     # Header-inline code (vc_pixel_buffer::as<>, the ctor) is compiled INTO the
     # bench TU and already gets -march via vc_bench_opts — but a kernel authored
-    # in a library .cpp (vc_grayscale_stage::process, etc.) is compiled in the
+    # in a library .cpp (a stage's process(), etc.) is compiled in the
     # library, and would otherwise be benchmarked WITHOUT the pinned -march,
     # understating it. Building a SEPARATE target (not mutating vc_image_utils_lib
     # in place) means the app/test binaries never inherit -march=native even if

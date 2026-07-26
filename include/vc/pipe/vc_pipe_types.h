@@ -80,7 +80,7 @@ struct stage_port {
     stage_port() = default;
 
     // From a typed descriptor:
-    // `stage_port{"grey", vc_grayscale_stage::slots::rgb}`. Lowers slot<T> to
+    // `stage_port{"a", vc_passthrough_stage::slots::in}`. Lowers slot<T> to
     // its name at the boundary, keeping the T only long enough to be typo-safe
     // at the call site.
     template <typename T>

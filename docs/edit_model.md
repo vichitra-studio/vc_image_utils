@@ -247,16 +247,36 @@ checked by an additional params-shape concept at registration (the schema
 concept that once served this role, `vc_param_struct`, is superseded — §18).
 This is what `build_pipeline` calls to get each stage it wires.
 
-> **[REVERTED]** An intermediate shape moved each stage's `from_session` out to a
-> free builder function living in the edit layer, supplied to `register_stage` at
-> registration. That was reverted: `from_session` (e.g. `vc_blur_stage::from_session`)
-> lives back on the stage as a static, sitting next to the params struct it
-> produces. `vc_stage_registry::register_stage` accepts either shape identically —
-> it only requires something invocable with `const vc_edit_session&`, so a pointer
-> to a static member function (`&vc_blur_stage::from_session`) satisfies the same
-> `vc_stage_builder_req` concept a free function would. The stage itself stays
-> session-blind either way (§4.3) — `from_session` derives params from a
-> session, but nothing in `process()` ever sees one.
+> **[SUPERSEDED 2026-07-26].** The paragraph below describes two earlier shapes —
+> a free builder function in the edit layer, then a `from_session` static back on
+> the stage — both reached through a `builder` argument to `register_stage` and a
+> `vc_stage_builder_req` concept. **All of that is removed.** The session → params
+> translation is now a **type-keyed trait**: `vc::edit::vc_stage_params<StageT>`
+> (`include/vc/edit/vc_stage_params.h`), an undefined primary template that each
+> stage's translation specializes with one `static from_session(const
+> vc_edit_session&)`. `register_stage<StageT>(kind)` takes **no builder argument**
+> and looks the trait up itself, constrained by `vc_stage_params_req`.
+>
+> Why the change: a builder *argument* could not enforce that a stage HAS a
+> translation (any caller could pass an ad-hoc lambda), and it let one stage type
+> acquire a different mapping at every call site. An undefined primary makes a
+> missing translation a compile error naming the stage. Crucially, the trait and
+> all its specializations live in `vc::edit`, so no stage ever names
+> `vc_edit_session` — which is what a `from_session` static on the stage would have
+> forced, inverting the `edit → pipe` dependency into a cycle.
+>
+> *Historical, no longer accurate:*
+>
+> > **[REVERTED]** An intermediate shape moved each stage's `from_session` out to a
+> > free builder function living in the edit layer, supplied to `register_stage` at
+> > registration. That was reverted: `from_session` (e.g. `vc_blur_stage::from_session`)
+> > lives back on the stage as a static, sitting next to the params struct it
+> > produces. `vc_stage_registry::register_stage` accepts either shape identically —
+> > it only requires something invocable with `const vc_edit_session&`, so a pointer
+> > to a static member function (`&vc_blur_stage::from_session`) satisfies the same
+> > `vc_stage_builder_req` concept a free function would. The stage itself stays
+> > session-blind either way (§4.3) — `from_session` derives params from a
+> > session, but nothing in `process()` ever sees one.
 
 ### 4.3 Params on a stage
 **A stage is a pure function of its slots (data) and its params (config)** — it sees
@@ -1095,7 +1115,7 @@ generate save/load/describe.
 > needing the schema's genericity once `i_pipe::params_hash()` became a
 > per-stage virtual method: that already gives the "uniform access across
 > concrete types" the schema was meant to provide. Hash-keying now uses a
-> direct hand-written combine per stage (e.g. `vc_blur_stage::params_hash()`),
+> direct hand-written combine per stage (e.g. `vc_sample_blur_stage::params_hash()`),
 > mirroring `stage_port::hash()` — an established pattern in this codebase,
 > not a new one. `vc_edit_settings_writer`/`vc_edit_settings_reader`
 > (`doc_writer`/`doc_reader` above) are removed too, not "still gated" —

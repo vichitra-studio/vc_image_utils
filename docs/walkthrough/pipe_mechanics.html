@@ -58,7 +58,7 @@
   .kw { color: var(--kw); } .ty { color: var(--signal); } .cmt { color: var(--muted); font-style: italic; } .fn { color: var(--accent); } .str { color: var(--assembly); } .lit{ color: var(--run); }
 
   .pill { display:inline-block; font-family: var(--mono); font-size: .64rem; letter-spacing:.05em; text-transform:uppercase; padding: .1rem .45rem; border-radius: 100px; border:1px solid currentColor; vertical-align: middle; }
-  .pill.done { color: var(--run); } .pill.todo { color: var(--assembly); }
+  .pill.done { color: var(--run); }
 
   .callout { font-size: .88rem; color: var(--ink); background: color-mix(in srgb, var(--accent) 7%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent); border-radius: 8px; padding: .7rem .85rem; margin-top: .8rem; }
   .callout b { color: var(--accent); }
@@ -172,14 +172,14 @@ std::unordered_map&lt;slot_name, vc_pipe_packet&gt; outputs_;</code></pre>
   </div>
 
   <!-- ========= 2. THE ALGORITHMS ========= -->
-  <h2>Mechanism 4 · the pipeline <span class="pill todo" style="margin-left:.6rem">validate/run = TODO(you)</span></h2>
+  <h2>Mechanism 4 · the pipeline <span class="pill done" style="margin-left:.6rem">validate/run = implemented</span></h2>
   <div class="block tone" style="--tone:var(--accent)">
     <h3>What gets stored when you assemble</h3>
     <p class="sub"><code class="inline">add()</code> and <code class="inline">connect()</code> are done — they just append to two vectors. Each stage carries its <em>own</em> name (<code class="inline">i_pipe::name()</code>), so there is no separate name field on the belt.</p>
 <pre class="code"><code>stages_       = [ ptr→grayscale(<span class="str">"grey"</span>), ptr→mean_brightness(<span class="str">"mean"</span>) ]   <span class="cmt">// unique_ptr&lt;i_pipe&gt;</span>
 connections_  = [ { from:{<span class="str">"grey"</span>,<span class="str">"grey"</span>}, to:{<span class="str">"mean"</span>,<span class="str">"image"</span>} } ]      <span class="cmt">// two stage_ports</span></code></pre>
 
-    <h3 style="margin-top:1.2rem">validate() — the algorithm <span class="pill todo">yours to write</span></h3>
+    <h3 style="margin-top:1.2rem">validate() — the algorithm <span class="pill done">implemented</span></h3>
     <p class="sub">Compares <em>declarations against declarations</em>. No packet exists yet.</p>
 <pre class="code"><code><span class="lit">1.</span> <span class="kw">for each</span> stage: make a vc_pipe_contract, call stage.<span class="fn">declare</span>(c), keep it keyed by stage.<span class="fn">name</span>().
 <span class="lit">2.</span> <span class="kw">for each</span> connection {from, to}:            <span class="cmt">// from, to are stage_port {stage, slot}</span>
@@ -187,7 +187,7 @@ connections_  = [ { from:{<span class="str">"grey"</span>,<span class="str">"gre
      in_ty  = contracts[to.stage].<span class="fn">input_slot_type</span>(to.slot)
      <span class="kw">if</span> (out_ty != in_ty) → throw    <span class="cmt">// the only branch — a missing slot already threw above</span></code></pre>
 
-    <h3 style="margin-top:1.2rem">run() — the algorithm <span class="pill todo">yours to write</span></h3>
+    <h3 style="margin-top:1.2rem">run() — the algorithm <span class="pill done">implemented</span></h3>
     <p class="sub">The <b>map variant</b>: inject open inputs, execute in order, harvest open outputs (see the model below).</p>
 <pre class="code"><code><span class="lit">1.</span> gather contracts (declare() each stage) → you know every stage's declared slot names.
 <span class="lit">2.</span> open inputs  = all declared input slots  minus every connection's `to`
@@ -327,26 +327,26 @@ vc::<span class="ty">vc_image</span> img = reader.<span class="fn">read</span>(<
 
 <span class="cmt">// 2. construct + add stages. Each stage carries its OWN name; add() returns it.</span>
 <span class="ty">vc_pipeline</span> pipe;
-<span class="kw">const auto</span> grey = pipe.<span class="fn">add</span>(std::<span class="fn">make_unique</span>&lt;<span class="ty">vc_grayscale_stage</span>&gt;(<span class="str">"grey"</span>));
-<span class="kw">const auto</span> mean = pipe.<span class="fn">add</span>(std::<span class="fn">make_unique</span>&lt;<span class="ty">vc_mean_brightness_stage</span>&gt;(<span class="str">"mean"</span>));
+<span class="kw">const auto</span> grey = pipe.<span class="fn">add</span>(std::<span class="fn">make_unique</span>&lt;<span class="ty">vc_sample_grayscale_stage</span>&gt;(<span class="str">"grey"</span>));
+<span class="kw">const auto</span> mean = pipe.<span class="fn">add</span>(std::<span class="fn">make_unique</span>&lt;<span class="ty">vc_sample_mean_brightness_stage</span>&gt;(<span class="str">"mean"</span>));
 
 <span class="cmt">// 3. wire output slot → input slot, each named by its stage + typed slot.</span>
-pipe.<span class="fn">connect</span>(grey, vc_grayscale_stage::slots::grey,
-             mean, vc_mean_brightness_stage::slots::image);
+pipe.<span class="fn">connect</span>(grey, vc_sample_grayscale_stage::slots::grey,
+             mean, vc_sample_mean_brightness_stage::slots::image);
 
 <span class="cmt">// 4. check the wiring BEFORE any pixels move (throws on a type mismatch)</span>
 pipe.<span class="fn">validate</span>();
 
 <span class="cmt">// 5. inject on the open input (grey.rgb); we're done with img, so MOVE it in.</span>
 std::unordered_map&lt;<span class="ty">stage_port</span>, vc_pipe_packet&gt; inputs;
-inputs.<span class="fn">emplace</span>(<span class="ty">stage_port</span>{grey, vc_grayscale_stage::slots::rgb},
+inputs.<span class="fn">emplace</span>(<span class="ty">stage_port</span>{grey, vc_sample_grayscale_stage::slots::rgb},
                vc_pipe_packet{std::<span class="fn">move</span>(img)});
 
 <span class="kw">const auto</span> outputs = pipe.<span class="fn">run</span>(std::<span class="fn">move</span>(inputs));
 
 <span class="cmt">// 6. read the result off its open-output port (mean.mean : double)</span>
 <span class="kw">const</span> <span class="kw">double</span> brightness =
-    outputs.<span class="fn">at</span>(<span class="ty">stage_port</span>{mean, vc_mean_brightness_stage::slots::mean})
+    outputs.<span class="fn">at</span>(<span class="ty">stage_port</span>{mean, vc_sample_mean_brightness_stage::slots::mean})
         .<span class="fn">get</span>&lt;<span class="kw">double</span>&gt;();</code></pre>
     <div class="callout"><b>Why <code class="inline">grey</code> / <code class="inline">mean</code> instead of string literals?</b> <code class="inline">add()</code> hands back the stage's name, so wiring never restates a literal that could drift. A <code class="inline">stage_port{grey, slots::grey}</code> is identical to one built from the raw string — code-wired and config-wired graphs are interchangeable.</div>
   </div>
@@ -354,9 +354,9 @@ inputs.<span class="fn">emplace</span>(<span class="ty">stage_port</span>{grey, 
   <div class="block">
     <h3>B · a stage that captures configuration</h3>
     <p class="sub">The strategy/functor pattern: config in the constructor (after the name), held as a private member; <code class="inline">process()</code> stays <code class="inline">const</code> and only reads it.</p>
-<pre class="code"><code><span class="kw">class</span> <span class="ty">vc_blur_stage</span> : <span class="kw">public</span> i_pipe {
+<pre class="code"><code><span class="kw">class</span> <span class="ty">vc_sample_blur_stage</span> : <span class="kw">public</span> i_pipe {
   <span class="kw">public</span>:
-    <span class="fn">vc_blur_stage</span>(stage_name name, <span class="kw">float</span> radius)
+    <span class="fn">vc_sample_blur_stage</span>(stage_name name, <span class="kw">float</span> radius)
         : <span class="fn">i_pipe</span>(std::<span class="fn">move</span>(name)), radius_(radius) {}   <span class="cmt">// name → base, config → member</span>
 
     <span class="kw">const char*</span> <span class="fn">kind</span>() <span class="kw">const override</span> { <span class="kw">return</span> <span class="str">"blur"</span>; }   <span class="cmt">// per-type identity</span>
@@ -380,7 +380,7 @@ inputs.<span class="fn">emplace</span>(<span class="ty">stage_port</span>{grey, 
 };
 
 <span class="cmt">// constructed WITH its param — name first, then config</span>
-pipe.<span class="fn">add</span>(std::<span class="fn">make_unique</span>&lt;<span class="ty">vc_blur_stage</span>&gt;(<span class="str">"blur"</span>, <span class="lit">2.5f</span>));</code></pre>
+pipe.<span class="fn">add</span>(std::<span class="fn">make_unique</span>&lt;<span class="ty">vc_sample_blur_stage</span>&gt;(<span class="str">"blur"</span>, <span class="lit">2.5f</span>));</code></pre>
   </div>
 
   <div class="block">

@@ -34,10 +34,11 @@ are building toward* and the reasoning behind each decision — not a tutorial f
   kept separate from **ad-hoc investigation sweeps** (run on demand, not tracked). See §7.
 - **Honest current status:** the **harness is built and runs** (nanobench vendored; `bench/` with
   `vc_benchmark_harness`/`vc_benchmark_pipe`/`vc_benchmark_pipeline` behind `VC_BUILD_BENCHMARKS`). The **substrate
-  suite already produces real numbers** (buffer alloc/copy, `as<T>()`, packet box/unbox). But every
-  piece of real *compute* is still a `TODO(you)` stub (`vc_image` ctor, all kernels, `run()`,
-  `vc::io`), so the kernel/stage/pipeline suites are wired-and-ready but measure stubs — the
-  **first real kernel number arrives when the `vc_image` ctor and one kernel are implemented**.
+  suite already produces real numbers** (buffer alloc/copy, `as<T>()`, packet box/unbox).
+  ⚠️ **The rest of this bullet was stale and has been corrected — see the §9 banner (2026-07-26):**
+  the `vc_image` ctor, `vc_pipeline::run()`/`validate()`, and `vc::io` are all implemented; the
+  kernels now live in `tests/samples/` and are written. What actually blocks a real kernel number
+  is that the bench targets link the *library*, which no longer contains any kernel to measure.
   See §9.
 
 ---
@@ -239,8 +240,9 @@ number.
   confirms the actual cost.
 
 **Tier 1 — framework plumbing.** A no-op stage through `process()` and `run()` — the overhead
-floor (§6); the instrument for catching missed copies and design regressions. *(Design target
-today — see §9: `run()` is not implemented, and `passthrough` runs on a null buffer.)*
+floor (§6); the instrument for catching missed copies and design regressions. *(⚠️ corrected
+2026-07-26: `run()` IS implemented and `passthrough` runs on a real buffer, so this tier measures
+what it claims; the cases remain flagged not-baseline-eligible pending a review of the numbers.)*
 
 **Tier 2 — kernels (micro), reported in MP/s.** One per algorithm, added as it is built: grayscale
 luminance, mean-brightness (P1); box/Gaussian/Laplacian convolution, separable vs 2D, pyramid
@@ -299,9 +301,11 @@ nanobench prints e.g. *"process() is 2.4×, run() is 3.8× the raw kernel"* dire
 is the "is the design causing slowdowns?" instrument.** A missed/accidental deep copy shows up as
 an MP/s cliff and a jump above the known plumbing cost.
 
-**Status caveat (see §9):** this ladder is a *design target*. Today rung 2b (`run()`) is
-unimplemented (measures an empty-map return) and rung 2a runs on a null buffer — so real ratios
-appear only as those stubs land. The table's "adds over previous" column describes the *expected*
+**Status caveat (see §9):** ⚠️ *corrected 2026-07-26* — `run()` and the `vc_image` ctor are both
+implemented, so rung 2b executes for real and rung 2a runs on a real buffer. The ladder is still
+not measurable end-to-end for a *kernel*, because the only stage the library exposes is
+`vc_passthrough_stage`; the real kernels moved to `tests/samples/`, which the bench targets do
+not link. The table's "adds over previous" column describes the *expected*
 overhead contributors; the bench confirms the actual attribution.
 
 Caveat, stated so it is not misread as a defect: on a **fat** kernel (convolution on a 12 MP
@@ -392,6 +396,27 @@ written only for baseline-eligible cases (§9).*
 ---
 
 ## 9. Current status — what is real today [NOW]
+
+> ### ⚠️ CORRECTED 2026-07-26 — read this before the text below
+>
+> The section below was written 2026-07 and is **substantially out of date**; it is kept for
+> history. Verified state as of 2026-07-26, by building and running the suite:
+>
+> - **`vc_image` construction works.** `vc_image_info::element_count()`, the private ctor, and
+>   `vc_image_writer`/`seal()` are all implemented; `zeros()`/`with_fill()` allocate real buffers.
+> - **`vc_pipeline::run()` and `validate()` are implemented**, including the between-stage
+>   cancellation check.
+> - **`vc::io` read/write is implemented** — a JPEG-in/PNG-out round-trip test passes.
+> - **The kernels are written**, but they **moved out of the library** to `tests/samples/`
+>   (`vc_sample_grayscale_stage`, `vc_sample_mean_brightness_stage`, `vc_sample_blur_stage`) and
+>   are compiled only into the test binary. The `grayscale`/`mean_brightness` cases were therefore
+>   **deleted** from `bench/vc_benchmark_pipe.cpp`, which now holds only `passthrough`.
+> - Still genuinely unimplemented: `build_pipeline`, `render_image`, `export_image`, the two
+>   edit-table stores' `get`/`set`, and `src/main.cpp`'s round-trip.
+>
+> **Net effect on benchmarking:** the blocker is no longer "kernels are stubs" but "the library
+> exposes no kernel to benchmark". Measuring one again means either a production stage with a real
+> kernel, or letting a bench target link `tests/samples/`.
 
 Honest state (verified 2026-07): **every piece of real compute in the repo is a `TODO(you)`
 stub.**
