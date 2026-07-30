@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <iostream>
 
-#include "vc/io/vc_io.h"
+#include "vc/io/vc_io_stb.h"
 #include "vc/vc_exception.h"
 
 int main(int argc, char** argv) {

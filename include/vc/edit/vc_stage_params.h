@@ -52,8 +52,7 @@ namespace vc::edit {
 // the opposite — that the miss would be silent and only surface as a
 // cross-TU ODR violation. That was wrong: a DEFINED primary would have that
 // hazard; an undefined one converts it into a compile error.)
-template <typename StageT>
-struct vc_stage_params;
+template <typename StageT> struct vc_stage_params;
 
 // Checks that StageT's slot above is filled in AND that what it produces is
 // exactly what StageT's constructor wants alongside the per-instance name.
@@ -87,12 +86,10 @@ template <typename StageT>
 concept vc_stage_params_req =
     requires(const vc_edit_session& session) {
         vc_stage_params<StageT>::from_session(session);
-    } &&
-    std::constructible_from<
-        StageT,
-        vc::pipe::stage_name,
-        decltype(vc_stage_params<StageT>::from_session(
-            std::declval<const vc_edit_session&>()))>;
+    } && std::constructible_from<StageT,
+                                 vc::pipe::stage_name,
+                                 decltype(vc_stage_params<StageT>::from_session(
+                                     std::declval<const vc_edit_session&>()))>;
 
 // ---- specializations ----
 //

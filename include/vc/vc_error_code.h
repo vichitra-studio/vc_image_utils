@@ -4,15 +4,10 @@
 #pragma once
 
 #include <cstdint>
-#include <string>
 
 #include "vc/utils/vc_strings.h"
 
 namespace vc {
-
-namespace pipe {
-class vc_render_context;
-}
 
 // Underlying type fixed to uint8_t: this enum is only ever compared and
 // converted (to_int/to_error_code), never used in arithmetic — no
@@ -37,6 +32,10 @@ enum class vc_error_code : std::uint8_t {
                               // add_output_slot) twice for the same slot name
     pipe_connection_mismatch, // a connection's upstream output type does not
                               // match the downstream input type
+    pipe_invalid_topology,    // a connection's producer was add()ed at
+                              // the same or a later position than its
+                              // consumer (self-loop or backwards edge) —
+                              // it can never run
     pipe_input_already_connected, // two connections both target the same
                                   // downstream (stage, slot) input port
     user_cancelled,               // the run() was cancelled by the user (via
@@ -48,9 +47,5 @@ enum class vc_error_code : std::uint8_t {
 to_error_code(int value); // throws vc_exception if value is out of range
 
 [[nodiscard]] vc::utils::string to_string(vc_error_code code) noexcept;
-
-void throw_if_cancelled(const vc::pipe::vc_render_context& run_context);
-
-[[noreturn]] void throw_pipe_run_error(const std::string& message);
 
 } // namespace vc

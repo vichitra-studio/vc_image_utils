@@ -57,7 +57,8 @@ class vc_pipe_context {
     // reaches a stage author. `run_context` defaults to a never-cancelled
     // context, so every existing single-argument call site (all of them,
     // before this milestone) is unaffected.
-    explicit vc_pipe_context(slot_packet_map inputs, vc_render_context run_context = {})
+    explicit vc_pipe_context(slot_packet_map inputs,
+                             vc_render_context run_context = {})
         : inputs_(std::move(inputs)), run_context_(std::move(run_context)) {
     }
 

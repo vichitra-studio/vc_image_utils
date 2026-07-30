@@ -80,6 +80,21 @@ class i_pipe {
     explicit i_pipe(stage_name name) : name_(std::move(name)) {
     }
 
+    // No base declares copy ops, so the implicit copy assignment operator is
+    // public and reachable through a base reference — and here that would
+    // silently overwrite only name_ (the one field add()/connect()/run() key
+    // a stage's identity on), corrupting a live graph without touching the
+    // rest of the derived stage. Protected keeps a derived class's own copy
+    // ops working (they still chain to these) while blocking `i_pipe& a =
+    // ...; a = b;`. The copy constructor gets the same treatment for
+    // symmetry/Rule-of-Three, though it is not independently exploitable
+    // here: i_pipe is abstract (kind()/params_hash()/declare() are pure), so
+    // the language already refuses to materialize a standalone i_pipe object
+    // by value — only the assignment-through-reference path is live.
+    i_pipe(const i_pipe&) = default;
+    i_pipe& operator=(const i_pipe&) = default;
+
+  private:
     // Domain-specific input invariants beyond type — e.g. a blur radius must
     // be positive, or two image inputs must share dimensions. PURE: every
     // stage must say explicitly whether it has one, even if the answer is an
@@ -87,6 +102,11 @@ class i_pipe {
     // context.get_input(slot<T>) exactly as in do_process() — its typed
     // extraction proves a slot's type as a side effect of checking its value,
     // for whichever slots this override reads.
+    //
+    // PRIVATE, not protected (NVI idiom): a derived class can still override
+    // a private virtual, and nothing here needs to CALL these from a derived
+    // class (there is no base implementation to invoke), so protected access
+    // would grant a right nobody uses.
     virtual void validate_inputs(const vc_pipe_context& context) const = 0;
 
     // The stage's actual work: read inputs, publish outputs. What a concrete
@@ -94,7 +114,6 @@ class i_pipe {
     // wrapper above.
     virtual void do_process(vc_pipe_context& context) const = 0;
 
-  private:
     stage_name name_;
 };
 

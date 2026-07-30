@@ -8,9 +8,11 @@
 // Rung 2b (pipeline.run()) is the sibling vc_benchmark_pipeline suite, per the
 // one-binary-per-category split (Sec 7).
 //
-// REALITY GATE (Sec 9): the one case in this suite runs and prints (it calls
-// the REAL stage API), but it is not baseline-eligible yet — see the case
-// comment. The vc_benchmark_harness suite carries the real baselines today.
+// REALITY GATE (Sec 9): the one case in this suite calls the REAL stage API
+// on a REAL buffer — vc_image_info::element_count() (and so zeros()/
+// with_fill()) has been implemented since commit 5daa148, so this is no
+// longer a null-pixels partial floor. Baseline-eligible since 2026-07-27 —
+// see the case comment for the numbers that justified the flip.
 //
 // grayscale/mean_brightness (and blur) moved to tests/samples/ — worked
 // examples for pipe-framework mechanics, not production stages the library
@@ -69,20 +71,18 @@ bool produces_output(
 std::vector<vc::bench::bench_case> micro_cases() {
     std::vector<vc::bench::bench_case> cases;
 
-    // NOT baseline-eligible YET: both rungs copy a vc_image whose pixels_ is a
-    // null shared_ptr under the stubbed vc_image_info::element_count() (still a
-    // TODO(you) rep, so zeros()/with_fill() allocate a 0-element buffer), so
-    // today they measure the box/map/dispatch plumbing but NOT the refcount
-    // atomic a real copy carries. rung1 (a bare handle copy) is dominated by
-    // that absent atomic — ~0.26 ns is essentially "no control block touched".
-    // Implementing element_count() changes these numbers but is NOT a "bench
-    // code change", so the Sec 8 lifecycle rule would not flag a committed
-    // baseline for regeneration — the exact reason grayscale/mean are excluded.
-    // So passthrough is gated the same way: it runs and prints (the ladder is
-    // wired and ready), but is committed only once the rep lands. Flip to true
-    // then (and add a correctness gate).
+    // Baseline-eligible: element_count() is implemented (commit 5daa148), so
+    // zeros()/with_fill() allocate a REAL buffer with a REAL shared_ptr — both
+    // rungs copy a live vc_image, not a null handle. rung1 (a bare handle
+    // copy) now prices a genuine refcount atomic: ~3.15 ns, not the ~0.26 ns
+    // a null-control-block copy would show (verified 2026-07-27, low err%,
+    // stable across repeated runs). A correctness gate already exists below
+    // (produces_output, checked before timing, Sec 4.5). Note this is
+    // unrelated to grayscale/mean_brightness: those never lived here — they
+    // moved to tests/samples/ (top-of-file note) and are not benchmark
+    // subjects in this suite at all, stub or otherwise.
     cases.push_back(
-        {"passthrough", /*baseline_eligible=*/false,
+        {"passthrough", /*baseline_eligible=*/true,
          [](ankerl::nanobench::Bench& bench) {
              using stage_t = vc::pipe::vc_passthrough_stage;
              const stage_t stage("bench_passthrough");
@@ -108,11 +108,10 @@ std::vector<vc::bench::bench_case> micro_cases() {
 
              // Rung 1 — raw framework identity op: a shallow vc_image copy.
              // NOT the user's algorithm; the framework's own no-op carry, so
-             // writing it here respects the infra-only boundary. Caveat (Sec 9):
-             // with the stubbed ctor pixels_ is a NULL shared_ptr, so this copy
-             // does no refcount/atomic work today (copying a null shared_ptr
-             // touches no control block) — it becomes a real refcount bump once
-             // the ctor allocates. A partial floor, like rung 2a.
+             // writing it here respects the infra-only boundary. `image` holds
+             // a real, allocated buffer (element_count() is implemented), so
+             // this copy is a genuine shared_ptr refcount bump — the full
+             // floor, not a partial one.
              bench.run("rung1 raw shallow copy", [&] {
                  vc::vc_image out = image;
                  ankerl::nanobench::doNotOptimizeAway(out.width());

@@ -146,7 +146,7 @@ slot_decl { name: <span class="str">"rgb"</span>, type: <span class="ty">type_in
 <span class="cmt">// how the pipeline reads it back — off the FULL vc_pipe_contract it owns, NOT</span>
 <span class="cmt">// the builder (which exposes only add_*_slot); the type is a value, check is ==</span>
 std::type_index t = full_contract.<span class="fn">input_slot_type</span>(<span class="str">"rgb"</span>);   <span class="cmt">// THROWS if never declared</span></code></pre>
-    <div class="callout"><b>The mechanism:</b> a stage names+types its slots in exactly one place (its <code class="inline">struct slots</code>), <code class="inline">declare()</code> forwards them, and the pipeline reads the declarations back to validate. Because the lookup <b>throws</b> on an undeclared slot (this project's only error channel), <code class="inline">validate()</code> never carries a not-found branch — just the real type comparison.</div>
+    <div class="callout"><b>The mechanism:</b> a stage names+types its slots in exactly one place (its <code class="inline">struct slots</code>), <code class="inline">declare()</code> forwards them, and the pipeline reads the declarations back to validate. Because the lookup <b>throws</b> on an undeclared slot (this project's only error channel), this slot-lookup step never carries a not-found branch — the type comparison itself is a plain <code class="inline">==</code>.</div>
   </div>
 
   <h2>Mechanism 3 · the per-run context <span class="pill done" style="margin-left:.6rem">implemented</span></h2>
@@ -180,12 +180,14 @@ std::unordered_map&lt;slot_name, vc_pipe_packet&gt; outputs_;</code></pre>
 connections_  = [ { from:{<span class="str">"grey"</span>,<span class="str">"grey"</span>}, to:{<span class="str">"mean"</span>,<span class="str">"image"</span>} } ]      <span class="cmt">// two stage_ports</span></code></pre>
 
     <h3 style="margin-top:1.2rem">validate() — the algorithm <span class="pill done">implemented</span></h3>
-    <p class="sub">Compares <em>declarations against declarations</em>. No packet exists yet.</p>
+    <p class="sub">Compares <em>declarations against declarations</em>. No packet exists yet. Per connection, checks run in this order, each its own failure mode with its own <code class="inline">vc_error_code</code>.</p>
 <pre class="code"><code><span class="lit">1.</span> <span class="kw">for each</span> stage: make a vc_pipe_contract, call stage.<span class="fn">declare</span>(c), keep it keyed by stage.<span class="fn">name</span>().
 <span class="lit">2.</span> <span class="kw">for each</span> connection {from, to}:            <span class="cmt">// from, to are stage_port {stage, slot}</span>
+     <span class="kw">if</span> to <span class="kw">already wired</span> by an earlier connection → throw    <span class="cmt">// pipe_input_already_connected — an input slot holds exactly one packet</span>
+     <span class="kw">if</span> from.stage was <span class="kw">not add()ed strictly before</span> to.stage → throw    <span class="cmt">// pipe_invalid_topology — backwards edge, or from.stage == to.stage (self-loop); the runner is insertion-order, no topological sort</span>
      out_ty = contracts[from.stage].<span class="fn">output_slot_type</span>(from.slot)   <span class="cmt">// type_index — THROWS if undeclared</span>
      in_ty  = contracts[to.stage].<span class="fn">input_slot_type</span>(to.slot)
-     <span class="kw">if</span> (out_ty != in_ty) → throw    <span class="cmt">// the only branch — a missing slot already threw above</span></code></pre>
+     <span class="kw">if</span> (out_ty != in_ty) → throw    <span class="cmt">// pipe_connection_mismatch</span></code></pre>
 
     <h3 style="margin-top:1.2rem">run() — the algorithm <span class="pill done">implemented</span></h3>
     <p class="sub">The <b>map variant</b>: inject open inputs, execute in order, harvest open outputs (see the model below).</p>
@@ -353,7 +355,7 @@ inputs.<span class="fn">emplace</span>(<span class="ty">stage_port</span>{grey, 
 
   <div class="block">
     <h3>B · a stage that captures configuration</h3>
-    <p class="sub">The strategy/functor pattern: config in the constructor (after the name), held as a private member; <code class="inline">process()</code> stays <code class="inline">const</code> and only reads it.</p>
+    <p class="sub">The strategy/functor pattern: config in the constructor (after the name), held as a private member; <code class="inline">do_process()</code> stays <code class="inline">const</code> and only reads it.</p>
 <pre class="code"><code><span class="kw">class</span> <span class="ty">vc_sample_blur_stage</span> : <span class="kw">public</span> i_pipe {
   <span class="kw">public</span>:
     <span class="fn">vc_sample_blur_stage</span>(stage_name name, <span class="kw">float</span> radius)
@@ -361,22 +363,32 @@ inputs.<span class="fn">emplace</span>(<span class="ty">stage_port</span>{grey, 
 
     <span class="kw">const char*</span> <span class="fn">kind</span>() <span class="kw">const override</span> { <span class="kw">return</span> <span class="str">"blur"</span>; }   <span class="cmt">// per-type identity</span>
 
-    <span class="kw">void</span> <span class="fn">declare</span>(contract_builder&amp; c) <span class="kw">const override</span> {
+    <span class="cmt">// PURE like kind(): every stage states its own params identity explicitly.</span>
+    <span class="kw">std::size_t</span> <span class="fn">params_hash</span>() <span class="kw">const override</span> { <span class="kw">return</span> std::<span class="fn">hash</span>&lt;<span class="kw">float</span>&gt;{}(radius_); }
+
+    <span class="kw">void</span> <span class="fn">declare</span>(vc_pipe_contract&amp; c) <span class="kw">const override</span> {
         c.<span class="fn">add_input_slot</span>(slots::in);
         c.<span class="fn">add_output_slot</span>(slots::out);
-    }
-    <span class="kw">void</span> <span class="fn">process</span>(vc_pipe_context&amp; ctx) <span class="kw">const override</span> {
-        <span class="kw">const auto</span>&amp; src = ctx.<span class="fn">get_input</span>(slots::in);   <span class="cmt">// const vc_image&amp;, type deduced</span>
-        <span class="cmt">// ... blur src using radius_, build result ...</span>
-        <span class="cmt">// ctx.set_output(slots::out, vc_pipe_packet{result});</span>
     }
 
     <span class="kw">struct</span> slots {
         <span class="kw">static constexpr</span> slot&lt;vc::<span class="ty">vc_image</span>&gt; in{<span class="str">"in"</span>};
         <span class="kw">static constexpr</span> slot&lt;vc::<span class="ty">vc_image</span>&gt; out{<span class="str">"out"</span>};
     };
+
   <span class="kw">private</span>:
-    <span class="kw">float</span> radius_;   <span class="cmt">// captured once at construction; process() only reads it</span>
+    <span class="cmt">// process() itself is i_pipe's non-virtual wrapper (validate_inputs() then</span>
+    <span class="cmt">// do_process()); a stage overrides these two private steps, never process().</span>
+    <span class="kw">void</span> <span class="fn">validate_inputs</span>(<span class="kw">const</span> vc_pipe_context&amp; ctx) <span class="kw">const override</span> {
+        (<span class="kw">void</span>)ctx;   <span class="cmt">// no domain invariant beyond type for this stage</span>
+    }
+    <span class="kw">void</span> <span class="fn">do_process</span>(vc_pipe_context&amp; ctx) <span class="kw">const override</span> {
+        <span class="kw">const auto</span>&amp; src = ctx.<span class="fn">get_input</span>(slots::in);   <span class="cmt">// const vc_image&amp;, type deduced</span>
+        <span class="cmt">// ... blur src using radius_, build result ...</span>
+        <span class="cmt">// ctx.set_output(slots::out, vc_pipe_packet{result});</span>
+    }
+
+    <span class="kw">float</span> radius_;   <span class="cmt">// captured once at construction; do_process() only reads it</span>
 };
 
 <span class="cmt">// constructed WITH its param — name first, then config</span>

@@ -7,18 +7,21 @@
 
 #include <cstddef>
 
+#include "samples/vc_sample_blur_stage.h"
 #include "vc/edit/vc_build_pipeline.h"
-#include "vc/edit/vc_export.h"
-#include "vc/edit/vc_table.h"
+#include "vc/edit/vc_cached_edits_table.h"
 #include "vc/edit/vc_edit_document.h"
 #include "vc/edit/vc_edit_document_io.h"
 #include "vc/edit/vc_edit_session.h"
 #include "vc/edit/vc_edit_table.h"
-#include "vc/edit/vc_image_meta.h"
+#include "vc/edit/vc_export.h"
+#include "vc/edit/vc_memory_image_meta.h"
+#include "vc/edit/vc_memory_table.h"
+#include "vc/edit/vc_persistent_edits_table.h"
 #include "vc/edit/vc_render_image.h"
 #include "vc/edit/vc_render_request.h"
 #include "vc/edit/vc_stage_registry.h"
-#include "samples/vc_sample_blur_stage.h"
+#include "vc/edit/vc_table.h"
 #include "vc/pipe/i_pipe.h"
 #include "vc/pipe/stages/vc_passthrough_stage.h"
 #include "vc/pipe/vc_cancellation_token.h"
@@ -29,6 +32,7 @@
 #include "vc/pipe/vc_render_context.h"
 #include "vc/vc_exception.h"
 #include "vc/vc_image.h"
+#include "vc/vc_image_meta.h"
 
 #include <concepts>
 #include <filesystem>
@@ -152,9 +156,9 @@ TEST_CASE("vc_edit_session: composes an immutable source and mutable edits") {
     vc::edit::vc_memory_table backing;
     vc::edit::vc_persistent_edits_table persistent{backing};
     vc::edit::vc_cached_edits_table cache{backing};
-    vc::edit::vc_edit_session session{img, doc,
-                                      std::make_unique<vc::edit::vc_memory_image_meta>(),
-                                      persistent, cache};
+    vc::edit::vc_edit_session session{
+        img, doc, std::make_unique<vc::edit::vc_memory_image_meta>(),
+        persistent, cache};
 
     // source() exposes the immutable source geometry.
     CHECK(session.source().width() == 2);
@@ -171,7 +175,7 @@ TEST_CASE("vc_edit_session: composes an immutable source and mutable edits") {
     // A metadata backend was injected at construction — the session enforces
     // it is non-null, so meta() hands back a plain reference and set()/get()
     // round-trip through it directly.
-    session.meta().set("rating", vc::edit::vc_metadata_value{std::string{"5"}});
+    session.meta().set("rating", vc::vc_metadata_value{std::string{"5"}});
     CHECK(session.meta().get("rating").value().get<std::string>() == "5");
 }
 
@@ -182,7 +186,7 @@ TEST_CASE("vc_memory_table: put/get round-trips bytes; a miss is nullopt") {
     CHECK_FALSE(store.get("absent").has_value());
 
     const vc::edit::data_bytes payload{std::byte{0x01}, std::byte{0x02},
-                                        std::byte{0x03}};
+                                       std::byte{0x03}};
     store.put("k", payload);
 
     const auto got = store.get("k");
@@ -195,7 +199,7 @@ TEST_CASE("vc_memory_table: put/get round-trips bytes; a miss is nullopt") {
 TEST_CASE("vc_memory_image_meta: set/get round-trips; a miss is nullopt") {
     vc::edit::vc_memory_image_meta meta;
     CHECK_FALSE(meta.get("absent").has_value());
-    meta.set("iso", vc::edit::vc_metadata_value{std::string{"100"}});
+    meta.set("iso", vc::vc_metadata_value{std::string{"100"}});
     REQUIRE(meta.get("iso").has_value());
     CHECK(meta.get("iso").value().get<std::string>() == "100");
 }
@@ -259,7 +263,8 @@ TEST_CASE("vc_stage_registry: register -> has -> create round-trips a kind") {
     CHECK_FALSE(registry.has("passthrough")); // nothing registered yet
 
     registry.register_kind("passthrough", [](vc::pipe::stage_name name) {
-        return std::make_unique<vc::pipe::vc_passthrough_stage>(std::move(name));
+        return std::make_unique<vc::pipe::vc_passthrough_stage>(
+            std::move(name));
     });
     CHECK(registry.has("passthrough"));
 
@@ -272,6 +277,32 @@ TEST_CASE("vc_stage_registry: register -> has -> create round-trips a kind") {
     CHECK_THROWS_AS(registry.create("nope", "x"), vc::vc_exception);
 }
 
+TEST_CASE("vc_stage_registry: create() rejects a registered factory that"
+          " returns a null stage") {
+    // register_kind() stores an arbitrary caller-supplied std::function, with
+    // nothing constraining its return value the way register_stage<StageT>'s
+    // hardcoded make_unique lambda does. create() is the boundary where that
+    // externally-supplied value enters the system, so a hostile/buggy
+    // factory's null result must be rejected there — via a THROW, not an
+    // assert, because unlike vc_pipeline::add() (where a null can only be a
+    // programming error, since make_unique cannot return null), a null here
+    // is caller-supplied runtime data. CHECK_THROWS_AS is deliberate here,
+    // not just a style pick: it doubles as the assertion itself, failing
+    // this test outright if the guard under test were ever removed — create()
+    // would then simply hand back a null stage_ptr with nothing thrown, and
+    // this test dereferences it nowhere, so nothing downstream would crash.
+    // This shape fails clean either way: CHECK_THROWS_AS reports "did not
+    // throw", loudly and locally, rather than the guard's absence going
+    // unnoticed the way it would behind a bare try/catch with no follow-up
+    // check on whether the catch block ever ran.
+    vc::edit::vc_stage_registry registry;
+    registry.register_kind("broken", [](vc::pipe::stage_name) {
+        return vc::pipe::stage_ptr{}; // a deliberately-broken factory
+    });
+
+    CHECK_THROWS_AS(registry.create("broken", "n"), vc::vc_exception);
+}
+
 // Fill in the session -> params slot for the sample stage. A LIBRARY stage
 // declares its specialization in vc/edit/vc_stage_params.h and defines it in
 // src/edit/vc_stage_params.cpp; vc_sample_blur_stage is a tests/samples/
@@ -280,8 +311,7 @@ TEST_CASE("vc_stage_registry: register -> has -> create round-trips a kind") {
 // can be added from any file, without editing the framework header. Defined
 // inline in the struct (hence implicitly inline), so this stays ODR-safe.
 namespace vc::edit {
-template <>
-struct vc_stage_params<vc::pipe::vc_sample_blur_stage> {
+template <> struct vc_stage_params<vc::pipe::vc_sample_blur_stage> {
     static vc::pipe::vc_sample_blur_params
     from_session(const vc_edit_session& session) {
         // DERIVED from a session slice rather than returning defaults, so the
@@ -343,7 +373,8 @@ class unregistered_stage : public vc::pipe::i_pipe {
 
 // Sanity: the type really IS constructible from (name, params), so the
 // negative assert below cannot be passing for that reason.
-static_assert(std::constructible_from<unregistered_stage, vc::pipe::stage_name,
+static_assert(std::constructible_from<unregistered_stage,
+                                      vc::pipe::stage_name,
                                       unregistered_params>);
 static_assert(!vc::edit::vc_stage_params_req<unregistered_stage>,
               "a stage with no vc_stage_params specialization must NOT "
@@ -387,7 +418,7 @@ TEST_CASE("vc_stage_registry: register_stage -> create(kind,name,session)"
     const auto stage = registry.create("sample_blur", "b", session);
     REQUIRE(stage != nullptr);
     CHECK(std::string{stage->kind()} == "sample_blur"); // per-type identity
-    CHECK(stage->name() == "b");                 // per-instance name
+    CHECK(stage->name() == "b");                        // per-instance name
 
     // THE point of the trait: the params the stage was built with really came
     // out of vc_stage_params<StageT>::from_session(), fed by THIS session.
@@ -425,7 +456,8 @@ TEST_CASE("vc_stage_registry: one kind cannot be claimed by BOTH registration"
         // Throwing but still having inserted into session_factories_ would
         // reintroduce the very split-brain this guard exists to prevent, and
         // a bare CHECK_THROWS_AS cannot tell the two apart.
-        CHECK(registry.create("clash", "n")->kind() == std::string{"passthrough"});
+        CHECK(registry.create("clash", "n")->kind() ==
+              std::string{"passthrough"});
         const auto img = vc::vc_image::zeros<vc::buf_f32>(2, 2, 3);
         vc::edit::vc_memory_table backing;
         vc::edit::vc_persistent_edits_table persistent{backing};
@@ -449,32 +481,35 @@ TEST_CASE("vc_stage_registry: one kind cannot be claimed by BOTH registration"
         CHECK_THROWS_AS(registry.create("clash", "n"), vc::vc_exception);
     }
 
-    SUBCASE("re-registering on the SAME path is still last-wins, not an error") {
+    SUBCASE(
+        "re-registering on the SAME path is still last-wins, not an error") {
         vc::edit::vc_stage_registry registry;
         registry.register_kind("same", paramless);
         CHECK_NOTHROW(registry.register_kind("same", paramless));
 
         registry.register_stage<vc::pipe::vc_sample_blur_stage>("also_same");
-        CHECK_NOTHROW(
-            registry.register_stage<vc::pipe::vc_sample_blur_stage>(
-                "also_same"));
+        CHECK_NOTHROW(registry.register_stage<vc::pipe::vc_sample_blur_stage>(
+            "also_same"));
     }
 }
 
 // =====================================================================
-// SPEC (RED until you implement the TODO(you) bodies). Each fails loudly
-// until its named rep is written — the same convention as
-// tests/test_vc_pipe.cpp. This is your edit-model worklist. Every failure
-// here must trace to exactly one TODO(you).
+// SPEC — the edit-model worklist, same convention as tests/test_vc_pipe.cpp.
+// This section now mixes now-green spine cases (build_pipeline, render_image,
+// including cancellation propagation) with the three still-red ones
+// (export_image; vc_cached_edits_table/vc_persistent_edits_table get/set).
+// Every failure here must trace to exactly one TODO(you).
 // =====================================================================
 
 TEST_CASE("build_pipeline: assembles a runnable pipeline from a one-stage"
-          " session (RED until build_pipeline() is written)") {
-    // The spine: vc_edit_session -> build_pipeline -> (run -> vc_image). The
-    // scaffold body throws, so this is RED; when build_pipeline assembles the
-    // passthrough spine it returns a pipeline and stops throwing -> GREEN. The
-    // failure is isolated to build_pipeline (not run(), which has no public stage
-    // accessor to observe) — see the throwing-shell rationale in the header.
+          " session, with `inputs` already populated on the open input"
+          " port") {
+    // The spine: vc_edit_session -> build_pipeline -> (run -> vc_image).
+    // build_pipeline knows the passthrough's ports BY CONSTRUCTION, so the
+    // returned vc_built_graph's `inputs` map must already carry exactly one
+    // entry — the passthrough's `in` port — holding session.source(). The
+    // buffer-identity check (pixels() pointer equality) pins that this is
+    // the SAME image (a shared_ptr refcount bump), not a copy.
     const auto img = vc::vc_image::zeros<vc::buf_f32>(2, 2, 3);
     vc::edit::vc_memory_table backing;
     vc::edit::vc_persistent_edits_table persistent{backing};
@@ -484,18 +519,22 @@ TEST_CASE("build_pipeline: assembles a runnable pipeline from a one-stage"
         std::make_unique<vc::edit::vc_memory_image_meta>(), persistent, cache};
     const vc::edit::vc_render_request request; // full-res, whole image
 
-    CHECK_NOTHROW(
-        [[maybe_unused]] auto pipe =
-            vc::edit::build_pipeline(session, request)); // TODO(you)
+    auto built = vc::edit::build_pipeline(session, request);
+
+    REQUIRE(built.inputs.size() == 1);
+    const auto& [port, packet] = *built.inputs.begin();
+    CHECK(port.slot == vc::pipe::vc_passthrough_stage::slots::in.name);
+    CHECK(packet.get<vc::vc_image>().pixels().get() ==
+          session.source().pixels().get());
 }
 
-TEST_CASE("render_image: renders a one-stage session end-to-end (RED until"
-          " build_pipeline()/run() are written)") {
+TEST_CASE("render_image: renders a one-stage session end-to-end") {
     // Composes build_pipeline + vc_pipeline::run() (the spine diagram,
     // edit_model_scaffold_plan.md Sec 3, made callable). The spine's one
     // stage is vc_passthrough_stage (identity — see its worked-reference
     // process()), so a correct render_image reproduces the source's geometry
-    // exactly. RED today: the shell throws unconditionally.
+    // exactly AND shares its pixel buffer (a passthrough round-trip, not a
+    // copy).
     const auto img = vc::vc_image::zeros<vc::buf_f32>(4, 3, 3);
     vc::edit::vc_memory_table backing;
     vc::edit::vc_persistent_edits_table persistent{backing};
@@ -505,22 +544,52 @@ TEST_CASE("render_image: renders a one-stage session end-to-end (RED until"
         std::make_unique<vc::edit::vc_memory_image_meta>(), persistent, cache};
     const vc::edit::vc_render_request request; // full-res, whole image
 
-    const auto rendered =
-        vc::edit::render_image(session, request); // TODO(you)
+    const auto rendered = vc::edit::render_image(session, request);
 
     CHECK(rendered.width() == 4);
     CHECK(rendered.height() == 3);
     CHECK(rendered.channels() == 3);
+    CHECK(rendered.pixels().get() == session.source().pixels().get());
+}
+
+TEST_CASE("render_image: propagates cancellation through build_pipeline's"
+          " graph into vc_pipeline::run()") {
+    // The first end-to-end proof that the cancellation subsystem is
+    // reachable from the PUBLIC API: a pre-cancelled vc_render_context
+    // passed into render_image must surface as a thrown vc::vc_exception
+    // (vc_error_code::user_cancelled) — the same policy vc_pipeline::run()
+    // itself enforces (see the sibling "run() observes a PRE-CANCELLED run
+    // context" test above), just reached this time through render_image
+    // rather than by driving vc_pipeline directly.
+    const auto img = vc::vc_image::zeros<vc::buf_f32>(4, 3, 3);
+    vc::edit::vc_memory_table backing;
+    vc::edit::vc_persistent_edits_table persistent{backing};
+    vc::edit::vc_cached_edits_table cache{backing};
+    const vc::edit::vc_edit_session session{
+        img, vc::edit::vc_edit_document{},
+        std::make_unique<vc::edit::vc_memory_image_meta>(), persistent, cache};
+    const vc::edit::vc_render_request request; // full-res, whole image
+
+    vc::pipe::vc_cancellation_source src;
+    src.cancel(); // pre-cancelled before render_image is even entered
+    const vc::pipe::vc_render_context run_context{src.token()};
+
+    try {
+        vc::edit::render_image(session, request, run_context);
+        FAIL("render_image should have thrown on a pre-cancelled context");
+    } catch (const vc::vc_exception& e) {
+        CHECK(e.code() == vc::vc_error_code::user_cancelled);
+    }
 }
 
 TEST_CASE("export_image: renders a session and writes it to a file (RED"
-          " until render_image()/export_image() are written)") {
+          " until export_image() is written)") {
     // The end of the export chain: vc_edit_session -> export_image -> a real
     // file on disk. Checks only that the file lands
     // (std::filesystem::exists), not its contents — decoding it back would
-    // entangle this test's red with stb_image_reader's own separate,
-    // unimplemented rep (the same throwing-shell isolation reasoning as
-    // vc_build_pipeline.h).
+    // pull `stb_image_reader` (already implemented) into a test whose red is
+    // meant to isolate export_image's own still-unwritten TODO(you) body,
+    // not couple it to a second component's correctness.
     const auto img = vc::vc_image::zeros<vc::buf_f32>(4, 3, 3);
     vc::edit::vc_memory_table backing;
     vc::edit::vc_persistent_edits_table persistent{backing};
@@ -556,10 +625,10 @@ TEST_CASE("vc_cached_edits_table: get misses, then hits after set()"
     CHECK_FALSE(cache.get("hash-abc").has_value()); // TODO(you): get()
 
     const vc::edit::data_bytes computed{std::byte{0xAB}, std::byte{0xCD}};
-    cache.set("hash-abc", computed);                 // TODO(you): set()
+    cache.set("hash-abc", computed); // TODO(you): set()
 
     // Hit after set: the same content hash returns the bytes.
-    const auto hit = cache.get("hash-abc");         // TODO(you): get()
+    const auto hit = cache.get("hash-abc"); // TODO(you): get()
     REQUIRE(hit.has_value());
     CHECK(hit->size() == 2);
 }
@@ -579,10 +648,10 @@ TEST_CASE("vc_persistent_edits_table: get misses, then hits after set()"
     CHECK_FALSE(persistent.get("mask-id-1").has_value()); // TODO(you): get()
 
     const vc::edit::data_bytes computed{std::byte{0xEF}};
-    persistent.set("mask-id-1", computed);                 // TODO(you): set()
+    persistent.set("mask-id-1", computed); // TODO(you): set()
 
     // Hit after set: the same id returns the bytes.
-    const auto hit = persistent.get("mask-id-1");         // TODO(you): get()
+    const auto hit = persistent.get("mask-id-1"); // TODO(you): get()
     REQUIRE(hit.has_value());
     CHECK(hit->size() == 1);
 }
@@ -600,7 +669,7 @@ TEST_CASE("vc_pipeline: run() observes a PRE-CANCELLED run context and"
     // separate rep.
     //
     // POLICY: cancel => throw vc::vc_exception (vc_error_code::user_cancelled,
-    // via vc::throw_if_cancelled) — matches vc_pipeline::run()'s own body.
+    // via vc::pipe::throw_if_cancelled) — matches vc_pipeline::run()'s own body.
     vc::pipe::vc_pipeline pipe;
     pipe.add(std::make_unique<vc::pipe::vc_passthrough_stage>("a"));
     pipe.add(std::make_unique<vc::pipe::vc_passthrough_stage>("b"));

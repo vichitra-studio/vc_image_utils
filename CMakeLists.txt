@@ -95,10 +95,11 @@ set(VC_LIB_SOURCES
     src/io/vc_io_stb.cpp
     src/io/vc_io_fs.cpp
     src/utils/vc_log.cpp
-    src/utils/vc_image_dumper.cpp
     src/utils/vc_perf.cpp
+    src/debug/vc_image_dumper.cpp
     src/pipe/vc_pipe_contract.cpp
     src/pipe/vc_pipe_context.cpp
+    src/pipe/vc_pipe_errors.cpp
     src/pipe/vc_pipeline.cpp
     src/pipe/stages/vc_passthrough_stage.cpp
     src/edit/vc_edit_session.cpp
@@ -193,9 +194,20 @@ if(VC_BUILD_BENCHMARKS)
     endif()
 
     if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
-        message(WARNING
-            "VC_BUILD_BENCHMARKS is ON but CMAKE_BUILD_TYPE is '${CMAKE_BUILD_TYPE}', not 'Release'. "
-            "Benchmark numbers are only meaningful in an optimized build.")
+        # A WARNING here used to be survivable, but it no longer is: line ~234
+        # below hardcodes -DNDEBUG into VC_BENCH_FLAGS on the assumption that
+        # benchmarks are Release-only, so a non-Release bench build would
+        # stamp a committed baseline with a flags string that lies about what
+        # actually ran. Match the sanitizer guard above — FATAL, not a
+        # warning that can be silently ignored.
+        message(FATAL_ERROR
+            "VC_BUILD_BENCHMARKS requires CMAKE_BUILD_TYPE=Release (got "
+            "'${CMAKE_BUILD_TYPE}'). Benchmark numbers are only meaningful in "
+            "an optimized build, and VC_BENCH_FLAGS hardcodes -DNDEBUG into "
+            "every baseline's metadata regardless of the actual build type — "
+            "a non-Release build would write a baseline whose recorded flags "
+            "are false. Configure benchmarks in a separate Release build dir "
+            "(docs/benchmarking.md Sec 4.4).")
     endif()
 
     # Pinned, not left to default: two runs on the same machine diverge otherwise
@@ -248,6 +260,35 @@ if(VC_BUILD_BENCHMARKS)
     target_compile_options(vc_bench_opts INTERFACE -O3 -march=${VC_BENCH_MARCH})
     target_include_directories(vc_bench_opts INTERFACE bench)
     target_include_directories(vc_bench_opts SYSTEM INTERFACE third_party/nanobench)
+    # Whole third_party/ too (SYSTEM, same reasoning as nanobench above): the
+    # --compare mode in vc_bench_support.cpp parses a baseline .json with the
+    # vendored nlohmann/json.hpp (already used by src/edit/vc_edit_document_io.cpp)
+    # rather than hand-rolling a reader. CORRECTED: this does NOT match how the
+    # library target pulls third_party in, despite the identical include PATH.
+    # vc_image_utils_lib's equivalent (~line 118) is SYSTEM PRIVATE — visible
+    # only inside that target's own .cpp files, non-propagating. This is
+    # SYSTEM INTERFACE, because vc_bench_opts is itself an INTERFACE library
+    # (header-only carrier of flags/includes/defs, no .cpp of its own) and
+    # INTERFACE is the only visibility keyword an INTERFACE library accepts —
+    # verified directly: swapping this line to SYSTEM PRIVATE makes CMake
+    # (4.3.4) refuse to configure with "target_include_directories may only
+    # set INTERFACE properties on INTERFACE targets", so this CANNOT be
+    # PRIVATE like line 118 is. The practical effect: this include
+    # propagates to every target that links vc_bench_opts, i.e. all three
+    # bench executables (not just vc_bench_support_lib), incidentally handing
+    # them stb/ and doctest/ headers they never use. Narrowing this to
+    # third_party/nlohmann (mirroring the third_party/nanobench line above)
+    # was considered and rejected: nanobench vendors as a flat header directly
+    # under third_party/nanobench/, so pointing the include path one level in
+    # keeps `#include "nanobench.h"` unchanged; nlohmann vendors as
+    # third_party/nlohmann/json.hpp, so narrowing would force this file's own
+    # `#include "nlohmann/json.hpp"` to become `#include "json.hpp"`,
+    # diverging from the identical `#include "nlohmann/json.hpp"` spelling
+    # src/edit/vc_edit_document_io.cpp already uses for the exact same header.
+    # Consistency of the include spelling across the codebase was judged more
+    # valuable than closing this incidental (and harmless — stb/doctest are
+    # unused headers, not symbols that can collide) leak.
+    target_include_directories(vc_bench_opts SYSTEM INTERFACE third_party)
     target_compile_definitions(vc_bench_opts INTERFACE
         VC_BENCH_HOST="${VC_BENCH_HOST}"
         VC_BENCH_COMPILER="${VC_BENCH_COMPILER}"

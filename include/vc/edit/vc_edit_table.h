@@ -14,7 +14,8 @@ namespace vc::edit {
 
 // MISS-EXPOSING reader concept: `const R&` exposes `get(key) -> optional<V>`
 // — a miss surfaces so the caller can recompute. i_edit_table's read side is
-// written this way "in spirit": the concrete stores below use a runtime
+// written this way "in spirit": the concrete stores
+// (vc_cached_edits_table.h/vc_persistent_edits_table.h) use a runtime
 // interface (i_edit_table), not this concept, as their calling convention;
 // the concept documents and checks that their METHOD SHAPE matches it (see
 // the static_asserts in vc_edit_table.cpp). Lives here, not in a shared
@@ -35,9 +36,11 @@ concept vc_optional_reader_req = requires(const R& r, const K& key) {
 // compile time (matching the `vc_pixel_element_req` style already used
 // elsewhere) instead of one inherited interface every backend derives from.
 // Relocated here (2026-07-25) from the shared `vc_table.h`: it used to serve
-// two consumer families (this file's two stores, plus a settings-writer
-// class since removed); with only one family left, it belongs beside its
-// sole conformers rather than in the shared low-level byte-store header.
+// two consumer families (i_edit_table's two stores, declared in
+// vc_cached_edits_table.h/vc_persistent_edits_table.h, plus a
+// settings-writer class since removed); with only one family left, it
+// belongs beside its sole conformers rather than in the shared low-level
+// byte-store header.
 // Each conformance is pinned with a static_assert next to its concrete type,
 // not here, since the checked type must already be complete (see
 // `vc_edit_table.cpp`).
@@ -83,46 +86,19 @@ class i_edit_table {
     [[nodiscard]] virtual std::optional<data_bytes>
     get(const std::string& key) const = 0;
     virtual void set(const std::string& key, data_bytes value) = 0;
-};
 
-// Reproducible derived data (alignment/homography, algorithmic masks,
-// feature points, rasterized parametric masks). Content-hash keyed; MAY
-// evict; NEVER saved — a loss means recompute, not data loss. Backed by an
-// INJECTED i_table& (test/mock substitution; the cache does not
-// construct its own backing store).
-//
-// [LATER] (not built now): eviction/GC/invalidation policy, the actual
-// chained-hash keying, taps/injections integration. Only the adapter SHAPE
-// is scaffolded here — get()/set() are TODO(you) reps (content-hash keying
-// + delegation to the backing store is the user's rep).
-class vc_cached_edits_table : public i_edit_table {
-  public:
-    explicit vc_cached_edits_table(i_table& backing);
+  protected:
+    // See i_table (vc_table.h): the copy ctor's declaration would otherwise
+    // suppress the implicit default one that vc_cached_edits_table's
+    // (vc_cached_edits_table.h) and vc_persistent_edits_table's
+    // (vc_persistent_edits_table.h) base-subobject initialization relies on.
+    i_edit_table() = default;
 
-    [[nodiscard]] std::optional<data_bytes>
-    get(const std::string& key) const override;
-    void set(const std::string& key, data_bytes value) override;
-
-  private:
-    i_table& backing_;
-};
-
-// Non-reproducible derived data (AI/ML object masks, non-deterministic
-// embeddings). Id-keyed; PINNED (never evicted); travels with the edit —
-// SAVED/bundled — because a loss here IS data loss, so it behaves like
-// intent, not a cache. Backed by an INJECTED i_table&.
-//
-// [LATER] (not built now): disk/bundle IO. get()/set() are TODO(you) reps.
-class vc_persistent_edits_table : public i_edit_table {
-  public:
-    explicit vc_persistent_edits_table(i_table& backing);
-
-    [[nodiscard]] std::optional<data_bytes>
-    get(const std::string& key) const override;
-    void set(const std::string& key, data_bytes value) override;
-
-  private:
-    i_table& backing_;
+    // Slicing prevention, same reasoning as i_table (vc_table.h): protected
+    // copy ops keep a derived store's own copy ops working while blocking
+    // assignment/construction through a base i_edit_table&.
+    i_edit_table(const i_edit_table&) = default;
+    i_edit_table& operator=(const i_edit_table&) = default;
 };
 
 } // namespace vc::edit

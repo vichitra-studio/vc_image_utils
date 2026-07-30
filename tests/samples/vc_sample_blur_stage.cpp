@@ -22,6 +22,19 @@ namespace vc::pipe {
 vc_sample_blur_stage::vc_sample_blur_stage(stage_name name,
                                            vc_sample_blur_params params)
     : i_pipe(std::move(name)), params_(params) {
+    // radius is known in full at construction — there is no run-time input it
+    // could depend on — so it is checked HERE, not deferred to
+    // validate_inputs()/process() time: an invalid blur should never be
+    // constructible, let alone added to a pipeline and pass validate().
+    //
+    // Written as NOT(positive), not `radius <= 0.0`: every relational
+    // comparison against NaN is false, so `radius <= 0.0` would silently
+    // accept a NaN radius (`NaN > 0.0` is also false, so its negation
+    // correctly throws instead of falling through into the kernel).
+    if (!(params_.radius > 0.0)) {
+        throw vc::vc_exception(vc::vc_error_code::invalid_argument,
+                               "vc_sample_blur_stage: radius must be positive");
+    }
 }
 
 const char* vc_sample_blur_stage::kind() const {
@@ -42,16 +55,8 @@ void vc_sample_blur_stage::declare(vc_pipe_contract& contract) const {
     contract.add_output_slot(slots::out);
 }
 
-void vc_sample_blur_stage::validate_inputs(const vc_pipe_context& context) const {
-    // Written as NOT(positive), not `radius <= 0.0`: every relational
-    // comparison against NaN is false, so `radius <= 0.0` would silently
-    // accept a NaN radius (`NaN > 0.0` is also false, so its negation
-    // correctly throws instead of falling through into the kernel).
-    if (!(params_.radius > 0.0)) {
-        throw vc::vc_exception(vc::vc_error_code::invalid_argument,
-                               "vc_sample_blur_stage: radius must be positive");
-    }
-
+void vc_sample_blur_stage::validate_inputs(
+    const vc_pipe_context& context) const {
     // dtype is an invariant the type contract cannot carry: slot<T> pins the
     // payload as a vc_image but not which dtype it holds, and do_process()
     // reads as<buf_f32>() — which would otherwise throw from deep inside
@@ -93,8 +98,7 @@ void vc_sample_blur_stage::do_process(vc_pipe_context& context) const {
     // NOTE: a radius in (0, 0.5) rounds to 0 here and the stage becomes an
     // identity copy. That is accepted, not guarded — validate_inputs() only
     // requires radius > 0, so a sub-half-pixel blur is a legal no-op.
-    const auto max_extent =
-        static_cast<long long>(std::max(width, height));
+    const auto max_extent = static_cast<long long>(std::max(width, height));
     const auto radius = static_cast<vc::image_dim>(
         std::min(std::llround(params_.radius), max_extent));
 

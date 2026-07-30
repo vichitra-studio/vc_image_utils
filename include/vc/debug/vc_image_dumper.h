@@ -19,7 +19,7 @@
 // vc::vc_image must be complete right here, not just at whatever call site
 // eventually instantiates the template.
 
-namespace vc::utils::debug {
+namespace vc::debug {
 
 // ---------------------------------------------------------------------
 // Process-wide state, owned entirely by vc_image_dumper.cpp as
@@ -63,12 +63,12 @@ void dump(const vc::utils::string& label,
 // dump_image_builder — the one place a deferred image gets resolved, built
 // on vc::utils::log_info_builder_base<vc::vc_image> (see vc_log_info_builder.h
 // for operator()/resolve()). should_build() checks this instance's
-// tag_enabled() and vc::utils::debug::enabled() — the same shape as
+// tag_enabled() and vc::debug::enabled() — the same shape as
 // log_info_builder.
 //
-//   vc::utils::debug::dump_image_builder builder;
+//   vc::debug::dump_image_builder builder;
 //   ...
-//   vc::utils::debug::dump("resize",
+//   vc::debug::dump("resize",
 //       builder([&]() -> std::optional<vc::vc_image> {
 //           return build_visualisation(buffer);
 //       }));
@@ -92,8 +92,8 @@ class dump_image_builder
 
   private:
     bool should_build() const override {
-        return tag_enabled() && vc::utils::debug::enabled();
+        return tag_enabled() && vc::debug::enabled();
     }
 };
 
-} // namespace vc::utils::debug
+} // namespace vc::debug

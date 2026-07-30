@@ -3,13 +3,7 @@
 
 #pragma once
 
-#include <any>
-#include <type_traits>
-#include <typeinfo>
-#include <utility>
-
-#include "vc/vc_error_code.h"
-#include "vc/vc_exception.h"
+#include "vc/vc_any_box.h"
 
 namespace vc::pipe {
 
@@ -23,45 +17,15 @@ namespace vc::pipe {
 // cost of a heap allocation + RTTI. That choice is [OPEN] in the design and
 // revisited once the real payload set is known.
 //
-// This class is written in full — there is no learning rep in hand-writing an
-// any_cast. The reps live in the stage process() bodies (vc_pipeline's own
-// validate()/run() are done).
-class vc_pipe_packet {
-  public:
-    vc_pipe_packet() = default;
-
-    // Wrap a value. The requires-clause stops this template from being chosen
-    // in place of the copy/move constructors when T would deduce to
-    // vc_pipe_packet itself (the classic "greedy templated constructor" trap).
-    template <typename T>
-        requires(!std::is_same_v<std::decay_t<T>, vc_pipe_packet>)
-    explicit vc_pipe_packet(T value) : value_(std::move(value)) {
-    }
-
-    // Unbox to T. Throws vc::vc_exception if the stored payload is not a T.
-    // In a graph that cleared assembly-time validation (Sec 6) this never
-    // throws, because the connected types were already checked — but it is a
-    // runtime cast, not a compile-time guarantee on its own.
-    template <typename T> const T& get() const {
-        const T* held = std::any_cast<T>(&value_);
-        if (held == nullptr) {
-            throw vc::vc_exception(
-                vc::vc_error_code::invalid_argument,
-                "vc_pipe_packet::get<T>(): requested type does not match the "
-                "stored payload type");
-        }
-        return *held;
-    }
-
-    bool has_value() const noexcept {
-        return value_.has_value();
-    }
-    const std::type_info& type() const noexcept {
-        return value_.type();
-    }
-
-  private:
-    std::any value_;
+// Backed by vc::vc_any_box (include/vc/vc_any_box.h), the mechanism shared
+// with vc::vc_metadata_value; get<T>()'s mismatch message names this
+// type via the tag below. In a graph that cleared assembly-time validation
+// (Sec 6) get<T>() never throws, because the connected types were already
+// checked — but it is a runtime cast, not a compile-time guarantee on its
+// own.
+struct vc_pipe_packet_tag {
+    static constexpr const char* type_name = "vc_pipe_packet";
 };
+using vc_pipe_packet = vc::vc_any_box<vc_pipe_packet_tag>;
 
 } // namespace vc::pipe

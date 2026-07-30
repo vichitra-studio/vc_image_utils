@@ -8,30 +8,27 @@
 
 #include "vc/vc_types.h"
 
-namespace vc::edit {
-// Forward-declared, not #included: vc::edit is a HIGHER layer than this
-// core header (vc::edit depends on vc, not the reverse — vc_edit_session.h
-// etc already #include "vc/vc_image.h"). #including
-// "vc/edit/vc_image_meta.h" here would invert that layering into a cycle
-// (core -> edit -> core). A forward declaration + shared_ptr<const T> is
-// layering-safe: shared_ptr's destructor/copy/comparison are all type-
-// erased and do not need T complete, so vc_image_info stays a value type
-// with no out-of-line special members even though i_image_meta is never
-// #included here. This is the pointer-not-compose escape hatch, not the
-// straightforward "just #include it" path — worth a second look if the
-// edit/core split ever gets its own CMake targets, where this forward
-// declaration would become load-bearing rather than just tidy.
-class i_image_meta;
-} // namespace vc::edit
-
 namespace vc {
 
-// A shared, read-only handle onto a vc::edit::i_image_meta — the composed-
+// Forward-declared, not #included (both i_image_meta and vc_image_info are
+// core — see vc_image_meta.h's own comment for why the interface lives here
+// rather than in vc::edit): this is a plain compile-firewall forward
+// declaration, the same technique vc_image.h uses for vc_image_writer. A
+// forward declaration + shared_ptr<const T> is enough because shared_ptr's
+// destructor/copy/comparison are all type-erased and do not need T complete,
+// so vc_image_info stays a value type with no out-of-line special members
+// even though i_image_meta is never #included here — a consumer that only
+// holds/copies/compares the handle (most of vc_image_info's own clients)
+// never pays for pulling in <optional>/<string>/vc_any_box.h; a consumer
+// that actually calls get()/set() on it includes vc/vc_image_meta.h itself.
+class i_image_meta;
+
+// A shared, read-only handle onto a vc::i_image_meta — the composed-
 // metadata field's exact type, spelled once here rather than at every
 // accessor/parameter that needs it. Matches the pixel_buffer_ptr /
 // const_pixel_buffer_ptr precedent in vc_types.h: a shared_ptr handle over a
 // domain type gets a named alias instead of being spelled out repeatedly.
-using const_image_meta_ptr = std::shared_ptr<const vc::edit::i_image_meta>;
+using const_image_meta_ptr = std::shared_ptr<const vc::i_image_meta>;
 
 // An image's descriptor: its geometry (dimensions) plus the element-index math
 // those dimensions imply. Held by BOTH vc_image and vc_image_writer as a plain
@@ -80,7 +77,8 @@ class vc_image_info {
     //   (static_cast<std::size_t>(ch) * height_ + y) * width_ + x
     // when planar working buffers actually arrive. Kept interleaved now because
     // no code depends on the layout yet and the first consumer is stb I/O.
-    std::size_t index(image_dim x, image_dim y, channel_count ch) const noexcept {
+    std::size_t
+    index(image_dim x, image_dim y, channel_count ch) const noexcept {
         return (static_cast<std::size_t>(y) * width_ + x) * channels_ + ch;
     }
 
@@ -88,7 +86,7 @@ class vc_image_info {
 
     // ---- composed metadata ----
     //
-    // The image's captured metadata (EXIF/IPTC/etc, vc::edit::i_image_meta),
+    // The image's captured metadata (EXIF/IPTC/etc, vc::i_image_meta),
     // COMPOSED here rather than merged into the geometry above — physical
     // dimensions (width_/height_/channels_) always describe the BUFFER, and
     // stay independent of metadata like EXIF orientation that can make the
@@ -115,7 +113,8 @@ class vc_image_info {
     image_dim width_ = 0;
     image_dim height_ = 0;
     channel_count channels_ = 0;
-    const_image_meta_ptr metadata_; // null by default: a mask is an image whose composed metadata is null
+    const_image_meta_ptr
+        metadata_; // null by default: a mask is an image whose composed metadata is null
 };
 
 } // namespace vc

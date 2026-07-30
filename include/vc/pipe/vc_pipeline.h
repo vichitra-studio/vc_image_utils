@@ -3,11 +3,14 @@
 
 #pragma once
 
+#include <cstddef>
 #include <optional>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "vc/pipe/i_pipe.h"
+#include "vc/pipe/vc_pipe_context.h"
 #include "vc/pipe/vc_pipe_contract.h"
 #include "vc/pipe/vc_pipe_types.h"
 #include "vc/pipe/vc_render_context.h"
@@ -29,6 +32,10 @@ class vc_pipeline {
     //   const auto b = pipe.add(std::make_unique<vc_passthrough_stage>("b"));
     //   pipe.connect(a, vc_passthrough_stage::slots::out,
     //                b, vc_passthrough_stage::slots::in);
+    //
+    // PRECONDITION: `pipe` must be non-null. This is a caller programming
+    // error, not a runtime condition — checked only via a debug-build
+    // assert (see vc_pipeline.cpp), compiled out under NDEBUG.
     stage_name add(stage_ptr pipe);
 
     // Wire an upstream OUTPUT slot to a downstream INPUT slot, each named by
@@ -57,12 +64,24 @@ class vc_pipeline {
                        .to = stage_port{std::move(to_stage), to_slot}});
     }
 
-    // Run every pipe's declare() to gather its slot contracts, then check every
-    // connection's TYPE contract: the upstream output slot's declared type must
-    // equal the downstream input slot's expected type. Throw vc::vc_exception
-    // with a clear message on the first mismatch, e.g.
-    //   "connection mean.mean -> grey.rgb: produces double but expects
-    //    vc_image".
+    // Checks every connection against the graph assembled so far, throwing
+    // vc::vc_exception on the first problem found. Non-exhaustive list of
+    // what's checked (see vc_pipeline.cpp for the exact order):
+    //   - UNKNOWN STAGE: a connection naming a stage that was never add()ed
+    //     (require_contract() throws stage_not_found);
+    //   - duplicate input wiring: two connections targeting the same (stage,
+    //     slot) input port;
+    //   - TOPOLOGY: since run() executes stages in insertion order (no
+    //     topological sort — Sec 12.9), a connection's producing stage must
+    //     have been add()ed at a strictly earlier index than its consuming
+    //     stage, and a stage may not feed its own input (a self-loop). Any
+    //     cycle must contain at least one such backwards edge in a linear
+    //     ordering, so this single index comparison also rejects cycles,
+    //     with no graph/DAG machinery;
+    //   - TYPE contract: the upstream output slot's declared type must equal
+    //     the downstream input slot's expected type, e.g.
+    //       "connection mean.mean -> grey.rgb: produces double but expects
+    //        vc_image".
     // No pixels flow here — this compares declarations only (Sec 6). The data
     // contract (vc_image_spec) is [LATER]; only the type layer is checked now.
     void validate() const;
@@ -74,7 +93,7 @@ class vc_pipeline {
     //   - `inputs` must cover EXACTLY the open inputs: a missing or extra key
     //     is an error.
     //   - Only open outputs are returned; an intermediate output consumed by a
-    //     connection is not observable here (use vc::utils::debug::dump() to
+    //     connection is not observable here (use vc::debug::dump() to
     //     inspect mid-pipeline).
     // "Open" is computed by subtracting the connected ports from each stage's
     // declared slots (contract.input_slot_names()/output_slot_names()).
@@ -129,6 +148,38 @@ class vc_pipeline {
     stage_port_list
     find_open_outputs(const stage_name& stage,
                       const std::vector<slot_name>& output_slots) const;
+
+    // One stage's input packet map, resolved from run()'s two sources: for
+    // each of `stage_contract`'s declared input slots, take the packet from
+    // `inputs` if it is one of this run's caller-supplied open inputs,
+    // otherwise from `outputs` via the upstream connection. A fanned-out
+    // upstream output is read by more than one downstream input — only the
+    // LAST remaining read (per `remaining_reads`) moves the packet out of
+    // `outputs`; every earlier read copies (cheap for vc_image: a
+    // shared_ptr refcount bump, not a pixel copy). Throws
+    // vc::pipe::throw_pipe_run_error if a connected upstream never
+    // published its output. Extracted from run()'s per-stage loop body so
+    // that loop reads at one level: resolve inputs -> process -> harvest
+    // outputs.
+    [[nodiscard]] vc_pipe_context::slot_packet_map resolve_stage_inputs(
+        const stage_name& stage,
+        const vc_pipe_contract& stage_contract,
+        render_io_map& inputs,
+        render_io_map& outputs,
+        std::unordered_map<stage_port, std::size_t>& remaining_reads) const;
+
+    // Filters `outputs` down to exactly `open_output_ports`, in place:
+    // throws vc::pipe::throw_pipe_run_error if a declared open output was
+    // never published, then erases every entry not in `open_output_ports`
+    // (an intermediate output some connection already consumed, and so not
+    // observable to run()'s caller). Mirrors find_open_outputs's naming, but
+    // operates on the actual packet map rather than just port names. Takes
+    // `run_context` to preserve run()'s cancellation checkpoint between the
+    // missing-output check and the erase_if — both steps used to be
+    // separated by a throw_if_cancelled() call in run()'s own body.
+    void harvest_open_outputs(render_io_map& outputs,
+                              const stage_port_list& open_output_ports,
+                              const vc_render_context& run_context) const;
 
     // The named stage's contract, or throw stage_not_found. A private query,
     // like vc_pipe_contract's has_slot()/find_slot_type() — used only by

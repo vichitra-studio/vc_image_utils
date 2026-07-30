@@ -25,9 +25,8 @@ namespace vc::pipe {
 // call only add_input_slot/add_output_slot; the name-keyed query methods
 // below (input_slot_type, input_slot_names, ...) exist for
 // vc_pipeline::validate()/run(), the framework code that owns and queries the
-// populated contract. Nothing enforces that split anymore (the
-// contract_builder write-only view that used to enforce it was removed) — it
-// is a convention on the author side, not a compile-time guarantee.
+// populated contract. Nothing enforces that split — it is a convention on
+// the author side, not a compile-time guarantee.
 //
 // This is the "type layer" of the contract, and the only layer live now. The
 // "data layer" — matching a vc_image_spec (planar/linear/float32, etc.) — is

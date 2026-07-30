@@ -23,10 +23,10 @@ fixed-size design, not by `std::span` alone — but `vc_pixel_buffer` is dtype-t
 runtime property, decided when a file is decoded — see §3.1), so its typed accessor
 (`as<T>()`) needs a return type that doesn't hard-code one element type. `std::span<T>` fills
 that role: element access without the capacity-mutating surface a `vector<T>&` would reopen.
-`std::concepts` is used for the same reason — `vc_pixel_element` constrains `as<T>()`/the
-constructor to the two types the variant actually holds, turning a request for an unsupported
-type into a compile error instead of a runtime throw. Modules remain unused — no concrete
-problem in this project needs them yet.
+`std::concepts` is used for the same reason — `vc_pixel_element_req` constrains `as<T>()`/the
+constructor to the three types the variant actually holds (`buf_f32`/`buf_u8`/`buf_u16`),
+turning a request for an unsupported type into a compile error instead of a runtime throw.
+Modules remain unused — no concrete problem in this project needs them yet.
 
 ---
 
@@ -44,7 +44,7 @@ All identifiers use `snake_case`. No `PascalCase`, no `camelCase`, no `SCREAMING
 | Enums (scoped) | snake_case | `vc_error_code`, `vc_image_format` |
 | Enum values | snake_case | `vc_error_code::file_not_found` |
 | Typedefs / aliases | snake_case | `pixel_buffer_ptr`, `image_dim` |
-| Functions / methods | snake_case | `to_string()`, `mutable_pixels()` |
+| Functions / methods | snake_case | `to_string()`, `pixel_count()` |
 | Variables | snake_case | `pixel_count`, `output_path` |
 | Private members | snake_case + trailing `_` | `width_`, `channels_`, `pixels_` |
 | Constants | snake_case | `max_channel_count` |
@@ -83,28 +83,57 @@ warrants grouping. The `vc_` prefix on type names already provides visual disamb
 deep nesting adds redundancy without clarity.
 
 ```
-vc              — vc_image, vc_exception, vc_error_code + all core typedefs
-vc::utils       — string, message (low-level, no circular deps — everything can include this)
+vc              — vc_image, vc_exception, vc_error_code, i_image_meta,
+                  vc_metadata_value + all core typedefs
+vc::utils       — string, message, log_info_builder_base<T> (low-level, no circular
+                  deps — everything can include this)
 vc::utils::log  — level, debug/info/warning/error/temp, log_info_builder
 vc::utils::perf — scoped_timer
-vc::utils::debug — image dump/visualisation (dump, dump_image_builder)
 vc::io          — path, vc_image_format, read_config, write_config,
                   i_image_reader, i_image_writer, stb_image_reader, stb_image_writer
+vc::pipe        — i_pipe, vc_pipeline, vc_pipe_context, vc_pipe_contract,
+                  vc_cancellation_token, vc_render_context, vc_passthrough_stage
+vc::edit        — vc_edit_session, vc_edit_document, i_edit_table,
+                  vc_cached_edits_table, vc_persistent_edits_table, vc_stage_registry,
+                  vc_memory_image_meta, export_image
+vc::debug       — image dump/visualisation (dump, dump_image_builder)
 ```
 
 No namespace aliases anywhere (`using image = vc::vc_image` etc.). Write fully-qualified
 names in headers. Two levels (`vc::io::i_image_reader`) is readable without aliasing.
 
-**Exception — `vc::utils::{log,perf,debug}` are three levels deep.** These three
-subsystems are genuinely low-level, dependency-free utilities (the same description
-`vc::utils` itself is defined by below), which is why they live under `utils` rather than
-as top-level siblings of it. But they also deliberately mirror each other's shape —
-`set_enabled(bool)` / `enabled() noexcept`, a `*_builder` class, the same tag-scoped
-gating pattern — so they can't be flattened directly into `vc::utils` itself without
-colliding (three unrelated `set_enabled`/`enabled` pairs can't coexist in one namespace).
-Nesting them one level deeper resolves the collision without giving up the intentional
-consistency across the three. Not a general license to add a third level elsewhere —
-this is a specific, reasoned carve-out for this one case.
+**Exception — `vc::utils::{log,perf}` are three levels deep.** Both subsystems share a
+shape — `set_enabled(bool)` / `enabled() noexcept`, plus (for `log`) a `*_builder` class
+and tag-scoped gating that `dump_image_builder` also happens to reuse (see
+`vc_log_info_builder.h`) — and neither can flatten directly into `vc::utils` itself
+without colliding: two unrelated `set_enabled`/`enabled` pairs can't coexist in one
+namespace. Nesting one level deeper resolves that collision without giving up the shared
+shape. This is *not* because `log`/`perf` are somehow more deserving of a nested spot —
+`perf` in particular has no `*_builder` and no tag-gating at all, only the bare
+`set_enabled`/`enabled` pair (see `vc_perf.h`'s own comment); the "mirrors each other"
+framing this exception used to make was overstated. The actual justification is narrower,
+and it is about *where* a dependency goes, not whether one exists at all: `log` depends
+only on things already inside `vc::utils` — `vc::utils::string`/`message` (`vc_strings.h`)
+and the shared `log_info_builder_base` (`vc_log_info_builder.h`) — plus the standard
+library. `perf` adds one real dependency on top of that: `vc_perf.cpp` includes
+`vc_log.h` and calls `vc::utils::log::info(...)` from `~scoped_timer()` to report elapsed
+time, so `perf` depends on `log`. That edge is real, but it stays inside `vc::utils` —
+`log` is a sibling namespace nested under the same parent, not a different top-level
+package — so it is not a reason to move `perf` anywhere, unlike `vc::debug`'s dependency
+on `vc::io` below, which does cross out of `vc::utils` entirely. The invariant that
+actually earns `log`/`perf` their spot is: no dependency *outside* `vc::utils`, not no
+dependency at all, and the collision is what forces the extra level once they're there.
+
+`vc::debug` (image dump/visualisation) faces the identical `set_enabled`/`enabled`
+collision but resolves it differently, by *not* nesting under `utils` at all: it
+depends on `vc::io` (to write the dumped file) and on `vc::vc_image`, so it fails the
+"nothing outside `vc::utils`" test that gets `log`/`perf` into `utils` to begin with. It
+sits at the top level instead, alongside `vc::io`/`vc::pipe`/`vc::edit`, with its own
+`include/vc/debug` and `src/debug`. Its builder class (`dump_image_builder`) still
+derives from `vc::utils::log_info_builder_base<T>` across that namespace boundary —
+deliberately (see `vc_log_info_builder.h`'s comment) — because that base enforces shape,
+not co-location. Not a general license to add a third level elsewhere under `utils` —
+this is a specific, reasoned carve-out for `log`/`perf` only, now that `debug` has left.
 
 ### 2.2 Never `using namespace` in headers
 
@@ -131,7 +160,7 @@ public API signatures. Every primitive has a named alias that encodes its semant
 
 ```cpp
 namespace vc {
-    enum class pixel_dtype { f32, u8 };                          // which concrete type is stored
+    enum class pixel_dtype : std::uint8_t { f32, u8, u16 };      // which concrete type is stored
     class  vc_pixel_buffer        { /* fixed-size, dtype-tagged — see Sec 4.2 */ };
     using pixel_buffer_ptr       = std::shared_ptr<vc_pixel_buffer>;
     using const_pixel_buffer_ptr = std::shared_ptr<const vc_pixel_buffer>;
@@ -140,11 +169,14 @@ namespace vc {
 }
 ```
 
-`pixel_dtype` and `vc_pixel_buffer` are declared in `vc_pixel_buffer.h`; `vc_types.h` includes
-it and adds the `shared_ptr` aliases plus `image_dim`/`channel_count`.
+`pixel_dtype` is declared in `vc_types.h`, alongside the `shared_ptr` aliases and
+`image_dim`/`channel_count` — `vc_types.h` only forward-declares `vc_pixel_buffer` itself (a
+`shared_ptr` alias needs no complete type). `vc_pixel_buffer.h` includes `vc_types.h` for
+`pixel_dtype` and defines the actual `vc_pixel_buffer` class, plus the `vc_pixel_element_req`
+concept its constructor and `as<T>()` are constrained by.
 
-`vc_pixel_buffer` stores one of a closed set of element types (currently `float`, `uint8_t`)
-in a `std::variant`, not a single fixed type — dtype is discovered at load time (a JPEG
+`vc_pixel_buffer` stores one of a closed set of element types (currently `float`, `uint8_t`,
+`uint16_t`) in a `std::variant`, not a single fixed type — dtype is discovered at load time (a JPEG
 decodes to `uint8`, an EXR to `float`), so it's a runtime property of one concrete class, not
 a compile-time template parameter that would cascade into `vc_image` and everything that
 touches it. `as<T>()` is the typed accessor: state the dtype an algorithm requires, get a
@@ -183,46 +215,53 @@ namespace vc::io {
 
 ### 4.1 Pixel buffer — shared ownership
 
-`vc_image` holds a `pixel_buffer_ptr` (`shared_ptr<vc_pixel_buffer>`).
+`vc_image` holds a `const_pixel_buffer_ptr` (`shared_ptr<const vc_pixel_buffer>`).
 
-Copying a `vc_image` is **cheap** (reference count bump) but **aliases** — both copies point
-to the same pixel data. Mutating through one copy mutates all. This is intentional: the
-library passes images around as lightweight handles.
+Copying a `vc_image` is **cheap** (reference count bump) and **aliases** — both copies point
+to the same pixel data — but that data is `const`, so no copy can ever mutate it. This is
+intentional: the library passes images around as lightweight, safe-to-share handles.
 
-Returning the `shared_ptr` (rather than an iterator or `span`) from `pixels()`/
-`mutable_pixels()` is also what lets a caller extend the buffer's lifetime past the owning
-`vc_image` — e.g. handing pixel data to an async writer or a cache that outlives the image
-object that produced it. A non-owning view type cannot do this; it dangles the moment the
-`vc_image` is destroyed. This is a real, recurring need (not just Week 0.2 scope), so
-`pixels()`/`mutable_pixels()` stay as the one paradigm for buffer access — see §4.2 for how
-the resize/clear risk that would normally come with sharing a mutable container is designed
-out instead of routed around with a second accessor type.
+Returning the `shared_ptr` (rather than an iterator or `span`) from `pixels()` is also what
+lets a caller extend the buffer's lifetime past the owning `vc_image` — e.g. handing pixel
+data to an async writer or a cache that outlives the image object that produced it. A
+non-owning view type cannot do this; it dangles the moment the `vc_image` is destroyed. This
+is a real, recurring need (not just Week 0.2 scope), so `pixels()` stays the one paradigm for
+*reading* buffer access — see §4.2 for how mutation is confined to construction instead of
+being offered as a second accessor on `vc_image` itself.
 
 ### 4.2 Pixel access — const truly prevents mutation, size truly cannot change
 
 ```cpp
-// Returns shared_ptr<const vc_pixel_buffer> by value — data is read-only through this ptr
+// vc_image — read-only, always. Returns shared_ptr<const vc_pixel_buffer> by value —
+// data is read-only through this ptr, and there is no mutable counterpart on this type.
 vc::const_pixel_buffer_ptr pixels() const noexcept;
 
-// Returns shared_ptr<vc_pixel_buffer> by value — explicit mutation path, name signals intent
-vc::pixel_buffer_ptr mutable_pixels() noexcept;
+// vc_image_writer — the ONLY type with write access, and only until seal(). Typed element
+// write; at()/pixels<T>()/with_pixels<T>() below are the three ways in.
+template <vc_pixel_element_req T> T& at(image_dim x, image_dim y, channel_count ch);
 ```
 
-`pixels()` returns `const_pixel_buffer_ptr` by value (cheap — refcount bump, no data copy).
-The pointed-to `vc_pixel_buffer` is `const`, so the compiler prevents any write through it.
-`mutable_pixels()` forces the caller to explicitly opt into mutation — but even then, the
-`width*height*channels == size()` invariant cannot be broken, because `vc_pixel_buffer`
-(§3.1) exposes no `resize()`/`clear()`/`push_back()` at all. This isn't caller discipline —
-the invariant is enforced by construction. The same holds one layer in: `as<T>()` returns
-`std::span<T>`, not the backing `std::vector<T>&`, so typed element access doesn't reopen the
-capacity-mutating surface either. A caller can still write wrong pixel *values* through
-`mutable_pixels()`/`as<T>()` (inherent to any mutation access), and calling a C-interop
-raw-pointer accessor and holding it past the `shared_ptr`'s lifetime is still a dangle —
-that's deliberately stepping outside ownership, not something a wrapper type can prevent.
+`vc_image::pixels()` returns `const_pixel_buffer_ptr` by value (cheap — refcount bump, no data
+copy). The pointed-to `vc_pixel_buffer` is `const`, so the compiler prevents any write through
+it, and `vc_image` declares no mutable accessor at all — not a private one, not a
+carefully-gated one, none. The only way to get pixels into an image is to fill a
+`vc_image_writer` (`at<T>()`, `pixels<T>()`, or the preferred `with_pixels<T>()`) and then
+`seal()` it; sealing moves the buffer out, const-qualified, and the writer is spent. Mutation
+is confined to that one construction window, never reachable afterward.
 
-Do not return `shared_ptr<T>&` from either accessor: converting `shared_ptr<T>` to
-`shared_ptr<const T>` constructs a temporary, and binding a reference to it is a
-`-Wreturn-stack-address` bug (dangling reference to a local temporary) — verified directly
+Either way, the `width*height*channels == size()` invariant cannot be broken, because
+`vc_pixel_buffer` (§3.1) exposes no `resize()`/`clear()`/`push_back()` at all. This isn't
+caller discipline — the invariant is enforced by construction. The same holds one layer in:
+`as<T>()` returns `std::span<T>`, not the backing `std::vector<T>&`, so typed element access
+doesn't reopen the capacity-mutating surface either. A caller can still write wrong pixel
+*values* through the writer's accessors (inherent to any mutation access), and calling a
+C-interop raw-pointer accessor and holding it past the `shared_ptr`'s lifetime is still a
+dangle — that's deliberately stepping outside ownership, not something a wrapper type can
+prevent.
+
+Do not return `shared_ptr<T>&` from `pixels()` or the writer's accessors: converting
+`shared_ptr<T>` to `shared_ptr<const T>` constructs a temporary, and binding a reference to it
+is a `-Wreturn-stack-address` bug (dangling reference to a local temporary) — verified directly
 with `clang++ -std=c++20 -Wall -Wextra -fsyntax-only`. Always return by value.
 
 ### 4.3 Passing function parameters
@@ -242,8 +281,8 @@ pointer:
 ```cpp
 class vc_edit_session {
     // ...
-    vc_persistent_edits_table& persistent_; // non-owning; non-nullable
-    vc_cached_edits_table& cache_;          // non-owning; non-nullable
+    i_edit_table& persistent_; // non-owning; non-nullable
+    i_edit_table& cache_;      // non-owning; non-nullable
 };
 ```
 
@@ -255,6 +294,13 @@ for null and throws `vc::vc_exception` before construction completes
 (`vc_edit_session.cpp`), so no caller ever observes a live object with a null `meta_` —
 every later access can stay an unchecked dereference. Validation happens once, at the one
 construction boundary, not on every subsequent access.
+
+(Both members above are typed against the `i_edit_table` interface rather than the concrete
+`vc_persistent_edits_table`/`vc_cached_edits_table` stores they're bound to. The constructor's
+two parameters deliberately stay the concrete types, though: two same-typed `i_edit_table&`
+parameters could be silently swapped positionally by a caller, while distinct parameter types
+make that mistake a compile error. Abstraction where storage is *used*, type safety where
+identity is *established*.)
 
 Raw pointers are reserved for two narrow cases, not a general-purpose "maybe valid" type:
 - A genuinely nullable lookup result, always internal/private (e.g.
@@ -371,7 +417,7 @@ run in the member-initializer list, before the pixel buffer that depends on
 the validated geometry is allocated:
 
 ```cpp
-template <vc_pixel_element T>
+template <vc_pixel_element_req T>
 vc_image_writer(image_dim width, image_dim height, channel_count channels, T fill)
     : meta_(validated(width, height, channels)),
       pixels_(std::make_shared<vc_pixel_buffer>(meta_.element_count(), fill)) {
@@ -390,10 +436,9 @@ validated(image_dim width, image_dim height, channel_count channels);
 // before the descriptor is ever built
 ```
 
-(`validated()` is currently a `TODO(you)` stub that returns the descriptor
-unchecked — the "rejects invalid dimensions" test in `test_vc_image.cpp`
-stays red until it throws. Same "stated now, enforced when the gate lands"
-caveat as §4.4/§6.5.)
+(`validated()` is fully implemented: it rejects `width == 0`, `height == 0`,
+`channels == 0`, and `channels > 4`, throwing `vc::vc_exception` for each — the
+"rejects invalid dimensions" test in `test_vc_image.cpp` passes.)
 
 ### 6.4 No raw `new` / `delete`
 
@@ -418,14 +463,14 @@ before use — and nowhere else re-derives or re-checks it. This is what makes "
 construction" true rather than aspirational: once the gate passes, every other member
 function can assume the invariant holds instead of defensively re-verifying it.
 
-(The comment above is the target shape once `vc_image_info::element_count()` computes the
-real `width*height*channels` product — it is currently a `TODO(you)` stub hardcoded to
-`0`, so the equality does not hold in practice yet, even though `vc_pixel_buffer`'s
-fixed-size, no-resize design already guarantees it can never be broken once it does.
-`vc_image_writer::validated()` is a separate, narrower gate: it only rejects degenerate
-*geometry* — zero dimensions, `channels > 4` — not the size==product equality itself. Don't
-attribute an invariant to a gate that doesn't actually establish it; say what's true today
-until it is.)
+(`vc_image_info::element_count()` computes the real `width*height*channels` product today, and
+`vc_image_writer` allocates its buffer at exactly that many elements — so the equality above
+holds in practice, not just as a target shape, and `vc_pixel_buffer`'s fixed-size, no-resize
+design guarantees it can never be broken afterward. `vc_image_writer::validated()` remains a
+separate, narrower gate: it only rejects degenerate *geometry* — zero dimensions, `channels > 4`
+— the size==product equality itself is established by the writer's allocation, not by
+`validated()`. Don't attribute an invariant to a gate that doesn't actually establish it; say
+what's true today.)
 
 Not every class needs a stated invariant. A plain data-holding struct with no constraint on
 its fields yet (e.g. a settings/params struct whose valid ranges are still an open domain
@@ -491,11 +536,20 @@ Mandatory exceptions:
 ## 9. File layout
 
 ```
-include/vc/vc_pixel_buffer.h  — pixel_dtype enum + vc_pixel_element concept + vc_pixel_buffer class
-include/vc/vc_types.h         — remaining vc:: typedefs (pixel_buffer_ptr, image_dim, etc.)
+include/vc/vc_pixel_buffer.h  — vc_pixel_element_req concept + vc_pixel_buffer class
+include/vc/vc_types.h         — pixel_dtype enum + remaining vc:: aliases (pixel_buffer_ptr, image_dim, etc.)
 include/vc/vc_error_code.h    — vc_error_code enum + to_int/to_error_code/to_string
 include/vc/vc_exception.h     — vc_exception class
-include/vc/vc_image.h         — vc_image class
+include/vc/vc_any_box.h       — vc_any_box<Tag> class: shared type-erased single-value box behind
+                                 vc_pipe_packet / vc_metadata_value (header-only, no .cpp)
+include/vc/vc_image_meta.h    — i_image_meta interface + vc_metadata_value alias (header-only, no
+                                 .cpp — pure interface, no non-pure members to define). Demoted
+                                 from vc::edit 2026-07-28 — see docs/edit_model.md Sec 6 and this
+                                 header's own comment; the concrete backend (vc_memory_image_meta)
+                                 stays in vc::edit (include/vc/edit/vc_memory_image_meta.h).
+include/vc/vc_image_info.h    — vc_image_info class: image geometry + composed metadata (header-only)
+include/vc/vc_image.h         — vc_image class (header-only; see §9.1)
+include/vc/vc_image_writer.h  — vc_image_writer class: validated(), seal() (header-only ctor)
 include/vc/utils/vc_strings.h — vc::utils string typedefs
 include/vc/utils/vc_log_info_builder.h — vc::utils::log_info_builder_base<T>: shared base for
                                  log_info_builder/dump_image_builder (header-only, no .cpp — see §9)
@@ -503,18 +557,23 @@ include/vc/utils/vc_log.h     — vc::utils::log: level enum, debug/info/warning
                                  log_info_builder
 include/vc/utils/vc_perf.h    — vc::utils::perf: scoped_timer (no builder — reports once
                                  at destruction from an enabled() answer already captured)
-include/vc/utils/vc_image_dumper.h — vc::utils::debug: dump, dump_image_builder
 include/vc/io/vc_io_types.h   — vc::io typedefs (path, vc_image_format, read/write config)
-include/vc/io/vc_io.h         — vc::io interfaces + stb adapter declarations
+include/vc/io/vc_io.h         — vc::io interfaces: i_image_reader, i_image_writer
+include/vc/io/vc_io_stb.h     — stb adapter declarations: stb_image_reader, stb_image_writer
+include/vc/io/vc_io_fs.h      — vc::io filesystem helpers: existence checks, directory creation,
+                                 atomic writes (see src/io/vc_io_fs.cpp)
+include/vc/debug/vc_image_dumper.h — vc::debug: dump, dump_image_builder
 
 src/vc_error_code.cpp         — vc_error_code utilities implementation
 src/vc_exception.cpp          — vc_exception implementation
-src/vc_image.cpp              — vc_image implementation
+src/vc_image.cpp              — empty TU (vc_image is header-only; see §9.1)
+src/vc_image_writer.cpp       — vc_image_writer::validated()/seal() implementation
 src/io/vc_io_stb.cpp          — stb adapter implementations; also the sole TU that defines
                                  the stb `_IMPLEMENTATION` macros (see §10)
+src/io/vc_io_fs.cpp           — vc::io filesystem helpers implementation
 src/utils/vc_log.cpp          — vc::utils::log implementation
 src/utils/vc_perf.cpp         — vc::utils::perf implementation
-src/utils/vc_image_dumper.cpp — vc::utils::debug implementation
+src/debug/vc_image_dumper.cpp — vc::debug implementation
 src/main.cpp                  — application entry point
 
 tests/data/                   — bundled test fixtures (committed to repo)
@@ -522,29 +581,45 @@ docs/                         — project documentation
 ```
 
 One class / one interface per header. No omnibus headers.
-`src/` mirrors `include/vc/` for implementation files — except `vc_pixel_buffer.h` and
-`vc_log_info_builder.h`, neither of which has a `.cpp`: every member that isn't a template is a
-one-liner (`dtype()`/`size()`; `set_tag_enabled()`/`tag_enabled()`), and the rest — the
-constructor and `as<T>()` for `vc_pixel_buffer`, `operator()`/`resolve()` for `log_info_builder_base<T>` —
-are templates that must be defined where instantiated. Nothing non-template is left to put in
-a `.cpp`.
+`src/` mirrors `include/vc/` for implementation files above — not an exhaustive rule over the whole
+tree (the later `pipe`/`edit` layers are not enumerated in this box — see their own design docs).
+Five worth calling out because a reader might expect a `.cpp` and not find one:
+`vc_pixel_buffer.h`, `vc_log_info_builder.h`, `vc_any_box.h`, `vc_image_info.h`, and
+`vc_image_meta.h` have none. For the first two, every member that isn't a template is a one-liner
+(`dtype()`/`size()`; `set_tag_enabled()`/`tag_enabled()`), and the rest — the constructor and
+`as<T>()` for `vc_pixel_buffer`, `operator()`/`resolve()` for `log_info_builder_base<T>` — are
+templates that must be defined where instantiated. `vc_any_box<Tag>` is templated on `Tag`
+itself, so the same reasoning covers the whole class, not just some members. `vc_image_info` has
+no template at all — every member (including `element_count()`/`index()`) is simply a one-liner —
+so there is nothing non-trivial to put in a `.cpp` regardless. `vc_image_meta.h`'s reason is
+different from all four: `i_image_meta` is a pure interface (every member is either `= default`,
+`= 0`, or `virtual ~... = default`) with no non-pure member to define anywhere — its one concrete
+implementation, `vc_memory_image_meta`, lives in `vc::edit` and is implemented in
+`src/edit/vc_image_meta.cpp` (named for the interface it backs — same convention as
+`src/edit/vc_table.cpp` implementing `vc_memory_table`, see the `pipe`/`edit` layers' own file
+layout).
 
-### 9.1 Week 0.2 scaffold — suggested implementation order
+### 9.1 Week 0.2 scaffold — original suggested implementation order (now mostly complete)
 
 `vc_error_code.cpp` and `vc_exception.cpp` are fully implemented (low-value plumbing —
 everything else needs working error signalling to give useful feedback). `vc_pixel_buffer` is
-likewise fully implemented, header-only (see §9). Everything else is a `TODO(you)` stub that
-compiles and runs, but fails its tests until implemented:
+likewise fully implemented, header-only (see §9). Of the originally-suggested order below,
+1 and 2 are now implemented; 3 remains a `TODO(you)` stub:
 
-1. `src/vc_image.cpp` — the constructor (validate + overflow-safe allocate), `pixel_count()`,
-   `pixels()`, `mutable_pixels()`. Run `ctest --preset debug` — the first two `vc_image` test
-   cases should go green.
-2. `src/io/vc_io_stb.cpp` — `stb_image_reader::read()` and `stb_image_writer::write()`. This
-   is the actual hello-image toy deliverable. The round-trip test case should go green.
-3. `src/main.cpp` — wire the reader/writer together into a working CLI round-trip.
+1. `vc_image`'s construction path — the validate-then-allocate logic now lives in
+   `vc_image_writer::validated()`/`seal()` (`src/vc_image_writer.cpp`,
+   `include/vc/vc_image_writer.h`), not `src/vc_image.cpp` (now an empty TU; the class is
+   header-only, see §9). `pixel_count()` and `pixels()` are implemented; there is no
+   `mutable_pixels()` — `vc_image` is uniformly read-only (§4.2). The `vc_image` test cases
+   this was gating pass.
+2. `src/io/vc_io_stb.cpp` — `stb_image_reader::read()` and `stb_image_writer::write()` are
+   implemented. The round-trip test case passes.
+3. `src/main.cpp` — wire the reader/writer together into a working CLI round-trip. Still a
+   `TODO(you)` stub (untested — no case in the suite exercises `main()`).
 
-Each stub's TODO comment lists the exact steps. Build stays green throughout — only tests
-fail until each piece lands.
+Build stays green throughout; `src/main.cpp`'s round-trip and the three sanctioned edit-layer
+reps (`export_image`; `vc_cached_edits_table`/`vc_persistent_edits_table` `get`/`set`) are the
+remaining `TODO(you)` bodies in the repo.
 
 ---
 

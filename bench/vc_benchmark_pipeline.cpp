@@ -9,17 +9,16 @@
 // of stages (Sec 5.3): per-stage + plumbing overhead already predicts a novel
 // wiring.
 //
-// REALITY GATE (Sec 9): vc_pipeline::run() is a stub today — its body is
-// `return {}` (it walks no stages, moves no packets, calls no process()). So
-// these cases currently time an empty-map construction + early return, NOT the
-// plumbing the ladder describes. They are fully wired against the real add() /
-// connect() / run() API and will become real rung-2b numbers untouched once you
-// implement run()/validate() — but are marked NOT baseline-eligible until then,
-// so an empty return never enters the committed timeseries.
+// REALITY GATE (Sec 9): vc_pipeline::run() and validate() are fully
+// implemented — run() walks stages in insertion order, resolves open
+// inputs/outputs, and moves real packets through process(). This case
+// baseline-eligible since 2026-07-27 — see the case comment for the epoch
+// tuning that converged the cross-run median.
 //
 // Run:  vc_benchmark_pipeline
 //       vc_benchmark_pipeline --list
 
+#include <chrono>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -29,6 +28,7 @@
 #include "vc_bench_support.h"
 
 #include "vc/pipe/stages/vc_passthrough_stage.h"
+#include "vc/pipe/vc_pipe_context.h"
 #include "vc/pipe/vc_pipe_packet.h"
 #include "vc/pipe/vc_pipe_types.h"
 #include "vc/pipe/vc_pipeline.h"
@@ -51,7 +51,7 @@ std::vector<vc::bench::bench_case> macro_cases() {
     // fresh map is built each time (that construction + move IS part of the
     // rung-2b cost the ladder attributes).
     cases.push_back(
-        {"passthrough_pipeline", /*baseline_eligible=*/false,
+        {"passthrough_pipeline", /*baseline_eligible=*/true,
          [](ankerl::nanobench::Bench& bench) {
              using stage_t = vc::pipe::vc_passthrough_stage;
 
@@ -71,12 +71,89 @@ std::vector<vc::bench::bench_case> macro_cases() {
                  return inputs;
              };
 
-             // No correctness gate: run() returns {} today (Sec 9). When you
-             // implement run(), assert here that the open output pt.out carries
-             // the image through, then flip baseline_eligible to true.
+             // Correctness gate (Sec 4.5), on a throwaway run so the timed
+             // loop below stays untouched: the open output pt.out must carry
+             // the same image through, real width/height/channels intact.
+             {
+                 auto outputs = pipe.run(make_inputs());
+                 const auto out_port =
+                     vc::pipe::stage_port{pt, stage_t::slots::out};
+                 auto it = outputs.find(out_port);
+                 vc::bench::check(
+                     it != outputs.end(),
+                     "passthrough_pipeline produced no open output");
+                 const auto& out_image = it->second.get<vc::vc_image>();
+                 vc::bench::check(
+                     out_image.width() == kWidth &&
+                         out_image.height() == kHeight &&
+                         out_image.channels() == kChannels,
+                     "passthrough_pipeline output geometry mismatch");
+             }
 
-             bench.unit("op").batch(1.0).relative(false);
-             bench.run("passthrough pipeline.run() [STUB]", [&] {
+             // A bare stage, off the pipeline graph, driven directly through
+             // process() on an equivalent input/context — rung 2a of the
+             // ladder (docs/benchmarking.md Sec 6), added here (not just in
+             // the sibling vc_benchmark_pipe suite) so it shares ONE Bench
+             // with the run() rung below: nanobench's relative(true) then
+             // reports run() as a ratio against it directly, in-process,
+             // instead of two separate baselined binaries a reader has to
+             // relate by hand.
+             const stage_t bare_stage("pt_bare");
+             const vc::pipe::slot_name in_slot{stage_t::slots::in.name};
+             const vc::pipe::slot_name out_slot{stage_t::slots::out.name};
+             const auto one_input = [&] {
+                 std::unordered_map<vc::pipe::slot_name,
+                                    vc::pipe::vc_pipe_packet>
+                     inputs;
+                 inputs.emplace(in_slot, vc::pipe::vc_pipe_packet{image});
+                 return inputs;
+             };
+             // Reused context for the timed rung 2a loop (mirrors
+             // vc_benchmark_pipe.cpp's passthrough case): built once so the
+             // timed region is process()'s own cost, not per-iteration map
+             // construction.
+             vc::pipe::vc_pipe_context process_ctx{one_input()};
+
+             // Correctness gate for the bare-stage rung (Sec 4.5), on its own
+             // throwaway context so the reused `process_ctx` above stays
+             // untouched.
+             {
+                 vc::pipe::vc_pipe_context throwaway{one_input()};
+                 bare_stage.process(throwaway);
+                 const auto bare_outputs = std::move(throwaway).take_outputs();
+                 vc::bench::check(bare_outputs.find(out_slot) !=
+                                      bare_outputs.end(),
+                                  "bare stage.process() produced no output");
+             }
+
+             bench.unit("op").batch(1.0).relative(true);
+             // A fatter epoch, same remedy the substrate `copy` deep-copy row
+             // uses (Sec 4.1's "raise minEpochTime" trap answer): this case
+             // rebuilds an unordered_map input sink every iteration, and that
+             // per-iteration allocation is malloc-driven, not measured by
+             // err% alone — nanobench's within-run err% stays low at the
+             // default 20 ms epoch (the noise doesn't show up WITHIN a run),
+             // but the ACROSS-run median is reproducibly unstable at that
+             // epoch: independent re-runs have observed roughly 7-17% median
+             // spread, the exact figure varying with machine load rather than
+             // being a fixed property of the case. 200 ms converges the
+             // cross-run median to roughly 3% spread in observed runs. Applies
+             // to both rungs below (one Bench, one epoch budget); the cheaper
+             // rung 2a just gets proportionally more iterations in it.
+             bench.minEpochTime(std::chrono::milliseconds(200));
+
+             // Rung 2a — bare stage.process(). Run FIRST so relative(true)
+             // marks it as the 100% baseline; rung 2b's row then reports
+             // run()'s cost as a ratio against it (the "plumbing overhead vs
+             // raw kernel" quantity this rung exists to make tracked and
+             // baselined, instead of derived by hand from two binaries).
+             bench.run("rung2a stage.process()", [&] {
+                 bare_stage.process(process_ctx);
+                 ankerl::nanobench::doNotOptimizeAway(&process_ctx);
+             });
+
+             // Rung 2b — the same carry through a full vc_pipeline::run().
+             bench.run("passthrough pipeline.run()", [&] {
                  auto outputs = pipe.run(make_inputs());
                  ankerl::nanobench::doNotOptimizeAway(outputs.size());
              });

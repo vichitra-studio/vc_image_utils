@@ -34,8 +34,9 @@ using buf_u16 = std::uint16_t;
 // pixel_buffer catch an enum/variant order mismatch, but not a missing or
 // extra concept entry).
 template <typename T>
-concept vc_pixel_element_req = std::same_as<T, buf_f32> ||
-                           std::same_as<T, buf_u8> || std::same_as<T, buf_u16>;
+concept vc_pixel_element_req =
+    std::same_as<T, buf_f32> || std::same_as<T, buf_u8> ||
+    std::same_as<T, buf_u16>;
 
 // Fixed-size, runtime-typed pixel storage. Composes a variant of vectors but
 // exposes no resize()/clear()/push_back() on any of them — a vc_image's

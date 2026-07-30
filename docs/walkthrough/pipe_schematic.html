@@ -203,11 +203,13 @@
       <ul class="members">
         <li><span class="k">const</span> stage_name&amp; name() <span class="c">const // per-instance</span></li>
         <li><span class="k">virtual const char*</span> kind() <span class="c">const = 0 // per-type</span></li>
-        <li><span class="k">virtual void</span> declare(contract_builder&amp;) <span class="c">const = 0</span></li>
-        <li><span class="k">virtual void</span> process(vc_pipe_context&amp;) <span class="c">const = 0</span></li>
+        <li><span class="k">virtual void</span> declare(vc_pipe_contract&amp;) <span class="c">const = 0</span></li>
+        <li><span class="k">void</span> process(vc_pipe_context&amp;) <span class="c">const // NON-virtual: calls validate_inputs() then do_process()</span></li>
         <li class="sub"><span class="c">protected:</span> i_pipe(stage_name)</li>
+        <li class="sub"><span class="c">private:</span> <span class="k">virtual void</span> validate_inputs(<span class="k">const</span> vc_pipe_context&amp;) <span class="c">const = 0</span></li>
+        <li class="sub"><span class="c">private:</span> <span class="k">virtual void</span> do_process(vc_pipe_context&amp;) <span class="c">const = 0</span></li>
       </ul>
-      <div class="card-note">One processing <b>station</b>. <b>name()</b> is its address in a graph; <b>kind()</b> is its type. <b>declare()</b> posts its contract; <b>process()</b> does the work. Both <code class="inline">const</code> — a pipe is stateless per run.</div>
+      <div class="card-note">One processing <b>station</b>. <b>name()</b> is its address in a graph; <b>kind()</b> is its type. <b>declare()</b> posts its contract. <b>process()</b> is a non-virtual public wrapper that always runs <b>validate_inputs()</b> then <b>do_process()</b> — the two private steps a stage actually overrides; a stage can never skip the validation step. All <code class="inline">const</code> — a pipe is stateless per run.</div>
     </div>
 
     <div class="card" style="--tone:var(--accent)">
@@ -253,7 +255,7 @@
         <li>vector&lt;slot_name&gt; input_slot_names() / output_slot_names()</li>
         <li class="sub"><span class="c">private struct</span> slot_decl { name; <span class="ty">type</span> }</li>
       </ul>
-      <div class="card-note">The <b>signs</b> a stage posts — but a stage never holds this contract: <code class="inline">declare()</code> is handed a narrow write-only <code class="inline">contract_builder</code> view (<code class="inline">add_*_slot</code> only). The full contract, with its name-keyed type lookups, stays framework-internal for <code class="inline">validate()</code>/<code class="inline">run()</code> (§12.6). Lookups <b>throw</b> on an undeclared slot (exceptions-only) — so <code class="inline">validate()</code> never branches on not-found. Type layer <span class="tag live">live</span> · data layer (image spec) <span class="tag later">later</span></div>
+      <div class="card-note">The <b>signs</b> a stage posts. <code class="inline">declare()</code> is handed this <code class="inline">vc_pipe_contract</code> directly — the narrow write-only <code class="inline">contract_builder</code> view that used to gate it was removed (§12.8); by convention (no longer a compile-time guarantee) a stage's <code class="inline">declare()</code> calls only <code class="inline">add_*_slot</code>. The name-keyed type lookups on the same object are what <code class="inline">validate()</code>/<code class="inline">run()</code> use. Lookups <b>throw</b> on an undeclared slot (exceptions-only) — so <code class="inline">validate()</code> never branches on not-found. Type layer <span class="tag live">live</span> · data layer (image spec) <span class="tag later">later</span></div>
     </div>
 
     <div class="card" style="--tone:var(--signal)">
@@ -296,7 +298,7 @@
       <ul class="members">
         <li>in <span class="slot">"rgb"</span> : <span class="ty">vc_image</span> <span class="arrow-h">→</span> out <span class="slot">"grey"</span> : <span class="ty">vc_image</span></li>
       </ul>
-      <div class="card-note">image → image. A plain Transform. <code class="inline">declare()</code> / <code class="inline">process()</code> are yours to write.</div>
+      <div class="card-note">image → image. A plain Transform. <code class="inline">declare()</code> / <code class="inline">do_process()</code> are yours to write.</div>
     </div>
 
     <div class="card" style="--tone:var(--assembly)">
@@ -317,11 +319,11 @@
     <div class="rel"><span class="a">stages</span><span class="arw">──</span><span class="verb">implement</span><span class="arw">──▷</span><span class="b">i_pipe</span></div>
     <div class="rel"><span class="a">connection</span><span class="arw">──</span><span class="verb">joins ▸ two</span><span class="arw">──▶</span><span class="b">stage_port</span></div>
     <div class="rel"><span class="a">stage_port</span><span class="arw">──</span><span class="verb">lowers</span><span class="arw">──▷</span><span class="b">slot&lt;T&gt;</span></div>
-    <div class="rel"><span class="a">i_pipe::declare</span><span class="arw">──</span><span class="verb">writes through</span><span class="arw">──▶</span><span class="b">contract_builder</span></div>
-    <div class="rel"><span class="a">contract_builder</span><span class="arw">──</span><span class="verb">fills (view onto)</span><span class="arw">──▶</span><span class="b">vc_pipe_contract</span></div>
+    <div class="rel"><span class="a">i_pipe::declare</span><span class="arw">──</span><span class="verb">writes directly to</span><span class="arw">──▶</span><span class="b">vc_pipe_contract</span></div>
     <div class="rel"><span class="a">vc_pipe_contract</span><span class="arw">──</span><span class="verb">holds ▸ many</span><span class="arw">──▶</span><span class="b">slot_decl</span></div>
     <div class="rel"><span class="a">slot_decl</span><span class="arw">──</span><span class="verb">is lowered</span><span class="arw">──▷</span><span class="b">slot&lt;T&gt;</span></div>
-    <div class="rel"><span class="a">i_pipe::process</span><span class="arw">──</span><span class="verb">reads / writes</span><span class="arw">──▶</span><span class="b">vc_pipe_context</span></div>
+    <div class="rel"><span class="a">i_pipe::process</span><span class="arw">──</span><span class="verb">wraps (non-virtual)</span><span class="arw">──▶</span><span class="b">validate_inputs / do_process</span></div>
+    <div class="rel"><span class="a">i_pipe::do_process</span><span class="arw">──</span><span class="verb">reads / writes</span><span class="arw">──▶</span><span class="b">vc_pipe_context</span></div>
     <div class="rel"><span class="a">vc_pipe_context</span><span class="arw">──</span><span class="verb">holds ▸ by slot</span><span class="arw">──▶</span><span class="b">vc_pipe_packet</span></div>
     <div class="rel"><span class="a">vc_pipe_packet</span><span class="arw">──</span><span class="verb">wraps</span><span class="arw">──▶</span><span class="b">std::any</span></div>
   </div>
@@ -408,12 +410,12 @@
         <tr><td>slot&lt;T&gt;, stage_port, names</td><td><span class="f">include/vc/pipe/vc_pipe_types.h</span></td><td>done</td></tr>
         <tr><td>type-erased parcel</td><td><span class="f">include/vc/pipe/vc_pipe_packet.h</span></td><td>done</td></tr>
         <tr><td>the interface</td><td><span class="f">include/vc/pipe/i_pipe.h</span></td><td>done</td></tr>
-        <tr><td>contract + author-facing builder view</td><td><span class="f">…/vc_pipe_contract.h · vc_pipe_contract_builder.h · src/pipe/vc_pipe_contract.cpp</span></td><td>done</td></tr>
+        <tr><td>contract (declare() writes it directly; contract_builder view removed)</td><td><span class="f">…/vc_pipe_contract.h · src/pipe/vc_pipe_contract.cpp</span></td><td>done</td></tr>
         <tr><td>per-run tray</td><td><span class="f">…/vc_pipe_context.h · src/pipe/vc_pipe_context.cpp</span></td><td>done</td></tr>
         <tr><td>belt + foreman</td><td><span class="f">…/vc_pipeline.h · src/pipe/vc_pipeline.cpp</span></td><td>add/connect · validate/run — all implemented</td></tr>
         <tr><td>worked reference stage</td><td><span class="f">…/stages/vc_passthrough_stage.*</span></td><td>done</td></tr>
         <tr><td>grayscale, mean-brightness</td><td><span class="f">tests/samples/vc_sample_grayscale_stage.* · vc_sample_mean_brightness_stage.*</span></td><td>implemented — <b>moved to tests/samples/</b> (not in the library)</td></tr>
-        <tr><td>tests (14 green + 6 red-spec)</td><td><span class="f">tests/test_vc_pipe.cpp</span></td><td>done</td></tr>
+        <tr><td>tests (all green — no red-spec remains)</td><td><span class="f">tests/test_vc_pipe.cpp</span></td><td>done</td></tr>
       </tbody>
     </table>
   </div>

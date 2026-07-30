@@ -43,12 +43,13 @@ vc_image vc_image_writer::seal() && {
     // A spent writer (already sealed, or moved-from) holds a null buffer;
     // sealing it would mint a vc_image with null pixels() — catch that misuse
     // loudly in debug (compiled out in release, off the hot path).
-    assert(pixels_ && "seal() called on a spent writer (already sealed / moved-from)");
+    assert(pixels_ &&
+           "seal() called on a spent writer (already sealed / moved-from)");
     // std::move(pixels_) is a shared_ptr<vc_pixel_buffer>; vc_image's ctor takes
     // const_pixel_buffer_ptr (shared_ptr<const vc_pixel_buffer>) — the
     // qualifying conversion is implicit and refcount-only. pixels_ is left null:
     // the writer is spent.
-    return vc_image{meta_, std::move(pixels_)};
+    return vc_image{std::move(meta_), std::move(pixels_)};
 }
 
 } // namespace vc

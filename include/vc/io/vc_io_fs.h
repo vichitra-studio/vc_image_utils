@@ -86,17 +86,21 @@ void ensure_parent_directory(const path& p);
 [[nodiscard]] std::ifstream open_for_read(const path& p,
                                           std::string_view caller);
 
-// Write `content` to `p` durably: write to a uniquely-named temp file beside
-// `p` (same directory, so the final rename stays on one filesystem — a
-// cross-filesystem rename is not atomic and may fail outright), flush it,
-// then atomically rename it onto `p`. Failure at any point before the
-// rename — including a `!out` write failure and the rename itself — leaves
-// whatever was previously at `p` untouched and removes the temp file rather
-// than leaving it behind; there is no window where `p` is truncated or
-// half-written. Throws vc::vc_exception(encode_error) on failure. Caller is
-// still responsible for ensure_parent_directory(p) first, matching every
-// other writer in this file.
-void write_file_atomically(const path& p, std::string_view content,
+// Write `content` to `p` corruption-safely: write to a uniquely-named temp
+// file beside `p` (same directory, so the final rename stays on one
+// filesystem — a cross-filesystem rename is not atomic and may fail
+// outright), flush it, then atomically rename it onto `p`. Failure at any
+// point before the rename — including a `!out` write failure and the rename
+// itself — leaves whatever was previously at `p` untouched and removes the
+// temp file rather than leaving it behind; there is no window where `p` is
+// truncated or half-written. NOTE: `flush()` only drains the C++ stream
+// buffer into the OS; there is no `fsync`/`fdatasync` in this chain, so this
+// is not a durability (survives-a-crash) guarantee — only the
+// corruption-safety described above. Throws vc::vc_exception(encode_error)
+// on failure. Caller is still responsible for ensure_parent_directory(p)
+// first, matching every other writer in this file.
+void write_file_atomically(const path& p,
+                           std::string_view content,
                            std::string_view caller);
 
 } // namespace vc::io

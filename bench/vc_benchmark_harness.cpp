@@ -71,11 +71,14 @@ std::vector<vc::bench::bench_case> substrate_cases() {
                  for (std::uint8_t v : u.as<vc::buf_u8>()) {
                      us += v;
                  }
-                 vc::bench::check(us == static_cast<std::uint64_t>(kCount) * fill_u8,
+                 vc::bench::check(us == static_cast<std::uint64_t>(kCount) *
+                                            fill_u8,
                                   "alloc+fill u8 sum wrong (fill elided?)");
              }
 
-             bench.unit("pixel").batch(static_cast<double>(kCount)).relative(true);
+             bench.unit("pixel")
+                 .batch(static_cast<double>(kCount))
+                 .relative(true);
              bench.run("alloc+fill+sum f32", [] {
                  vc::vc_pixel_buffer buf(kCount, fill_f32);
                  double sum = 0.0;
@@ -137,7 +140,8 @@ std::vector<vc::bench::bench_case> substrate_cases() {
                  // DCE-eligible (the same trap as alloc_fill). Touching an
                  // element forces the memcpy to be materialized. Does not
                  // manifest on AppleClang 17 today, but is fragile under -flto.
-                 ankerl::nanobench::doNotOptimizeAway(deep.as<vc::buf_f32>()[0]);
+                 ankerl::nanobench::doNotOptimizeAway(
+                     deep.as<vc::buf_f32>()[0]);
              });
          }});
 
@@ -160,7 +164,9 @@ std::vector<vc::bench::bench_case> substrate_cases() {
                                   "as<T> hoisted sum wrong");
              }
 
-             bench.unit("pixel").batch(static_cast<double>(kCount)).relative(true);
+             bench.unit("pixel")
+                 .batch(static_cast<double>(kCount))
+                 .relative(true);
              bench.run("as<T> hoisted once", [&] {
                  const std::span<const vc::buf_f32> s = buf.as<vc::buf_f32>();
                  double sum = 0.0;
@@ -172,7 +178,8 @@ std::vector<vc::bench::bench_case> substrate_cases() {
              bench.run("as<T> per element", [&] {
                  double sum = 0.0;
                  for (std::size_t i = 0; i < kCount; ++i) {
-                     const std::span<const vc::buf_f32> s = buf.as<vc::buf_f32>();
+                     const std::span<const vc::buf_f32> s =
+                         buf.as<vc::buf_f32>();
                      // Force each as<T>() call to actually happen: buf is
                      // loop-invariant, so without this barrier the compiler
                      // hoists the holds_alternative check out of the loop and
@@ -190,12 +197,11 @@ std::vector<vc::bench::bench_case> substrate_cases() {
     // exceeds the small-buffer optimization of common std libs, so a heap
     // allocation per packet is EXPECTED; a double fits inline. The ratio
     // confirms that threshold cost (Sec 5.1). The dominant HEAP-ALLOCATION cost
-    // is independent of the stubbed vc_image_info::element_count() (still a
-    // TODO(you) rep, so zeros() below allocates a 0-element buffer) — boxing
-    // copies the ~32-byte handle either way — but the shared_ptr refcount atomic
-    // inside that copy is null/free today and lands (a small addition, not the
-    // dominant cost) once the rep is implemented and the buffer is non-empty.
-    // See Sec 9.
+    // is independent of vc_image_info::element_count() — boxing copies the
+    // ~32-byte handle either way — but the shared_ptr refcount atomic inside
+    // that copy is real (element_count() is implemented, zeros() below
+    // allocates a genuine buffer): a small addition on top of the allocation,
+    // not the dominant cost. See Sec 9.
     cases.push_back(
         {"packet", true, [](ankerl::nanobench::Bench& bench) {
              const vc::vc_image image =
@@ -215,7 +221,8 @@ std::vector<vc::bench::bench_case> substrate_cases() {
              bench.unit("op").batch(1.0).relative(true);
              bench.run("box+unbox vc_image handle", [&] {
                  vc::pipe::vc_pipe_packet p{image};
-                 ankerl::nanobench::doNotOptimizeAway(p.get<vc::vc_image>().width());
+                 ankerl::nanobench::doNotOptimizeAway(
+                     p.get<vc::vc_image>().width());
              });
              bench.run("box+unbox double scalar", [] {
                  vc::pipe::vc_pipe_packet p{2.71828};

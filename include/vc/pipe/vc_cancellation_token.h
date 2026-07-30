@@ -58,7 +58,8 @@ class vc_cancellation_token {
 // travel into run().
 class vc_cancellation_source {
   public:
-    vc_cancellation_source() : flag_(std::make_shared<std::atomic<bool>>(false)) {
+    vc_cancellation_source()
+        : flag_(std::make_shared<std::atomic<bool>>(false)) {
     }
 
     // A fresh observer bound to this source's flag. All tokens from one source

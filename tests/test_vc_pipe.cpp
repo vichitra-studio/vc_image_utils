@@ -22,6 +22,7 @@
 #include "vc/pipe/vc_pipe_packet.h"
 #include "vc/pipe/vc_pipe_types.h"
 #include "vc/pipe/vc_pipeline.h"
+#include "vc/vc_error_code.h"
 #include "vc/vc_exception.h"
 #include "vc/vc_image.h"
 #include "vc/vc_image_writer.h"
@@ -148,8 +149,8 @@ TEST_CASE("vc_pipe_contract: rejects a second slot with the same name in the"
 
 TEST_CASE("stage_port: a typed-slot ctor builds a coordinate that compares + "
           "hashes") {
-    const vc::pipe::stage_port p1{"grey",
-                                  vc::pipe::vc_sample_grayscale_stage::slots::rgb};
+    const vc::pipe::stage_port p1{
+        "grey", vc::pipe::vc_sample_grayscale_stage::slots::rgb};
     CHECK(p1.stage == "grey");
     CHECK(p1.slot == "rgb");
 
@@ -242,7 +243,8 @@ TEST_CASE("i_pipe: paramless stages' params_hash() is a fixed 0") {
 // comment on each stage's header for why).
 // =====================================================================
 
-TEST_CASE("vc_sample_grayscale_stage: declares rgb-in -> grey-out (image->image)") {
+TEST_CASE(
+    "vc_sample_grayscale_stage: declares rgb-in -> grey-out (image->image)") {
     vc::pipe::vc_pipe_contract c;
     const vc::pipe::vc_sample_grayscale_stage stage{"grey"};
     stage.declare(c);
@@ -251,7 +253,8 @@ TEST_CASE("vc_sample_grayscale_stage: declares rgb-in -> grey-out (image->image)
     CHECK(c.output_slot_type("grey") == std::type_index(typeid(vc::vc_image)));
 }
 
-TEST_CASE("vc_sample_grayscale_stage: process() computes the luminance kernel") {
+TEST_CASE(
+    "vc_sample_grayscale_stage: process() computes the luminance kernel") {
     vc::vc_image_writer writer{1, 1, 3, vc::buf_f32{0.0f}};
     writer.at<vc::buf_f32>(0, 0, 0) = 1.0f; // R
     writer.at<vc::buf_f32>(0, 0, 1) = 0.0f; // G
@@ -260,25 +263,30 @@ TEST_CASE("vc_sample_grayscale_stage: process() computes the luminance kernel") 
 
     const vc::pipe::vc_sample_grayscale_stage stage{"grey"};
     std::unordered_map<vc::pipe::slot_name, vc::pipe::vc_pipe_packet> inputs;
-    inputs.emplace(std::string(vc::pipe::vc_sample_grayscale_stage::slots::rgb.name),
-                   vc::pipe::vc_pipe_packet{red});
+    inputs.emplace(
+        std::string(vc::pipe::vc_sample_grayscale_stage::slots::rgb.name),
+        vc::pipe::vc_pipe_packet{red});
     vc::pipe::vc_pipe_context ctx{std::move(inputs)};
     stage.process(ctx);
 
     const auto outputs = std::move(ctx).take_outputs();
     const auto& grey =
-        outputs.at(std::string(vc::pipe::vc_sample_grayscale_stage::slots::grey.name))
+        outputs
+            .at(std::string(
+                vc::pipe::vc_sample_grayscale_stage::slots::grey.name))
             .get<vc::vc_image>();
     CHECK(grey.channels() == 1);
     CHECK(grey.pixels()->as<vc::buf_f32>()[0] == doctest::Approx(0.299));
 }
 
-TEST_CASE("vc_sample_grayscale_stage: process() rejects an image with fewer than"
-          " 3 channels") {
+TEST_CASE(
+    "vc_sample_grayscale_stage: process() rejects an image with fewer than"
+    " 3 channels") {
     const vc::pipe::vc_sample_grayscale_stage stage{"grey"};
     std::unordered_map<vc::pipe::slot_name, vc::pipe::vc_pipe_packet> inputs;
-    inputs.emplace(std::string(vc::pipe::vc_sample_grayscale_stage::slots::rgb.name),
-                   vc::pipe::vc_pipe_packet{vc::vc_image::zeros<vc::buf_f32>(2, 2, 1)});
+    inputs.emplace(
+        std::string(vc::pipe::vc_sample_grayscale_stage::slots::rgb.name),
+        vc::pipe::vc_pipe_packet{vc::vc_image::zeros<vc::buf_f32>(2, 2, 1)});
     vc::pipe::vc_pipe_context ctx{std::move(inputs)};
     CHECK_THROWS_AS(stage.process(ctx), vc::vc_exception);
 }
@@ -304,19 +312,20 @@ TEST_CASE("sample stages: a non-f32 image is rejected by validate_inputs(),"
     CHECK_THROWS_AS(grey.process(grey_ctx), vc::vc_exception);
 
     const vc::pipe::vc_sample_mean_brightness_stage mean{"mean"};
-    auto mean_ctx = ctx_for(
-        std::string(vc::pipe::vc_sample_mean_brightness_stage::slots::image.name));
+    auto mean_ctx = ctx_for(std::string(
+        vc::pipe::vc_sample_mean_brightness_stage::slots::image.name));
     CHECK_THROWS_AS(mean.process(mean_ctx), vc::vc_exception);
 
-    const vc::pipe::vc_sample_blur_stage blur{"blur",
-                                              vc::pipe::vc_sample_blur_params{}};
+    const vc::pipe::vc_sample_blur_stage blur{
+        "blur", vc::pipe::vc_sample_blur_params{}};
     auto blur_ctx =
         ctx_for(std::string(vc::pipe::vc_sample_blur_stage::slots::in.name));
     CHECK_THROWS_AS(blur.process(blur_ctx), vc::vc_exception);
 }
 
-TEST_CASE("vc_sample_mean_brightness_stage: declares a NON-IMAGE (double) output"
-          " — the heterogeneous type contract this design exists for") {
+TEST_CASE(
+    "vc_sample_mean_brightness_stage: declares a NON-IMAGE (double) output"
+    " — the heterogeneous type contract this design exists for") {
     vc::pipe::vc_pipe_contract c;
     const vc::pipe::vc_sample_mean_brightness_stage stage{"mean"};
     stage.declare(c);
@@ -336,13 +345,17 @@ TEST_CASE("vc_sample_mean_brightness_stage: process() averages every element") {
 
     const vc::pipe::vc_sample_mean_brightness_stage stage{"mean"};
     std::unordered_map<vc::pipe::slot_name, vc::pipe::vc_pipe_packet> inputs;
-    inputs.emplace(std::string(vc::pipe::vc_sample_mean_brightness_stage::slots::image.name),
-                   vc::pipe::vc_pipe_packet{image});
+    inputs.emplace(
+        std::string(
+            vc::pipe::vc_sample_mean_brightness_stage::slots::image.name),
+        vc::pipe::vc_pipe_packet{image});
     vc::pipe::vc_pipe_context ctx{std::move(inputs)};
     stage.process(ctx);
 
     const auto outputs = std::move(ctx).take_outputs();
-    CHECK(outputs.at(std::string(vc::pipe::vc_sample_mean_brightness_stage::slots::mean.name))
+    CHECK(outputs
+              .at(std::string(
+                  vc::pipe::vc_sample_mean_brightness_stage::slots::mean.name))
               .get<double>() == doctest::Approx(0.5));
 }
 
@@ -352,7 +365,8 @@ TEST_CASE("vc_sample_mean_brightness_stage: process() averages every element") {
 // box-blur kernel.
 // =====================================================================
 
-TEST_CASE("vc_sample_blur_stage: is constructed with its params and exposes them") {
+TEST_CASE(
+    "vc_sample_blur_stage: is constructed with its params and exposes them") {
     vc::pipe::vc_sample_blur_params cfg;
     cfg.radius = 2.0;
     const vc::pipe::vc_sample_blur_stage blur{"blur", cfg};
@@ -363,7 +377,8 @@ TEST_CASE("vc_sample_blur_stage: is constructed with its params and exposes them
     CHECK(blur.params().normalize == true);
 }
 
-TEST_CASE("vc_sample_blur_stage: params_hash() is deterministic and varies with radius,"
+TEST_CASE("vc_sample_blur_stage: params_hash() is deterministic and varies "
+          "with radius,"
           " not with name") {
     vc::pipe::vc_sample_blur_params a;
     a.radius = 2.0;
@@ -375,27 +390,22 @@ TEST_CASE("vc_sample_blur_stage: params_hash() is deterministic and varies with 
     const vc::pipe::vc_sample_blur_stage blur_a_renamed{"blur2", a};
     const vc::pipe::vc_sample_blur_stage blur_b{"blur", b};
 
-    CHECK(blur_a.params_hash() == blur_a_again.params_hash());   // deterministic
-    CHECK(blur_a.params_hash() == blur_a_renamed.params_hash()); // name-independent
-    CHECK(blur_a.params_hash() != blur_b.params_hash());         // radius varies it
+    CHECK(blur_a.params_hash() == blur_a_again.params_hash()); // deterministic
+    CHECK(blur_a.params_hash() ==
+          blur_a_renamed.params_hash());                 // name-independent
+    CHECK(blur_a.params_hash() != blur_b.params_hash()); // radius varies it
 }
 
-TEST_CASE("vc_sample_blur_stage: rejects a non-positive or NaN radius before"
-          " the kernel ever runs") {
-    // A VALID "in" packet is bound (unlike the process() tests above, which
-    // only assert the kernel publishes something) specifically so that if
-    // validate_inputs() ever failed to reject one of these params,
-    // do_process() would run to completion and NOT throw — making these
-    // CHECK_THROWS_AS calls a real regression check on the radius validation
-    // itself, not just "process() throws for some reason or other".
-    auto bound_ctx = [] {
-        std::unordered_map<vc::pipe::slot_name, vc::pipe::vc_pipe_packet> inputs;
-        inputs.emplace(
-            std::string(vc::pipe::vc_sample_blur_stage::slots::in.name),
-            vc::pipe::vc_pipe_packet{vc::vc_image::zeros<vc::buf_f32>(2, 2, 3)});
-        return vc::pipe::vc_pipe_context{std::move(inputs)};
-    };
-
+TEST_CASE("vc_sample_blur_stage: rejects a non-positive or NaN radius from the"
+          " CONSTRUCTOR, before a pipeline or a pixel is ever involved") {
+    // radius is fully known at construction time (it never depends on a
+    // run-time input), so it is validated there, not deferred to
+    // validate_inputs()/process() — an invalid blur must never become a
+    // constructible object at all, let alone one that could be add()ed to a
+    // pipeline and pass validate(). Unlike the OLD behaviour this replaces
+    // (radius checked in validate_inputs()/process()), no vc_pipe_context or
+    // bound "in" packet is needed here: the throw happens before any of that
+    // could matter.
     vc::pipe::vc_sample_blur_params zero;
     zero.radius = 0.0;
     vc::pipe::vc_sample_blur_params negative;
@@ -403,20 +413,33 @@ TEST_CASE("vc_sample_blur_stage: rejects a non-positive or NaN radius before"
     vc::pipe::vc_sample_blur_params nan_radius;
     nan_radius.radius = std::numeric_limits<double>::quiet_NaN();
 
-    // Constructed as separate locals, not inline inside CHECK_THROWS_AS: a
-    // brace-init argument list's commas are not parenthesis-protected, so
-    // the preprocessor would otherwise mis-split the macro's own arguments.
-    const vc::pipe::vc_sample_blur_stage zero_blur{"blur", zero};
-    auto zero_ctx = bound_ctx();
-    CHECK_THROWS_AS(zero_blur.process(zero_ctx), vc::vc_exception);
+    // Wrapped in an extra parenthesis pair: a brace-init argument list's
+    // commas are not parenthesis-protected, so the preprocessor would
+    // otherwise mis-split the macro's own arguments.
+    CHECK_THROWS_AS((vc::pipe::vc_sample_blur_stage{"blur", zero}),
+                    vc::vc_exception);
+    CHECK_THROWS_AS((vc::pipe::vc_sample_blur_stage{"blur", negative}),
+                    vc::vc_exception);
+    CHECK_THROWS_AS((vc::pipe::vc_sample_blur_stage{"blur", nan_radius}),
+                    vc::vc_exception);
+}
 
-    const vc::pipe::vc_sample_blur_stage negative_blur{"blur", negative};
-    auto negative_ctx = bound_ctx();
-    CHECK_THROWS_AS(negative_blur.process(negative_ctx), vc::vc_exception);
+TEST_CASE("vc_sample_blur_stage: a valid radius still constructs and runs") {
+    vc::pipe::vc_sample_blur_params params;
+    params.radius = 2.0;
+    CHECK_NOTHROW((vc::pipe::vc_sample_blur_stage{"blur", params}));
 
-    const vc::pipe::vc_sample_blur_stage nan_blur{"blur", nan_radius};
-    auto nan_ctx = bound_ctx();
-    CHECK_THROWS_AS(nan_blur.process(nan_ctx), vc::vc_exception);
+    const vc::pipe::vc_sample_blur_stage blur{"blur", params};
+    std::unordered_map<vc::pipe::slot_name, vc::pipe::vc_pipe_packet> inputs;
+    inputs.emplace(
+        std::string(vc::pipe::vc_sample_blur_stage::slots::in.name),
+        vc::pipe::vc_pipe_packet{vc::vc_image::zeros<vc::buf_f32>(4, 4, 3)});
+    vc::pipe::vc_pipe_context ctx{std::move(inputs)};
+
+    CHECK_NOTHROW(blur.process(ctx));
+    const auto outputs = std::move(ctx).take_outputs();
+    CHECK(outputs.count(std::string(
+              vc::pipe::vc_sample_blur_stage::slots::out.name)) == 1);
 }
 
 // =====================================================================
@@ -424,8 +447,10 @@ TEST_CASE("vc_sample_blur_stage: rejects a non-positive or NaN radius before"
 // isolates the kernel itself from the pipeline runner.
 // =====================================================================
 
-TEST_CASE("vc_sample_blur_stage: process() publishes a blurred image on its output slot") {
-    const vc::pipe::vc_sample_blur_stage blur{"blur", vc::pipe::vc_sample_blur_params{}};
+TEST_CASE("vc_sample_blur_stage: process() publishes a blurred image on its "
+          "output slot") {
+    const vc::pipe::vc_sample_blur_stage blur{
+        "blur", vc::pipe::vc_sample_blur_params{}};
 
     // Seed the input slot with a source image and drive process() directly.
     std::unordered_map<vc::pipe::slot_name, vc::pipe::vc_pipe_packet> inputs;
@@ -437,8 +462,8 @@ TEST_CASE("vc_sample_blur_stage: process() publishes a blurred image on its outp
     CHECK_NOTHROW(blur.process(ctx));
 
     const auto outputs = std::move(ctx).take_outputs();
-    CHECK(outputs.count(std::string(vc::pipe::vc_sample_blur_stage::slots::out.name)) ==
-          1);
+    CHECK(outputs.count(std::string(
+              vc::pipe::vc_sample_blur_stage::slots::out.name)) == 1);
     // A zeros() source stays all-zero under a box blur, so this only checks
     // that the kernel runs and publishes — see the dedicated numeric test
     // below for the actual blur behaviour on a non-uniform image.
@@ -480,13 +505,15 @@ TEST_CASE("vc_sample_blur_stage: a normalized box blur moves boundary pixels"
     CHECK(out_pixels[blurred.meta().index(3, 0, 0)] < 1.0);
 }
 
-TEST_CASE("vc_sample_blur_stage: normalize=false publishes the raw neighbourhood"
-          " sum instead of its mean") {
+TEST_CASE(
+    "vc_sample_blur_stage: normalize=false publishes the raw neighbourhood"
+    " sum instead of its mean") {
     // A uniform image whose every source pixel is 1.0: a NORMALIZED blur
     // would leave it at 1.0 everywhere; an un-normalized blur inflates the
     // interior to the raw kernel-weight sum (9.0 for a radius-1 3x3
     // neighbourhood) — the two are only distinguishable on a non-zero image.
-    const vc::vc_image source = vc::vc_image::with_fill<vc::buf_f32>(3, 3, 1, 1.0f);
+    const vc::vc_image source =
+        vc::vc_image::with_fill<vc::buf_f32>(3, 3, 1, 1.0f);
 
     vc::pipe::vc_sample_blur_params params;
     params.radius = 1.0;
@@ -552,7 +579,8 @@ TEST_CASE("vc_sample_blur_stage: a radius larger than the image clamps to the"
 TEST_CASE("vc_pipeline: validate() accepts a matched image->image chain") {
     vc::pipe::vc_pipeline pipe;
     pipe.add(std::make_unique<vc::pipe::vc_sample_grayscale_stage>("grey"));
-    pipe.add(std::make_unique<vc::pipe::vc_sample_mean_brightness_stage>("mean"));
+    pipe.add(
+        std::make_unique<vc::pipe::vc_sample_mean_brightness_stage>("mean"));
     pipe.connect(
         "grey", vc::pipe::vc_sample_grayscale_stage::slots::grey, "mean",
         vc::pipe::vc_sample_mean_brightness_stage::slots::image); // image->img
@@ -561,12 +589,21 @@ TEST_CASE("vc_pipeline: validate() accepts a matched image->image chain") {
 
 TEST_CASE("vc_pipeline: validate() rejects a type-mismatched connection") {
     vc::pipe::vc_pipeline pipe;
-    pipe.add(std::make_unique<vc::pipe::vc_sample_mean_brightness_stage>("mean"));
+    pipe.add(
+        std::make_unique<vc::pipe::vc_sample_mean_brightness_stage>("mean"));
     pipe.add(std::make_unique<vc::pipe::vc_sample_grayscale_stage>("grey"));
     // Wire mean's `double` output into grayscale's image input -> mismatch.
     pipe.connect("mean", vc::pipe::vc_sample_mean_brightness_stage::slots::mean,
                  "grey", vc::pipe::vc_sample_grayscale_stage::slots::rgb);
-    CHECK_THROWS_AS(pipe.validate(), vc::vc_exception);
+    // A genuine type mismatch keeps the original, now-narrower code —
+    // pipe_invalid_topology is reserved for the backwards/self-loop checks
+    // above the type check in validate() (see vc_error_code.h).
+    try {
+        pipe.validate();
+        FAIL("validate() should have thrown on a type mismatch");
+    } catch (const vc::vc_exception& e) {
+        CHECK(e.code() == vc::vc_error_code::pipe_connection_mismatch);
+    }
 }
 
 TEST_CASE("vc_pipeline: validate() rejects two connections wired into the"
@@ -581,7 +618,74 @@ TEST_CASE("vc_pipeline: validate() rejects two connections wired into the"
                  vc::pipe::vc_passthrough_stage::slots::in);
     pipe.connect("a2", vc::pipe::vc_passthrough_stage::slots::out, "b",
                  vc::pipe::vc_passthrough_stage::slots::in); // same to-port
-    CHECK_THROWS_AS(pipe.validate(), vc::vc_exception);
+    // validate() can throw pipe_connection_mismatch, pipe_invalid_topology, or
+    // pipe_input_already_connected for different malformed graphs (see the
+    // sibling tests above/below) — assert the specific code so a future
+    // regression that fires one of the other two instead is caught here,
+    // matching the try/catch pattern those tests use.
+    try {
+        pipe.validate();
+        FAIL("validate() should have thrown on a duplicate input connection");
+    } catch (const vc::vc_exception& e) {
+        CHECK(e.code() == vc::vc_error_code::pipe_input_already_connected);
+    }
+}
+
+TEST_CASE("vc_pipeline: validate() accepts a forwards connection (producer"
+          " add()ed before consumer)") {
+    // b is add()ed AFTER a, and a feeds b — this is the only order run()
+    // (insertion-order, no topological sort) can execute correctly.
+    vc::pipe::vc_pipeline pipe;
+    pipe.add(std::make_unique<vc::pipe::vc_passthrough_stage>("a"));
+    pipe.add(std::make_unique<vc::pipe::vc_passthrough_stage>("b"));
+    pipe.connect("a", vc::pipe::vc_passthrough_stage::slots::out, "b",
+                 vc::pipe::vc_passthrough_stage::slots::in);
+    CHECK_NOTHROW(pipe.validate());
+}
+
+TEST_CASE("vc_pipeline: validate() rejects a backwards connection (consumer"
+          " add()ed before producer)") {
+    // b is add()ed FIRST and so runs FIRST; g is add()ed SECOND but its
+    // output feeds b's input. run() would execute b before g ever produces
+    // g.out — a topology validate() must reject, not just a type mismatch
+    // (both stages here declare vc_image slots, so this would otherwise pass
+    // the type check and fail deep inside run() instead, with a confusing
+    // "missing output from upstream stage" message).
+    vc::pipe::vc_pipeline pipe;
+    pipe.add(std::make_unique<vc::pipe::vc_passthrough_stage>("b"));
+    pipe.add(std::make_unique<vc::pipe::vc_passthrough_stage>("g"));
+    pipe.connect("g", vc::pipe::vc_passthrough_stage::slots::out, "b",
+                 vc::pipe::vc_passthrough_stage::slots::in);
+    // A topology failure, not a type mismatch, so it must carry the
+    // dedicated code — pipe_connection_mismatch is reserved for the type
+    // check further down validate() (see vc_error_code.h).
+    try {
+        pipe.validate();
+        FAIL("validate() should have thrown on a backwards connection");
+    } catch (const vc::vc_exception& e) {
+        CHECK(e.code() == vc::vc_error_code::pipe_invalid_topology);
+    }
+}
+
+TEST_CASE("vc_pipeline: validate() rejects a self-loop (a stage wired to its"
+          " own input)") {
+    // A stage's own output can never feed its own input in a runner that
+    // executes each stage exactly once, in insertion order: by the time the
+    // stage runs, it has not produced its output yet. This is also the
+    // degenerate case of the backwards-edge check (from_pos == to_pos, so
+    // `from_pos < to_pos` is false) — same index, not "added before".
+    vc::pipe::vc_pipeline pipe;
+    pipe.add(std::make_unique<vc::pipe::vc_passthrough_stage>("a"));
+    pipe.connect("a", vc::pipe::vc_passthrough_stage::slots::out, "a",
+                 vc::pipe::vc_passthrough_stage::slots::in);
+    // Same dedicated topology code as the backwards-connection case above —
+    // a self-loop is that check's degenerate case, not a type mismatch.
+    try {
+        pipe.validate();
+        FAIL("validate() should have thrown on a self-loop");
+    } catch (const vc::vc_exception& e) {
+        CHECK(e.code() == vc::vc_error_code::pipe_invalid_topology);
+    }
 }
 
 TEST_CASE("vc_pipeline: run() drives a packet through a two-stage chain") {

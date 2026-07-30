@@ -91,15 +91,26 @@ std::ifstream open_for_read(const path& p, std::string_view caller) {
     return in;
 }
 
-void write_file_atomically(const path& p, std::string_view content,
+void write_file_atomically(const path& p,
+                           std::string_view content,
                            std::string_view caller) {
     const path temp = make_unique_temp_path(p);
 
     try {
         std::ofstream out = open_for_write(temp, caller);
         out << content;
-        out.flush(); // force the OS-level write now, so a failure surfaces
-                     // here rather than silently in operator<<'s buffer.
+        out.flush(); // Drains the C++ stream's own buffer into the OS now, so
+                     // a write failure surfaces here rather than silently
+                     // inside operator<<'s buffering. This is NOT fsync/
+                     // fdatasync — it gives no guarantee against data loss on
+                     // an OS crash or power failure (neither the temp file
+                     // nor its parent directory is synced). What this
+                     // function actually guarantees is corruption-safety —
+                     // `p` is never left truncated or half-written — and
+                     // that guarantee comes from the temp-file + atomic
+                     // rename below, not from this flush(). Don't attribute
+                     // an invariant to a gate that doesn't establish it
+                     // (docs/coding_guidelines.md Sec 6.5).
         if (!out) {
             throw vc::vc_exception(vc::vc_error_code::encode_error,
                                    std::string(caller) + ": failed to write " +
@@ -118,7 +129,7 @@ void write_file_atomically(const path& p, std::string_view content,
         std::filesystem::remove(temp, ec); // best-effort; ignore the result
         throw;
     } // close `out` before renaming — some platforms refuse to rename a
-      // file that is still open.
+    // file that is still open.
 
     std::error_code ec;
     std::filesystem::rename(temp, p, ec);

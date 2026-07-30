@@ -3,25 +3,33 @@
 
 #include "vc/edit/vc_render_image.h"
 
+#include <string>
+#include <utility>
+
+#include "vc/edit/vc_build_pipeline.h"
 #include "vc/vc_error_code.h"
 #include "vc/vc_exception.h"
 
 namespace vc::edit {
 
 vc::vc_image render_image(const vc_edit_session& session,
-                          const vc_render_request& request) {
-    // TODO(you): the render-composition rep. See the header for what this
-    // needs to do (build_pipeline + run(), feeding/harvesting the SPINE's
-    // one open input/output) and the port-discovery caveat.
-    //
-    // Throwing shell (NOT a default-constructed vc_image — vc_image has no
-    // public default constructor anyway, see vc_image.h): build_pipeline()
-    // itself still throws today, so this would fail transitively regardless;
-    // an explicit throw here keeps the failure message specific to this rep.
-    (void)session;
-    (void)request;
-    throw vc::vc_exception(vc_error_code::invalid_argument,
-                           "render_image not yet implemented");
+                          const vc_render_request& request,
+                          const vc::pipe::vc_render_context& run_context) {
+    auto built = build_pipeline(session, request);
+    auto outputs = built.pipeline.run(std::move(built.inputs), run_context);
+
+    // The SPINE has exactly one open output; a later, multi-stage graph
+    // could still legitimately have several, but render_image's contract is
+    // a single rendered image, so enforce that here rather than silently
+    // picking one.
+    if (outputs.size() != 1) {
+        throw vc::vc_exception(
+            vc::vc_error_code::invalid_argument,
+            "render_image: expected exactly one open output, got " +
+                std::to_string(outputs.size()));
+    }
+
+    return outputs.begin()->second.get<vc::vc_image>();
 }
 
 } // namespace vc::edit

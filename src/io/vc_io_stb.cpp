@@ -3,8 +3,8 @@
 
 #include <algorithm>
 
-#include "vc/io/vc_io.h"
 #include "vc/io/vc_io_fs.h"
+#include "vc/io/vc_io_stb.h"
 
 #include "vc/vc_error_code.h"
 #include "vc/vc_exception.h"
@@ -86,7 +86,7 @@ void stb_image_writer::write(const path& p,
     // Auto-create the target's parent directory if it doesn't exist yet,
     // rather than making every caller ensure it exists first — a no-op if
     // it already exists (ensure_directory()'s own semantics).
-    // vc::utils::debug::write_dump() relies on this: it no longer creates
+    // vc::debug::write_dump() relies on this: it no longer creates
     // its own output directory, since this already covers it.
     ensure_parent_directory(p);
 

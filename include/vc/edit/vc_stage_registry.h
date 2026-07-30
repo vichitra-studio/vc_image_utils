@@ -56,8 +56,7 @@ class vc_stage_registry {
     // bare std::string repeated at each call site.
     using stage_kind = std::string;
 
-    using factory =
-        std::function<vc::pipe::stage_ptr(vc::pipe::stage_name)>;
+    using factory = std::function<vc::pipe::stage_ptr(vc::pipe::stage_name)>;
 
     // The session-aware factory shape: name + the session it derives params
     // from. Erased once, at register_stage<StageT>() below, so create()
@@ -66,13 +65,24 @@ class vc_stage_registry {
         vc::pipe::stage_name, const vc_edit_session&)>;
 
     // Register a factory under `kind`. A later registration for the same kind
-    // overwrites the earlier one (last-wins).
+    // overwrites the earlier one (last-wins). `make` must return a non-null
+    // stage; create() below enforces this — `make` is an arbitrary
+    // caller-supplied callable, so nothing at registration time constrains
+    // what it hands back.
     void register_kind(const stage_kind& kind, factory make);
 
     // Look up `kind` and invoke its factory with `name`, or throw
-    // vc::vc_exception (invalid_argument) on an unknown kind. This is
-    // map-lookup-or-throw plumbing (structurally identical to has()), NOT a rep —
-    // the scaffold writes it in full.
+    // vc::vc_exception (invalid_argument) on an unknown kind. The factory's
+    // result is also checked for null before it is handed back, and a null
+    // result throws vc::vc_exception (invalid_argument) too: `make` is an
+    // arbitrary caller-supplied std::function (register_kind() stores it
+    // as-is, unlike register_stage<StageT>()'s hardcoded make_unique lambda),
+    // so this is the boundary where that externally-supplied value enters
+    // the system — validated once, here, rather than trusted all the way to
+    // vc_pipeline::add() (which only asserts on a null stage, because a
+    // make_unique result reaching it can never be null). This is
+    // map-lookup-or-throw-or-reject plumbing, NOT a rep — the scaffold writes
+    // it in full.
     vc::pipe::stage_ptr create(const stage_kind& kind,
                                vc::pipe::stage_name name) const;
 
@@ -95,16 +105,31 @@ class vc_stage_registry {
         session_factories_[kind] =
             [](vc::pipe::stage_name name,
                const vc_edit_session& session) -> vc::pipe::stage_ptr {
-                return std::make_unique<StageT>(
-                    std::move(name),
-                    vc_stage_params<StageT>::from_session(session));
-            };
+            return std::make_unique<StageT>(
+                std::move(name),
+                vc_stage_params<StageT>::from_session(session));
+        };
     }
 
     // Look up `kind` in the session-aware map and invoke its factory with
     // `name` and `session`, or throw vc::vc_exception (invalid_argument) on
-    // an unknown kind. Map-lookup-or-throw plumbing, structurally identical
-    // to the name-only create() above — NOT a rep.
+    // an unknown kind. Map-lookup-or-throw plumbing, NOT a rep. Unlike the
+    // name-only create() above, this overload does NOT re-check the result
+    // for null: session_factories_ is populated exclusively by
+    // register_stage<StageT>() above, whose lambda body hardcodes
+    // std::make_unique<StageT>(...) — that call either returns a real
+    // instance or throws (bad_alloc, or StageT's constructor), never null.
+    // Caller-supplied code DOES reach this path — vc_stage_params<StageT> is
+    // an open-set trait anyone can specialize (see the trait's own doc
+    // comment, and tests/test_vc_edit.cpp's out-of-framework specialization
+    // for vc_sample_blur_stage) — but only in the PARAMS position, feeding
+    // make_unique's second argument. It cannot make make_unique itself
+    // return null the way register_kind()'s caller-supplied factory can:
+    // there the caller's return value IS the stage; here it is only an
+    // input to a construction that cannot produce a null result. Should a
+    // future overload ever accept a caller-supplied session_factory directly
+    // (the stage-producing position, not just the params-producing one), the
+    // same null-guard would need to move here.
     vc::pipe::stage_ptr create(const stage_kind& kind,
                                vc::pipe::stage_name name,
                                const vc_edit_session& session) const;

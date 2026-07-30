@@ -5,6 +5,7 @@
 
 #include "vc/edit/vc_edit_session.h"
 #include "vc/io/vc_io_types.h"
+#include "vc/pipe/vc_render_context.h"
 
 namespace vc::edit {
 
@@ -25,13 +26,21 @@ struct vc_export_config {
 // (render_image.h does that) and no encoding logic of its own (vc::io does
 // that) — this is purely the join between the two.
 //
-// TODO(you): render_image(session, vc_render_request{}) gets the pixels;
-// construct a vc::io::stb_image_writer and writer.write(config.path, image,
-// config.write) puts them on disk. stb_image_writer is constructed HERE, not
-// injected: it is vc::io's only real implementation and no caller chooses
-// between two (the substitutability test, docs/edit_model.md Sec 7) — same
-// convention main.cpp's read/write round trip already uses.
+// TODO(you): render_image(session, vc_render_request{}, run_context) gets the
+// pixels; construct a vc::io::stb_image_writer and writer.write(config.path,
+// image, config.write) puts them on disk. stb_image_writer is constructed
+// HERE, not injected: it is vc::io's only real implementation and no caller
+// chooses between two (the substitutability test, docs/edit_model.md Sec 7)
+// — same convention main.cpp's read/write round trip already uses.
+//
+// `run_context` (trailing, defaulted) is what lets a caller cancel an
+// in-flight export — forwarded, unmodified, into render_image()'s own
+// `run_context` parameter. Export is the longest-running operation in the
+// system, so this is the primary motivating case for the cancellation
+// subsystem (vc_cancellation_source/vc_cancellation_token/vc_render_context)
+// reaching a real caller at all.
 void export_image(const vc_edit_session& session,
-                  const vc_export_config& config);
+                  const vc_export_config& config,
+                  const vc::pipe::vc_render_context& run_context = {});
 
 } // namespace vc::edit

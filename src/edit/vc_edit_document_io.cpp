@@ -30,11 +30,16 @@ using edit_user_setting_doc = nlohmann::json;
 // that struct's own line here, (3) its name added to vc_edit_document's own
 // line below. save_edit_document()/load_edit_document() never change.
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(vc_capture_settings,
-                                                bracket_count, ev_spacing)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(vc_exposure_settings, enabled,
-                                                ev, black)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(vc_edit_document, version,
-                                                capture, exposure)
+                                                bracket_count,
+                                                ev_spacing)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(vc_exposure_settings,
+                                                enabled,
+                                                ev,
+                                                black)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(vc_edit_document,
+                                                version,
+                                                capture,
+                                                exposure)
 
 void save_edit_document(const std::filesystem::path& path,
                         const vc_edit_document& doc) {

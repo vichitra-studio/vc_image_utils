@@ -13,13 +13,24 @@ Each run writes a pair, keyed by `<suite>-<host>-<compiler>`:
 
 | File | Format | Purpose |
 |---|---|---|
-| `<suite>-<host>-<compiler>.json` | nanobench `json` + a `meta` header | machine-diffable; the git diff is the regression signal |
+| `<suite>-<host>-<compiler>.json` | nanobench `json` + a `meta` header | machine-diffable; read by `--compare` for automated regression detection, or diffed by a human (see "Regression check" below) |
 | `<suite>-<host>-<compiler>.md`   | nanobench Markdown table          | human-readable snapshot |
 
 `<suite>` is `harness` / `pipe` / `pipeline`; `<host>`/`<compiler>` come from
 CMake at configure time. **Numbers are machine-specific — never compare across
 host, compiler, or flags.** Each file stamps host, compiler, `-march`, flags,
 git SHA, and UTC generation time.
+
+**`<host>` is not guaranteed stable.** It comes from CMake's
+`cmake_host_system_information(... QUERY HOSTNAME)`, which on macOS is the
+mDNS/Bonjour local hostname and can change silently (machine rename, some
+network/System Settings changes) with no code change. If it changes, the next
+`--baseline` run writes a **new** `<suite>-<newhost>-<compiler>` pair instead
+of continuing the old one, forking the timeseries — the old file simply stops
+accumulating history. If this happens, either rename the old file(s) to the
+new hostname to preserve continuity (only if you're sure it's the same
+machine under a new name), or knowingly start a new series and say so in the
+commit message.
 
 ## Generating
 
@@ -28,12 +39,20 @@ cmake -S . -B cmake-build-bench -DCMAKE_BUILD_TYPE=Release -DVC_BUILD_BENCHMARKS
 cmake --build cmake-build-bench --target vc_benchmark_harness vc_benchmark_pipe vc_benchmark_pipeline
 ./cmake-build-bench/vc_benchmark_harness --baseline
 ./cmake-build-bench/vc_benchmark_pipe     --baseline
-./cmake-build-bench/vc_benchmark_pipeline --baseline   # writes nothing today: all cases stubbed
+./cmake-build-bench/vc_benchmark_pipeline --baseline
 ```
 
 Filter to one case with a substring, e.g. `./cmake-build-bench/vc_benchmark_harness copy`.
 List cases with `--list` (cases marked `[not baselined]` run and print but are
 excluded from the committed files).
+
+**Trying `--baseline` out without touching this directory:** add
+`--baseline-dir <scratch-path>`, e.g.
+`./cmake-build-bench/vc_benchmark_harness --baseline-dir /tmp/vc-bench-scratch --baseline`
+— writes `<scratch-path>/harness-<host>-<compiler>.{json,md}` instead of here,
+creating `<scratch-path>` if needed. Omitting `--baseline-dir` is unchanged:
+`--baseline` alone still writes straight into this directory. See "Sharp
+edge" below.
 
 ## Lifecycle (§8)
 
@@ -48,14 +67,277 @@ flags)*.
   edits before generating the baseline you keep.
 - Update baselines **deliberately** when a real change lands, with a commit
   message saying why — **not** every commit.
-- **Only baseline-eligible cases are written here.** Cases that today measure a
-  stubbed body (`grayscale`/`mean_brightness` `process()`, `pipeline.run()`) are
-  wired and runnable but excluded until their real implementation lands, so an
-  empty result never enters the timeseries (§9). `pipeline` writes no file yet.
+- **Only baseline-eligible cases are written here.** A case that measures a
+  stubbed body would still run and print, but is excluded from the written
+  files until its real implementation lands, so a stub's output never enters
+  the timeseries (§9). **As of 2026-07-27, every case in all three suites
+  (`harness`, `pipe`, `pipeline`) is baseline-eligible** — `vc_image_info::
+  element_count()`, `vc_pipeline::run()`/`validate()`, and `vc::io` are all
+  implemented, so nothing left in `bench/` measures a stub. (The
+  `grayscale`/`mean_brightness` kernels this note used to cite were never a
+  contradiction of that: they moved to `tests/samples/` — worked examples for
+  pipe-framework mechanics — and were removed from `bench/vc_benchmark_pipe.cpp`
+  entirely; they are not "excluded", they are simply not benchmark subjects
+  here.) This flag stays in the mechanism for the next real stub, not because
+  one is gated today.
 
 ## Regression check
 
-Run current vs the committed baseline; flag a median regression past a threshold
-**only when both runs have low err%** (else it is noise). There is no cross-run
-significance test (§3.4) — err%-aware threshold-on-median is the solo-project
-substitute.
+**Automated: `--compare <baseline.json>`.** Every bench binary can run, then
+check itself against a committed file in this directory, read-only:
+
+```sh
+./cmake-build-bench/vc_benchmark_harness  --compare bench/baselines/harness-<host>-<compiler>.json
+./cmake-build-bench/vc_benchmark_pipe     --compare bench/baselines/pipe-<host>-<compiler>.json
+./cmake-build-bench/vc_benchmark_pipeline --compare bench/baselines/pipeline-<host>-<compiler>.json
+```
+
+It never writes the file it compares against — the deliberate contrast with
+`--baseline`, which overwrites its output file in place with no diff-first
+step. **`--baseline` and `--compare` cannot be combined in one invocation** —
+rejected at argument-parsing time, unconditionally (not just when the paths
+happen to match): `--baseline` writes before `--compare` would read, so
+combining them risks — or, with a matching path, guarantees — a
+self-comparison that is always `+0.00% ok` and can never detect a
+regression. Run them separately.
+
+Exit code: **0** iff every row present on **both** the baseline and this run
+was actually comparable and none regressed past the threshold outside its
+err%-noise band. Otherwise the exit code is split into two distinct
+non-zero values, so a CI step can tell "the comparison ran cleanly but found
+a real regression" (advisory-worthy — safe to soften with `|| true`) apart
+from "the comparison itself could not be trusted" (never worth softening):
+
+- **1 — infrastructure failure.** Something kept part of the comparison
+  from happening at all:
+  - a missing, unreadable, or malformed baseline **file** (a hard error,
+    not a silent skip);
+  - a row present on **both** the baseline and this run whose median is
+    **missing, zero, or negative on either side** — its own `NOT
+    COMPARABLE` status, never a `+0.00%` delta (a baseline field rename
+    used to silently read as "no change" for the whole suite instead);
+    **[CORRECTED 2026-07-27: previously described as one-sided ("a row
+    present in the baseline with a missing/zero/negative median"); the
+    check is symmetric — `!b.median_ok || !c.median_ok` in
+    `bench/vc_bench_support.cpp`'s `run_compare` — untrustworthy on
+    EITHER side triggers it.]**
+  - a row with a field **present but of the wrong JSON type** — skipped
+    with a clear message; `--compare` never aborts on this (previously a
+    type mismatch, e.g. `median(elapsed)` as a string, could `SIGABRT` the
+    whole process);
+  - a `"benches"` array element that is **not even a JSON object**, a case
+    object **missing its `"results"` field**, one whose `"results"` is
+    present but **not an array**, a `"results"` array element that is
+    **not a JSON object**, or a `"results"` array element that **is** a
+    JSON object but carries none of nanobench's row fields
+    (`"title"`/`"name"`/`"median(elapsed)"`/
+    `"medianAbsolutePercentError(elapsed)"`) — skipped with a clear message
+    naming the position and the JSON type found. **[CORRECTED 2026-07-27:
+    added a fifth shape — a `"results"` element that IS a JSON object but
+    has none of nanobench's four row fields, which the row extractor's
+    `.value()`-based defaults would otherwise absorb silently (title/name
+    default to `""`, a missing `median(elapsed)` gets its own `NOT
+    COMPARABLE` status, `medianAbsolutePercentError(elapsed)` defaults to
+    `0.0`), producing a row keyed `" :: "` with no diagnostic for that
+    element specifically. See `extract_row` in `bench/vc_bench_support.cpp`
+    for why all four fields must be absent, not just one, to trigger this —
+    a row missing only `median(elapsed)` is the separate, already-diagnosed
+    `NOT COMPARABLE` case above.]** **[CORRECTED 2026-07-27: added — this is the
+    eighth confirmed instance of this repo's dominant defect class ("exits 0
+    while silently skipping its job"). The pre-fix guard in
+    `parse_case_results` was one unconditional early return covering all
+    three case-level shapes above, contributing zero rows with no
+    diagnostic; `extract_row`'s own guard for a non-object `"results"`
+    element had the identical shape one level deeper, and its own comment
+    used to cite that silence as deliberate precedent. Reproduced directly:
+    a `"benches"` array with 4 non-object elements (a string, a number,
+    `null`, an array) mixed among 2 valid case objects printed "2 compared,
+    6 new, 0 missing" and exited **0** — nothing distinguished the garbage
+    from an intentionally-trimmed baseline. Now reported and forces
+    `had_row_error`, the SAME mechanism the wrong-JSON-type bullet above
+    already uses, not a parallel one. A well-formed case object with a
+    genuinely **empty** `"results"` array is deliberately excluded from this
+    bullet — that is exactly the shape nanobench's own `json()` render
+    produces for a case whose `Bench` completed zero `.run()` calls, a real
+    honestly-empty case, not malformed input; it is still reported
+    (informationally), but does not set `had_row_error` or affect the exit
+    code. Checked against all three files in this directory: none contain
+    any of the malformed shapes, and none contain a case with an empty
+    `"results"` array, so this does not turn the local/CI workflow red.]**
+  - **zero rows anywhere reaching an actual comparison, in a whole-suite
+    (unfiltered) invocation** — e.g. a baseline that parsed but yielded
+    zero rows, or total key drift from a rename, with no positional
+    `FILTER` narrowing the run. Gated on "no filter" deliberately: running
+    `--compare` narrowed to one brand-new, not-yet-baselined case (see
+    "new (not in baseline)" below) legitimately compares zero rows every
+    time and must stay exit 0 — no CI workflow currently invokes these
+    binaries at all, so nothing in CI passes a filter either; gating this
+    way closes the CI-relevant hole without breaking that interactive
+    workflow. **[CORRECTED 2026-07-27: `.github/workflows/benchmark.yml` now
+    exists and its `benchmark` job defines three `--compare` steps, one per
+    binary, each with no positional filter, on every push/pull_request — this
+    is no longer a hypothetical "if CI ever runs this" gate, it is live. Only
+    the first (`harness`) actually executes today; no CI baseline has been
+    generated yet, so it fails closed and the job stops before the other two
+    run. See `docs/benchmarking.md` §8 for the full mechanics.]**
+  - **at least one `missing` row (present in the baseline, absent from this
+    run) in a whole-suite (unfiltered) invocation.** **[CORRECTED 2026-07-27:
+    added — a `missing` row used to be purely informational at every filter
+    level, the same as a `new` row. That symmetry was a hole: renaming or
+    removing cases in a refactor turns every affected baseline row into
+    `missing` (and its replacement into `new`), and a whole-suite run could
+    still exit 0 having silently lost most of the suite's gate coverage.
+    Reproduced directly: renaming 7 of 8 rows in a baseline made a
+    whole-suite `--compare` print 7 `missing` + 7 `new`, compare only 1 row,
+    and still exit 0 with a summary line claiming "every comparable row was
+    actually compared" — literally false of what happened. A `missing` row
+    now fails a whole-suite run because it means baseline COVERAGE was
+    lost, unlike `new` (a case that simply didn't exist yet, benign by
+    construction) which stays informational at every filter level. Gated on
+    "no filter", for the identical reason the zero-rows bullet above is: a
+    `--compare` narrowed to one case legitimately leaves every OTHER
+    baseline row `missing` every time, and that must stay exit 0.]**
+  - **a duplicate row key — two or more rows whose `(title, name)` pair is
+    identical — on either side (the baseline file, or this run's own
+    case results), at any filter level** (this one is NOT gated on
+    whole-suite). **[CORRECTED 2026-07-27: "identical `(title, name)` pair"
+    replaces an earlier "same `title :: name` string" description — the
+    actual match/dedup key (`match_key()` in `bench/vc_bench_support.cpp`)
+    is a length-prefixed encoding of the `(title, name)` pair, not the
+    unescaped `" :: "`-joined display string (`row_key()`, used only for
+    the printed "case" column and diagnostic text). Two structurally
+    different pairs can render to the identical display string — e.g.
+    `title="X"`, `name="Y :: Z"` vs. `title="X :: Y"`, `name="Z"` both
+    print as `"X :: Y :: Z"` — and those are correctly treated as
+    distinct, non-colliding rows; only an identical `(title, name)` pair
+    triggers this.]** **[CORRECTED 2026-07-27: added — this did not exist
+    before this date. The map that indexes baseline rows by key was filled
+    with an unconditional `.emplace`, a documented no-op once a key already
+    exists, so only the FIRST row for a repeated key ever survived — while
+    the vector that drives the comparison loop was never deduplicated, so
+    it still iterated the same surviving entry once per duplicate. Net
+    effect: the delta table printed and counted one row multiple times, and
+    every duplicate beyond the first had its asserted value silently
+    discarded — not `missing`, not `NOT COMPARABLE`, not anything. Confirmed
+    by direct reproduction: a baseline with two rows keyed
+    `alloc_fill :: alloc+fill+sum f32` — the first matching the real run,
+    the second asserting a median ~30,000% away — printed the first row's
+    delta twice and exited **0** with "compare OK"; the second, wildly-off
+    assertion never surfaced anywhere. A second case (the same row
+    triplicated) showed the compared-row count inflated to 3 for one
+    distinct row's value, undercutting the truthful-counts promise
+    documented just above. Now treated as malformed input in the same class
+    as an unusable median or a wrong-typed field: `--compare` names the
+    offending key and how many times it appeared, and the exit code is
+    forced non-zero. Checked against all three files in this directory:
+    none contain a duplicate key, so this does not turn the local/CI
+    workflow red. Applied symmetrically to this run's own rows, not just
+    the baseline's, matching this file's existing both-sides-validated
+    precedent for a row's median.]**
+- **2 — pure regression.** The comparison itself ran cleanly (none of the
+  above fired) but at least one row regressed past the threshold outside
+  its err% band. If both 1- and 2-shaped problems occur in the same run, 1
+  wins — an infrastructure failure is the more serious claim and is never
+  silently downgraded to the softer, advisory-shaped 2.
+
+A `new` row (in this run, not the baseline) is **always** informational and
+never fails the run, at any filter level — nothing was asserted about a case
+that simply didn't exist yet. A `missing` row (in the baseline, not this
+run) is informational only for a **filtered** invocation; for a **whole-suite**
+invocation it is now fatal (exit 1 — see above). **[CORRECTED 2026-07-27:
+this line previously read "a row present on only one side (`new`/`missing`)
+is informational and never fails the run" — that symmetry is exactly what
+changed; see the `missing`-row bullet above.]** Every summary line
+`--compare` prints — the `OK` line and every `FAILED` line — now names how
+many rows were actually compared, how many were `new`, and how many were
+`missing`, so a clean-looking `OK` can no longer hide a suite that silently
+lost most of its rows to a rename.
+
+**Provenance (host/compiler/`-march`/flags/git SHA/measured-at) is reported
+and warned on, never enforced.** `--compare` prints both the baseline's and
+this run's provenance in its header, and names exactly which of
+host/compiler/`-march`/flags differ when they do — but this is visibility,
+not a gate: it never changes the exit code, and a baseline with a missing or
+malformed `meta` block is handled gracefully ("provenance unknown"), never a
+crash. Hard-failing on a mismatch was considered and rejected: a
+CI-generated baseline's `meta.host` is the ephemeral runner VM hostname,
+different on every run, so hard equality would make the committed CI
+compare job permanently red. Comparability across host/compiler/flags
+remains the operator's responsibility — see `docs/benchmarking.md` §8 for
+the full reasoning.
+
+A baseline that parses but yields zero comparable rows (every case object
+present has a legitimately empty `"results"` array) is reported loudly;
+whether it fails the run depends on the same whole-suite-vs-filtered
+distinction above. **[CORRECTED 2026-07-27: a `"benches"` array element that
+is not even a well-formed case shape is a DIFFERENT situation as of the
+malformed-element bullet above — each such element is now individually
+reported and forces exit 1 on its own, rather than only being visible here as
+an unexplained drop in the total row count.]**
+
+This is what makes a CI gate possible; see `docs/benchmarking.md`'s
+"Automated regression detection" passage (§8) for the full mechanics,
+including why the default threshold is **15%** (measured: six clean runs of
+one row showed an 8.85% cross-run spread with zero code changes, so 10%
+would false-alarm), the `--threshold <percent>` override, and how `err%`
+gating is a within-run sanity check layered on top of the threshold — **not**
+a substitute for it; `err%` cannot see cross-run drift. The err%-band itself
+is capped: once either side's own err% exceeds a fixed 10% ceiling
+(independent of `--threshold`), it is no longer trusted to license
+suppression, and the row falls through to the ordinary threshold check
+instead — otherwise an implausibly wide err% (measured: 150%) could suppress
+an arbitrarily large regression. A large improvement is flagged for a human
+to verify, not treated as a failure.
+
+**Manual, still valid for anything `--compare` doesn't cover** (a by-hand
+spot check, or a comparison across a suite/host/compiler `--compare` was
+never meant to key across):
+
+1. Re-run with `--baseline`.
+2. `git diff` the resulting `.json`/`.md` against what is committed.
+3. Read the medians yourself, weighing each against its `err%` — flag a
+   change **only when both the old and new runs have low err%** (otherwise
+   it is noise). There is no cross-run significance test beyond what
+   `--compare`'s threshold/err%-band mechanism gives you (§3.4 of
+   `docs/benchmarking.md`).
+
+**Sharp edge:** because `--baseline` overwrites the committed file in place
+without diffing first, running it and then `git add`ing the result — without
+a passing `--compare` or doing step 2 above — silently promotes whatever the
+new run measured (including a regression) to the baseline. The overwrite
+does not fail or warn if the new numbers are worse.
+
+**Sensitivity floor:** measured cross-run spread on unmodified code is on the
+order of ~3% for the epoch-tuned `passthrough_pipeline` case (see
+`docs/benchmarking.md` §9's note) but has been measured as high as **8.85%**
+for another row under the same epoch tuning (the figure `--compare`'s default
+threshold is built from). Treat "roughly 5-6%" as an optimistic floor for the
+manual eyeball process, not a guarantee — prefer `--compare` when in doubt.
+
+**Sharp edge — no scratch location for `--baseline`:** **[CORRECTED 2026-07-27: this heading
+originally asserted there is no scratch location for `--baseline`; that is no longer true —
+`--baseline-dir` (below) now provides one. The underlying clobber hazard is still real and
+unchanged; only the "no scratch location" gap is closed. See below for exactly what changed.]**
+The directory `--baseline` writes to (`VC_BENCH_BASELINE_DIR`)
+is still baked in at CMake **configure** time to
+`${CMAKE_CURRENT_SOURCE_DIR}/bench/baselines`, i.e. *this* directory, **by
+default** — that part is unchanged and still true. What changed: `--baseline`
+now accepts a **`--baseline-dir <path>`** CLI override, so there is no longer
+any need to run `--baseline` bare against a scratch location to try it out.
+`--baseline-dir <path> --baseline` writes to `<path>` instead of this
+directory, creating `<path>` (`mkdir -p`) if it does not already exist; the
+compiled-in default is completely unaffected when `--baseline-dir` is
+omitted. Always pass `--baseline-dir` pointed at a scratch directory (e.g.
+somewhere under `/tmp`) when experimenting with `--baseline` — **never** the
+bare flag against this checkout, for the reason below.
+
+This sharp edge **happened for real** once, before the override existed:
+while `--compare` was being built, a bare `--baseline` run clobbered the
+files in this directory and had to be reverted with `git checkout`. That
+history is kept here as a genuine warning, not softened by the fix above —
+`--baseline` (no `--baseline-dir`) still overwrites these committed files
+exactly as before; the override only adds a way to avoid pointing it here by
+accident. The old workaround (build and experiment in a full separate copy of
+the tree — a worktree or clone, since a separate *build* directory alone does
+not help) still works and is still valid for anything that isn't about the
+baseline-write location specifically, but is no longer the only option.

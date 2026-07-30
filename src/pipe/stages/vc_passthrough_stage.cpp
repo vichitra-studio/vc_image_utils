@@ -29,8 +29,8 @@ std::size_t vc_passthrough_stage::params_hash() const {
 void vc_passthrough_stage::declare(vc_pipe_contract& contract) const {
     // One image in, one image out. The typed slot descriptors carry BOTH the
     // slot name and its payload type — add_*_slot needs nothing else. By
-    // convention (no longer enforced by a write-only view) a stage's
-    // declare() only ever calls add_input_slot/add_output_slot on `contract`.
+    // convention (not enforced by the compiler) a stage's declare() only
+    // ever calls add_input_slot/add_output_slot on `contract`.
     contract.add_input_slot(slots::in);
     contract.add_output_slot(slots::out);
 }

@@ -56,7 +56,7 @@ TEST_CASE("vc_perf: scoped_timer reports nothing when perf is disabled") {
 }
 
 TEST_CASE("vc_perf: scoped_timer reports tag and label when enabled") {
-    // Currently red: requires scoped_timer's constructor/destructor to be
+    // Green: exercises scoped_timer's constructor/destructor, both
     // implemented.
     vc::utils::perf::set_enabled(true);
     vc::utils::log::set_enabled(true);

@@ -7,7 +7,7 @@
 #include <optional>
 #include <string>
 
-#include "vc/utils/vc_image_dumper.h"
+#include "vc/debug/vc_image_dumper.h"
 #include "vc/vc_image.h"
 
 #ifndef VC_TEST_OUTPUT_DIR
@@ -15,27 +15,27 @@
 #endif
 
 TEST_CASE("vc_image_dumper: set_enabled/enabled round-trip") {
-    vc::utils::debug::set_enabled(true);
-    CHECK(vc::utils::debug::enabled() == true);
-    vc::utils::debug::set_enabled(false);
-    CHECK(vc::utils::debug::enabled() == false);
+    vc::debug::set_enabled(true);
+    CHECK(vc::debug::enabled() == true);
+    vc::debug::set_enabled(false);
+    CHECK(vc::debug::enabled() == false);
 }
 
 TEST_CASE("vc_image_dumper: set_output_dir/output_dir round-trip") {
     const vc::io::path dir = std::string(VC_TEST_OUTPUT_DIR) + "/dumper_test";
-    vc::utils::debug::set_output_dir(dir);
-    CHECK(vc::utils::debug::output_dir() == dir);
+    vc::debug::set_output_dir(dir);
+    CHECK(vc::debug::output_dir() == dir);
 }
 
 TEST_CASE("vc_image_dumper: dump() is a no-op when disabled") {
     const vc::io::path dir =
         std::string(VC_TEST_OUTPUT_DIR) + "/dumper_test_disabled";
     std::filesystem::remove_all(dir);
-    vc::utils::debug::set_output_dir(dir);
-    vc::utils::debug::set_enabled(false);
+    vc::debug::set_output_dir(dir);
+    vc::debug::set_enabled(false);
 
     vc::vc_image img = vc::vc_image::zeros<vc::buf_f32>(4, 2, 3);
-    CHECK_NOTHROW(vc::utils::debug::dump("test", img));
+    CHECK_NOTHROW(vc::debug::dump("test", img));
 
     CHECK(std::filesystem::exists(dir) == false);
 }
@@ -44,26 +44,26 @@ TEST_CASE("vc_image_dumper: dump() never throws, even on internal failure") {
     const vc::io::path dir =
         std::string(VC_TEST_OUTPUT_DIR) + "/dumper_test_enabled";
     std::filesystem::remove_all(dir);
-    vc::utils::debug::set_output_dir(dir);
-    vc::utils::debug::set_enabled(true);
+    vc::debug::set_output_dir(dir);
+    vc::debug::set_enabled(true);
 
     vc::vc_image img = vc::vc_image::zeros<vc::buf_f32>(4, 2, 3);
-    CHECK_NOTHROW(vc::utils::debug::dump("test", img));
+    CHECK_NOTHROW(vc::debug::dump("test", img));
 
-    vc::utils::debug::set_enabled(false);
+    vc::debug::set_enabled(false);
 }
 
 TEST_CASE("vc_image_dumper: dump() writes a numbered file when enabled") {
-    // Currently red: requires both vc::utils::debug::write_dump() and
-    // vc::io::stb_image_writer::write() to be implemented.
+    // Green: exercises both vc::debug::write_dump() and
+    // vc::io::stb_image_writer::write(), both implemented.
     const vc::io::path dir =
         std::string(VC_TEST_OUTPUT_DIR) + "/dumper_test_writes";
     std::filesystem::remove_all(dir);
-    vc::utils::debug::set_output_dir(dir);
-    vc::utils::debug::set_enabled(true);
+    vc::debug::set_output_dir(dir);
+    vc::debug::set_enabled(true);
 
     vc::vc_image img = vc::vc_image::zeros<vc::buf_f32>(4, 2, 3);
-    vc::utils::debug::dump("resize", img);
+    vc::debug::dump("resize", img);
 
     // The counter is process-wide and globally-incrementing, not reset per
     // test/directory (vc_image_dumper.h) — so its value here depends on how
@@ -78,39 +78,37 @@ TEST_CASE("vc_image_dumper: dump() writes a numbered file when enabled") {
     }
     CHECK(found);
 
-    vc::utils::debug::set_enabled(false);
+    vc::debug::set_enabled(false);
 }
 
 TEST_CASE(
     "vc_image_dumper::dump_image_builder: deferred callable is not invoked "
     "when disabled") {
-    vc::utils::debug::set_enabled(false);
-    vc::utils::debug::dump_image_builder builder;
+    vc::debug::set_enabled(false);
+    vc::debug::dump_image_builder builder;
 
     bool invoked = false;
-    vc::utils::debug::dump("test",
-                           builder([&]() -> std::optional<vc::vc_image> {
-                               invoked = true;
-                               return vc::vc_image::zeros<vc::buf_f32>(4, 2, 3);
-                           }));
+    vc::debug::dump("test", builder([&]() -> std::optional<vc::vc_image> {
+                        invoked = true;
+                        return vc::vc_image::zeros<vc::buf_f32>(4, 2, 3);
+                    }));
 
     CHECK(invoked == false);
 }
 
 TEST_CASE("vc_image_dumper::dump_image_builder: deferred callable is invoked "
           "when enabled") {
-    vc::utils::debug::set_enabled(true);
-    vc::utils::debug::dump_image_builder builder;
+    vc::debug::set_enabled(true);
+    vc::debug::dump_image_builder builder;
 
     bool invoked = false;
-    vc::utils::debug::dump("test",
-                           builder([&]() -> std::optional<vc::vc_image> {
-                               invoked = true;
-                               return vc::vc_image::zeros<vc::buf_f32>(4, 2, 3);
-                           }));
+    vc::debug::dump("test", builder([&]() -> std::optional<vc::vc_image> {
+                        invoked = true;
+                        return vc::vc_image::zeros<vc::buf_f32>(4, 2, 3);
+                    }));
 
     CHECK(invoked == true);
-    vc::utils::debug::set_enabled(false);
+    vc::debug::set_enabled(false);
 }
 
 TEST_CASE(
@@ -119,30 +117,29 @@ TEST_CASE(
     const vc::io::path dir =
         std::string(VC_TEST_OUTPUT_DIR) + "/dumper_test_nullopt";
     std::filesystem::remove_all(dir);
-    vc::utils::debug::set_output_dir(dir);
-    vc::utils::debug::set_enabled(true);
-    vc::utils::debug::dump_image_builder builder;
+    vc::debug::set_output_dir(dir);
+    vc::debug::set_enabled(true);
+    vc::debug::dump_image_builder builder;
 
-    vc::utils::debug::dump(
-        "test",
-        builder([&]() -> std::optional<vc::vc_image> { return std::nullopt; }));
+    vc::debug::dump("test", builder([&]() -> std::optional<vc::vc_image> {
+                        return std::nullopt;
+                    }));
 
     CHECK(std::filesystem::exists(dir) == false);
-    vc::utils::debug::set_enabled(false);
+    vc::debug::set_enabled(false);
 }
 
 TEST_CASE("vc_image_dumper::dump_image_builder: tag_enabled(false) suppresses "
           "this instance's messages") {
-    vc::utils::debug::set_enabled(true);
-    vc::utils::debug::dump_image_builder builder(false);
+    vc::debug::set_enabled(true);
+    vc::debug::dump_image_builder builder(false);
 
     bool invoked = false;
-    vc::utils::debug::dump("test",
-                           builder([&]() -> std::optional<vc::vc_image> {
-                               invoked = true;
-                               return vc::vc_image::zeros<vc::buf_f32>(4, 2, 3);
-                           }));
+    vc::debug::dump("test", builder([&]() -> std::optional<vc::vc_image> {
+                        invoked = true;
+                        return vc::vc_image::zeros<vc::buf_f32>(4, 2, 3);
+                    }));
 
     CHECK(invoked == false);
-    vc::utils::debug::set_enabled(false);
+    vc::debug::set_enabled(false);
 }

@@ -378,10 +378,14 @@ dormant.
 
 ### 5.1 What exists today, and what it already solves
 
-[VERIFIED against source, 2026-07] `vc_pixel_buffer` is a **runtime-typed** store:
+[VERIFIED against source, 2026-07-27] `vc_pixel_buffer` is a **runtime-typed** store:
 `std::variant<std::vector<buf_f32>, std::vector<buf_u8>, std::vector<buf_u16>>`, with
-`dtype()`, `size()`, and typed `as<T>()` access. `vc_image` holds `width_ / height_ /
-channels_` and a `pixel_buffer_ptr` (a `shared_ptr<vc_pixel_buffer>`).
+`dtype()`, `size()`, and typed `as<T>()` access. `vc_image` composes a `vc_image_info`
+(geometry: `width()`/`height()`/`channels()` — the `vc_image_spec` seed, §5.3) and a
+`const_pixel_buffer_ptr` (a `shared_ptr<const vc_pixel_buffer>`) — the raw `width_ /
+height_ / channels_` members this paragraph originally described were later extracted
+into `vc_image_info` so `vc_image_writer` could share the same geometry logic
+(`include/vc/vc_image_info.h`).
 
 The choice of a **runtime variant** rather than a templated `vc_pixel_buffer<T>` is deliberate
 and correct (see `vc_pixel_buffer.h` and `coding_guidelines.md` §3.1): templating the element
@@ -409,7 +413,7 @@ Two concrete, verified tells:
 - **Layout is implicit.** `vc_image` stores `w*h*channels` flat elements; whether that is planar
   (curriculum-mandated) or interleaved (what stb produces) is written down nowhere. Two stages
   disagreeing on this silently corrupt pixels.
-- **A display-referred fossil.** `vc_pixel_buffer.h` comments the `f32` dtype as
+- **A display-referred fossil.** `vc_types.h`'s `pixel_dtype` enum comments the `f32` value as
   `// normalised [0.0, 1.0]`. Scene-referred Linear Rec.2020 is explicitly *unbounded* (values
   above 1.0 are the point of HDR). That comment marks an assumption the merge pipeline will
   break; it is a [LATER] tension, recorded now.
@@ -492,6 +496,7 @@ stages, and it is opt-in.**
 |---|---|---|---|
 | Slot name / local payload type (within a stage) | slot typo; wrong local type annotation | **compile time** | enum keys + per-stage type trait (§4.3) |
 | Inter-stage **type** contract | `vc_image` vs `matrix3` mismatch across a connection | **graph-assembly time** (runtime) | declared **output type** vs declared **input `expects<T>`** — comparing *declarations*; no packet exists yet |
+| **Topology** (backwards edge / self-loop, §12.10) | a connection whose producing stage was `add()`ed at or after its consuming stage — the runner is linear (insertion order), so it could never run forwards | **graph-assembly time** (runtime) | per-edge index comparison (`add()` position of `from` vs `to`); a distinct diagnostic when `from == to` (self-loop) |
 | Inter-stage **data** contract | planar-linear-f32 vs bayer-u16-native mismatch | **graph-assembly time** (runtime) | `vc_image_spec` propagation — again comparing *declarations* (§5.4) |
 | Packet unbox (`any_cast`) + optional assertion | payload actually matches its slot | **execution time** | `std::any_cast` inside `ctx.in<>()`; guaranteed to pass in a graph that cleared assembly-time validation, so never throws in a well-formed pipeline |
 
@@ -655,14 +660,15 @@ definition; everything else is a projection of it, in lowered form:
 | slot definition (name + type), authoring | `slot<T>` | **public** (stage authors) |
 | slot identity | `slot_name` (string) | public |
 | payload type | the C++ type / `std::type_index` | — |
-| author-facing contract surface | `contract_builder` (write-only view) | **public** (stage authors) — see §12.6 |
+| author-facing contract surface | `vc_pipe_contract&` directly — ⚠️ **superseded (§12.8)**: the write-only `contract_builder` view described here was removed; `declare()` now takes the contract itself | **public** (stage authors) — see §12.8 |
 | declared slot (runtime record) | `slot_decl { name, type_index }` | **private to `vc_pipe_contract`** |
 | graph coordinate / `run()` map key | `stage_port { stage_name, slot_name }` | framework/assembly (§12.6) |
 
 Exactly **three** slot representations, each with one job: `slot<T>` authors, `slot_decl` stores
 (private), `stage_port` wires. `slot<T>` appears only at the author-facing call sites
-(`contract_builder::add_input_slot` / `add_output_slot`, `ctx.get_input`, `ctx.set_output`, and
-`connect`) and is gone by the next line — it never propagates or is stored. `stage_port` is the graph
+(`contract.add_input_slot` / `add_output_slot` on `vc_pipe_contract&` directly — ⚠️ **superseded
+(§12.8)**: the `contract_builder` this once named is gone — plus `ctx.get_input`, `ctx.set_output`,
+and `connect`) and is gone by the next line — it never propagates or is stored. `stage_port` is the graph
 coordinate: `connect` builds them from `slot<T>` and `run()` keys its maps by them. **Visibility is
 decided by audience — *what may a stage author or external caller touch?*** The author-facing surface
 is `slot<T>`-only; name-keyed methods (`stage_port`'s string ctor, the contract's type/name lookups,
@@ -739,6 +745,10 @@ restated-string cost the deferred `add()`-returns-a-handle ergonomics in §12.4 
 
 **`run` — the map variant (not the 1-in / 1-out form).**
 - `std::unordered_map<port, vc_packet> run(std::unordered_map<port, vc_packet> inputs) const;`
+  — this sketch's names (`port`, `vc_packet`) predate this doc's `stage_port`/`vc_pipe_packet`
+  rename and its signature predates the built `run_context` parameter (see the dated note
+  below); read it as `render_io_map run(render_io_map inputs, const vc_render_context&
+  run_context = {}) const;`, the actual signature in `vc_pipeline.h`.
 - **Inject** the caller's packets onto the **open inputs** (input slots no connection feeds) →
   **execute** stages in insertion order → **harvest** the **open outputs** (output slots no
   connection consumes) into the returned map.
@@ -746,8 +756,23 @@ restated-string cost the deferred `add()`-returns-a-handle ergonomics in §12.4 
   `[LATER]`.
 - The caller's input map must cover **exactly** the open inputs — a missing or extra key is an error.
 - Only **open** outputs are returned; an intermediate output consumed by a connection is *not*
-  observable via `run()` (use `vc::utils::debug::dump()` to inspect mid-pipeline).
-- Body is `TODO(you)`.
+  observable via `run()` (use `vc::debug::dump()` to inspect mid-pipeline).
+- **Body is implemented, not `TODO(you)`** — and, as of 2026-07-27, decomposed into two
+  private helpers (behavior-preserving refactor, `vc_pipeline.cpp`): `resolve_stage_inputs()`
+  (one stage's input packet map, resolved from the caller's open inputs or an upstream
+  connection's output — including the `remaining_reads` fan-out bookkeeping, §12.9) and
+  `harvest_open_outputs()` (checks every declared open output was published, then erases
+  everything else from the accumulated outputs map). `run()`'s own body now just orchestrates:
+  compute open input/output ports, inject the caller's map, execute stages in insertion order
+  calling the two helpers around each stage's `process()`, then return the harvested map.
+
+> **Reconciliation debt — partially closed 2026-07-27.** `edit_model.md` §14 lists three amendments
+> that doc requests against this one's `run()` contract, "to be reconciled here when built":
+> **(a)** `vc_render_context`, **(b)** taps/injections, **(c)** a resolution/ROI render request.
+> (a) is now built (`run_context`, above) **and** reconciled — see §12.11, which documents the
+> token/source split, where cancellation is actually checked, and the test proving it reaches
+> `vc::edit::render_image`. (b) and (c) remain unbuilt and undocumented here; this reconciliation
+> closes one of the three debts, not all three.
 
 > **`make_port(stage_name, slot<T>) → port`** [DECIDED] closes this — `run()`'s map keys are built
 > typo-safely from a slot descriptor, matching `connect()`'s safety:
@@ -757,7 +782,11 @@ restated-string cost the deferred `add()`-returns-a-handle ergonomics in §12.4 
 
 **`validate`.** Build each stage's contract via `declare()`, then per connection compare
 `output_type(out)` against `input_type(in)`; throw on a missing slot or a `type_index` mismatch.
-Type layer only; the data layer is `[LATER]`. Body is `TODO(you)`.
+Type layer only; the data layer is `[LATER]`. **Body is implemented, not `TODO(you)`** — and
+does more than this bullet originally described: it also rejects duplicate input wiring (two
+connections targeting the same input port — added 2026-07-22, §12.8, not repeated here) and, as
+of 2026-07-27, a **topology** check (backwards connection / self-loop — §12.10) run before the
+type check for every connection.
 
 **Stages.** Each: ctor takes a `stage_name` → forwards to `i_pipe(name)`; implements `kind()`;
 defines its `slots`. `vc_passthrough_stage` is the fully-implemented **worked reference** and the
@@ -788,7 +817,7 @@ an ownership check (`use_count() == 1`) is `[LATER]`.
 | E | `port` + `operator==` / `std::hash` + `make_port(name, slot<T>)`; `connect(name, slot<T>, name, slot<U>)` | me |
 | F | `vc_pipeline`: `run()` → **map variant**; `validate()` uses type projections | signatures me · **bodies you** |
 | G | Stages: name / kind / `slots`; passthrough implemented; grayscale + mean-brightness `TODO(you)` — ⚠️ **superseded 2026-07-26**: those two (and blur) moved to `tests/samples/` as `vc_sample_*` with kernels now written; see the note in §12.2 | me (shells) · **bodies you** |
-| H | Tests updated to the new API; green primitives + red-spec (incl. a multi-input map-`run` case) | me |
+| H | Tests updated to the new API; green primitives + red-spec (incl. a multi-input map-`run` case) — ⚠️ **superseded 2026-07-27**: `test_vc_pipe.cpp` is now all green, no red-spec remains (the multi-input map-`run` case included) | me |
 
 Also in this batch (me): `vc_pipe_context` gains the author-facing `in(slot<T>)` /
 `set_output(slot<T>)` overloads (§12.2), keeping its runner-facing string-keyed methods.
@@ -1112,3 +1141,159 @@ state fix. The day the non-linear/topological runner is actually being built is 
 graph representation (canonical edge list + adjacency built as *indices*, grouped by source node;
 per-node status for cycle detection during traversal) earns its cost — build it then, informed by
 that runner's actual traversal pattern, not preemptively now.
+
+### 12.10 `validate()` topology check — rejects backwards edges, and cycles for free (2026-07-27)
+
+**The gap this closes.** Nothing in `validate()` previously checked that a connection could
+actually *run*. §12.9 already established that the runner is **linear** — stages execute in
+`add()`/insertion order, no topological sort (§7, §8.2, §12.9) — but before this change a
+connection wired "backwards" (its consumer `add()`ed before its producer) passed `validate()`
+cleanly and only failed later, inside `run()`, with a `throw_pipe_run_error("missing output from
+upstream stage: ...")` — a correct but late and confusingly-worded diagnostic for what is really
+an assembly-time graph defect, not a runtime data-availability one.
+
+**The fix.** `validate()` now builds a `stage_name -> index` map from `stages_`'s current order
+(the same order `run()` executes in — one canonical ordering, not a second one kept in sync) and,
+for every connection, compares the producing stage's index against the consuming stage's index
+**before** the existing type-contract check (a backwards wire can never run regardless of whether
+its types happen to match, so the topology diagnostic is the more useful of the two to surface
+first). Both outcomes below report through a **new** `vc_error_code` enumerator,
+`pipe_invalid_topology` — added by this change, positioned right after the pre-existing
+`pipe_connection_mismatch` in `vc_error_code.h`, and wired into both of that header's exhaustive
+switches (`src/vc_error_code.cpp`) — rather than overloading `pipe_connection_mismatch` for a
+failure that has nothing to do with a type mismatch. Two outcomes:
+- `from_pos < to_pos` fails ⇒ `vc::vc_error_code::pipe_invalid_topology`, a "backwards
+  connection" message naming both stages and explaining *why* (the consumer would run before the
+  producer ever produces its output).
+- `from_stage == to_stage` (a self-loop, where `from_pos == to_pos` trivially, so the general
+  "added before" wording would read as false-by-accident) gets its own distinct message instead —
+  "a stage cannot consume its own output — the runner executes stages once, in insertion order,
+  not in a fixed-point loop" — under the **same** `pipe_invalid_topology` code (it is the
+  degenerate case of the same check, not a different failure mode; `pipe_connection_mismatch` is
+  reserved for the type-contract check below).
+
+**Why one check does both jobs.** The graph is a total order by construction (`add()` assigns
+each stage a strictly increasing index; there is no other way to add a stage). Any cycle, in any
+total order, must contain **at least one edge that points backwards** relative to that order —
+if every edge in a cycle pointed forwards, following them would strictly increase the index
+forever, which is impossible in a finite order. So rejecting every backwards edge (self-loops
+included, as the degenerate 1-node cycle) **is** cycle rejection — for free, as a side effect of
+the linear-runner constraint the codebase already has, with **no topological sort, no visited-set
+DFS, and no change to `vc_pipeline`'s storage shape** (which §12.9 deliberately left as the
+`stages_`/`connections_`/`contracts_` triad). This is the same "don't build graph machinery the
+current scale and runner shape don't need" stance §12.9 already took, applied to a second
+question (validity, not storage).
+
+**Ordering relative to the other `validate()` checks.** Per connection: `require_contract()` on
+both stages runs first (an unknown stage gets `stage_not_found`, not a confusing "position lookup
+missing" failure, since `position` — like `contracts_` — only knows about `add()`ed stages); then
+the topology check (this section); then the pre-existing type-contract check (§12.2's `validate`
+bullet). Duplicate-input-wiring rejection (§12.8) is checked earliest of all, per connection,
+before any of the above — it is unrelated to ordering and already documented there, not repeated
+here.
+
+**Test coverage:** `tests/test_vc_pipe.cpp` has one case for a stage-added-out-of-order backwards
+connection and one for a self-loop; both assert that `validate()` now throws at assembly time
+(catching a `vc::vc_exception`) rather than deferring the failure to `run()`, as it would have
+before this change. Each also catches the exception and checks
+`e.code() == vc::vc_error_code::pipe_invalid_topology` specifically — not just that *some*
+exception was thrown — so a future regression that fires the pre-existing
+`pipe_connection_mismatch` code (or any other) instead of the dedicated topology one would fail
+the test. The backwards-edge case's comment spells out the exact "missing output from upstream
+stage" message `run()` used to produce instead.
+
+### 12.11 Cancellation (`vc_render_context`) — amendment (a) reconciled (2026-07-27)
+
+**The debt this closes.** `edit_model.md` §14 lists three amendments that doc requests against
+this one's `run()` contract, "to be reconciled here when built": **(a)** a `vc_render_context`
+(control-only host wrapping the cancellation token now, a progress seam `[LATER]`), **(b)**
+`taps` + `injections` (read/write any slot), **(c)** a resolution/ROI render request. §12.2 already
+flagged that (a) had been *built* (`run_context`, in the `run` bullet) while this doc's own prose
+still said nothing about cancellation anywhere — a reconciliation debt noted but not paid. This
+section pays it. Only (a). (b) and (c) are untouched by this change and remain unbuilt and
+undocumented here — closing one of three debts, not three of three.
+
+**The token/source split, and why two types instead of one.** `vc_cancellation_source`
+(`vc_cancellation_token.h`) owns a `cancellation_flag` (`shared_ptr<atomic<bool>>`) and is the only
+thing that can flip it (`cancel()`); `vc_cancellation_token` is a cheap, copyable, read-only
+observer over the same flag, obtained only via `source.token()`. This is **CQS** (command/query
+separation) and **least privilege** applied to one shared cell: whoever drives a render (the UI/CLI
+layer) holds the source and may command a stop; everything downstream of it — `vc_render_context`,
+every per-stage `vc_pipe_context`, and by extension a stage's `process()` body — holds only a
+token and can query, never command. A stage cannot accidentally (or deliberately) cancel a run it
+did not initiate, because nothing reachable from a token exposes `cancel()`.
+
+A single polymorphic type (one class, a virtual `cancelled()`, source and observer both instances
+of it with the command surface gated some other way — a derived-class split, or a runtime flag)
+was considered and rejected. Two costs, both load-bearing: it would **lose the cheap-copyable
+value semantics** the token has now — `vc_render_context` wraps a token by value and is itself
+copied into every stage's `vc_pipe_context` (§ below), and a polymorphic type either needs
+reference/pointer semantics (reintroducing the ownership/lifetime questions the shared_ptr-backed
+flag was built to avoid) or a heap-allocated base copied by value on every stage boundary; and it
+would add a **virtual call on the one path this project's cancellation model is built to make
+cheap** — `cancelled()` is read once per stage in the tightest loop `vc_pipeline::run()` has
+(below), so a non-virtual `bool` load through a plain pointer beats indirect dispatch there with
+nothing bought in return (there is no second implementation of "observe a flag" to substitute).
+The two-type split gets the same safety property (an observer cannot command) for less: no
+inheritance, no vtable, and a token that is exactly as cheap to copy as the `shared_ptr` it wraps.
+
+**`vc_render_context` is control-only, and deliberately does not hold the derived-data cache.**
+`vc_render_context` (`vc_render_context.h`) wraps exactly one `vc_cancellation_token` today and
+reserves a `[LATER]` progress-reporting seam (a callback/handle a long stage could report
+fractional completion through — not built now, since no consumer of progress exists yet). It does
+**not** carry the cache `vc_edit_session`/`build_pipeline` hold (`vc_cached_edits_table` etc.):
+control (may this run continue?) and cache (what derived data already exists?) are different
+concerns with different lifetimes and different owners, and threading them through the same
+parameter would make a "control-only" host a grab-bag the moment a second concern needed a ride.
+The cache reaches a stage through `vc_edit_session`/`build_pipeline`'s own wiring, not through
+`vc_render_context` — this doc's `run()` signature carries only the former.
+
+**Where checks actually happen, and the granularity that implies.** `vc_pipeline::run()`
+(`vc_pipeline.cpp`) calls `vc::pipe::throw_if_cancelled(run_context)` — which throws
+`vc::vc_exception(vc::vc_error_code::user_cancelled, ...)` if `run_context.cancelled()` — at **six**
+points: once before validating the caller's input map, once after the fan-out bookkeeping
+(`remaining_reads`) is built and immediately before the stage loop, once **per stage**,
+immediately before that stage's `process()` call (inside the `for (const auto& pipe : stages_)`
+loop), once after the loop, once inside `harvest_open_outputs()` before its `erase_if`, and once
+more immediately before `run()` returns. The per-stage check fires **before** each `process()`, not
+after. The practical consequence: **cancellation granularity is one whole stage.** A cancel
+requested while a stage's `process()` is actually running is not observed until that call returns —
+`run()` cannot interrupt a stage mid-flight, only decline to start the next one (or decline to
+harvest/return) once it notices the flag. This is why
+`vc_pipe_context` also threads the same `run_context` into each stage (by value, so a context never
+outlives the run it was built from) and exposes it via `run_context()`: a stage MAY add its own
+in-process checkpoint by reading `context.run_context().cancelled()` partway through a long kernel,
+narrowing that granularity for itself. **No stage does yet** (confirmed by grep — nothing in
+`tests/samples/` or `src/pipe/stages/` calls `run_context()` or `cancelled()`), including
+`tests/samples/vc_sample_blur_stage`, the longest-running stage in the tree and the one whose
+kernel would most benefit from an in-process checkpoint; it relies on the between-stage check
+alone. A real gap, and an acceptable one — the seam exists for exactly this, unused until a stage's
+runtime actually motivates it.
+
+**Purely additive.** `run(render_io_map inputs, const vc_render_context& run_context = {})` adds
+`run_context` as a **trailing default parameter** — every one-argument call site that predates this
+change binds a default-constructed context, which wraps a default-constructed token, which has a
+null flag and therefore reads as permanently not-cancelled (`vc_cancellation_token::cancelled()`
+short-circuits on the null `shared_ptr`). No existing caller's behavior changes. The same shape
+repeats one layer up: `vc_pipe_context`'s constructor gained a trailing defaulted `run_context`,
+and `vc::edit::render_image`/`vc::edit::export_image` (`vc_render_image.h`/`vc_export.h`) both gained
+a trailing defaulted `vc_render_context` parameter for the same reason.
+
+**Reachable end-to-end — through `render_image`, not yet through `export_image`.**
+`vc::edit::render_image` (`vc_render_image.cpp`) forwards its `run_context` parameter, unmodified,
+straight into `built.pipeline.run(std::move(built.inputs), run_context)` — so a pre-cancelled
+context passed to `render_image` surfaces as a thrown `user_cancelled` exception, proven by
+`tests/test_vc_edit.cpp`'s *"render_image: propagates cancellation through build_pipeline's graph
+into vc_pipeline::run()"*: it pre-cancels a `vc_cancellation_source`, wraps its token in a
+`vc_render_context`, passes that into `render_image`, and asserts the catch specifically checks
+`e.code() == vc::vc_error_code::user_cancelled`. `vc::edit::export_image` (`vc_export.h`) also
+carries the trailing `vc_render_context` parameter in its signature, but its body is still one of
+this learning build's three deliberate `TODO(you)` shells — the TODO comment names forwarding
+`run_context` into `render_image()` as exactly what the user's rep is expected to write, but until
+that body exists, cancellation reaches `render_image` and `vc_pipeline::run()`, not (yet) a caller
+going through `export_image`.
+
+**What remains unreconciled.** (b) taps/injections (read/write any slot mid-run) and (c) a
+resolution/ROI render request are both still **unbuilt**, and this doc still says nothing about
+either — this section closes only the (a) debt `edit_model.md` §14 flagged; (b) and (c) stay open
+for whoever builds them next.

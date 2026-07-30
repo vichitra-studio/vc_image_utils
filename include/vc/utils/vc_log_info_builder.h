@@ -9,7 +9,7 @@
 
 namespace vc::utils {
 
-// Shared base for vc::utils::log::log_info_builder and vc::utils::debug::
+// Shared base for vc::utils::log::log_info_builder and vc::debug::
 // dump_image_builder — the one place a deferred callable (F&&) gets resolved
 // into std::optional<T>: the info a derived class builds, gated by
 // should_build(), a subsystem-specific condition each derived class
@@ -17,6 +17,16 @@ namespace vc::utils {
 // tag_enabled() (see log_info_builder/dump_image_builder) — the base doesn't
 // enforce that itself, since should_build() has to stay a simple, opaque
 // predicate to remain virtual (see below).
+//
+// dump_image_builder's inheritance from this base spans a package boundary
+// deliberately: vc::debug is a top-level namespace with its own
+// include/vc/debug and src/debug directories (docs/coding_guidelines.md
+// Sec 2.1), while this base stays put in vc::utils. That split is fine —
+// this base enforces SHAPE (the deferred-resolution mechanics below), not
+// namespace co-location, and log_info_builder already inherits across the
+// vc::utils/vc::utils::log boundary the same way. Do not "fix" this by
+// dragging log_info_builder_base into vc::debug to sit next to its
+// derived class.
 //
 // vc::utils::perf::scoped_timer does NOT use this — it only ever reports
 // once, at destruction, using an enabled() answer already captured at

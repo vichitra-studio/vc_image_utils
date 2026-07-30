@@ -19,10 +19,19 @@ repos:
         # Vendored third-party code keeps its own license — never inject ours.
         exclude: ^third_party/
 
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v22.1.8
+    hooks:
       - id: clang-format
         name: clang-format (C/C++ formatting)
-        entry: clang-format -i
-        language: system
+        # Pinned (like addlicense above) rather than "language: system": the
+        # tree was normalized under clang-format 22.1.8, and an unpinned
+        # system hook runs whatever version a contributor happens to have —
+        # a different major version fails the hook and dirties the tree on
+        # their very first commit. This mirror downloads 22.1.8 itself
+        # (see its pinned setup.py), so every contributor formats with the
+        # same binary regardless of what (if anything) is on their PATH.
+        args: ["-style=file"]
         # Matches the same extension set as addlicense (minus .py/.sh — clang-format is C/C++ only).
         files: \.(c|cc|cxx|cpp|h|hh|hpp|hxx|inl|ipp|tpp)$
         # Never auto-format vendored headers — preserves upstream diff-ability.

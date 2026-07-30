@@ -9,17 +9,43 @@
                                       // definition, not a forward declaration
                                       // (an incomplete-type value member is
                                       // ill-formed).
-#include "vc/edit/vc_image_meta.h" // i_image_meta + the image_metadata_handle alias;
-                                   // a light header (<any>/<memory>/<optional>/
-                                   // <string>/<unordered_map>), so including it
-                                   // directly is cheap and avoids a forward
-                                   // declaration + locally-restated alias.
+// i_image_meta now lives in core (vc/vc_image_meta.h, demoted 2026-07-28 —
+// see that header's comment and docs/edit_model.md Sec 6). This member only
+// names the INTERFACE, never vc_memory_image_meta, so the interface-only
+// header (<memory>/<optional>/<string> + vc/vc_any_box.h) is enough — a
+// light header, so including it directly is cheap and avoids an extra
+// forward declaration. The image_metadata_handle alias below is NOT part of
+// that core header: it names the session's OWNING overlay handle, which is
+// edit-local state (docs/edit_model.md Sec 6's "two layers, merged on
+// export"), not a core concept, so it is declared here instead.
 #include "vc/vc_image.h"
+#include "vc/vc_image_meta.h"
 
 namespace vc::edit {
 
-class vc_persistent_edits_table; // fwd — held by a non-owning, non-null reference
-class vc_cached_edits_table;  // fwd — held by a non-owning, non-null reference
+// The owning metadata handle: session-local mutable overlay state, as
+// distinct from the image's own composed, immutable
+// shared_ptr<const i_image_meta> (vc::const_image_meta_ptr, vc_image_info.h).
+// Kept here (not beside i_image_meta in core) because nothing in core needs
+// a unique_ptr<i_image_meta> — only vc_edit_session's overlay does.
+using image_metadata_handle = std::unique_ptr<i_image_meta>;
+
+// Two forward declarations remain even though the MEMBERS below no longer
+// mention them by name: the constructor still takes these two concrete
+// types by reference (see the ctor declaration for why), and a reference
+// parameter needs its type at least declared. i_edit_table (also fwd here)
+// is what the members/accessors are typed as instead — a forward
+// declaration suffices for both: nothing in this header dereferences or
+// calls through any of the three, so no complete type is needed until
+// vc_edit_session.cpp, which includes vc_edit_table.h (for i_edit_table's
+// definition) plus vc_cached_edits_table.h/vc_persistent_edits_table.h (for
+// the two concrete types' definitions) — needed there for the upcast from
+// concrete& to i_edit_table& done in the member-init list.
+class i_edit_table;              // fwd — the MEMBERS' type (storage is USED)
+class vc_persistent_edits_table; // fwd — a CTOR PARAM's type (identity is
+                                 // ESTABLISHED)
+class vc_cached_edits_table;     // fwd — a CTOR PARAM's type (identity is
+                                 // ESTABLISHED)
 
 // Everything about ONE image. Storage is deliberately SPLIT — the different
 // kinds of data (edit settings, image metadata, derived pixel data) have
@@ -42,6 +68,19 @@ class vc_cached_edits_table;  // fwd — held by a non-owning, non-null referenc
 // is held to the SAME non-null contract as persistent_/cache_: the
 // constructor throws if `meta` is null, so meta() can hand back a plain
 // reference. Composition + accessors are plumbing, not reps.
+//
+// DIP split: the MEMBERS and their accessors are typed `i_edit_table&`, not
+// the concrete `vc_persistent_edits_table`/`vc_cached_edits_table` — both
+// concrete stores' entire public surface is exactly ctor + get() + set(),
+// i.e. nothing beyond i_edit_table, so a consumer of persistent()/cache()
+// should depend on the interface it actually uses. The CONSTRUCTOR
+// PARAMETERS stay the concrete types on purpose, though: two same-typed
+// `i_edit_table&` parameters could be silently swapped positionally by a
+// caller (both compile identically), whereas distinct concrete parameter
+// types make that mistake a compile error. The rule applied is
+// "abstraction where storage is USED [accessors/members], type safety
+// where identity is ESTABLISHED [the ctor]" — the two members are
+// upcast-initialized from the concrete ctor params in the .cpp.
 class vc_edit_session {
   public:
     // The metadata handle is a std::unique_ptr<i_image_meta>; the destructor
@@ -59,7 +98,8 @@ class vc_edit_session {
     // only here, at construction, and the constructor throws vc::vc_exception
     // if `meta` is null. Every caller must supply a real (even if trivial
     // in-memory) metadata backend, same as the two store references.
-    vc_edit_session(vc_image source, vc_edit_document edits,
+    vc_edit_session(vc_image source,
+                    vc_edit_document edits,
                     image_metadata_handle meta,
                     vc_persistent_edits_table& persistent,
                     vc_cached_edits_table& cache);
@@ -88,20 +128,23 @@ class vc_edit_session {
 
     // NON-OWNING, NON-NULLABLE references: each store outlives the session
     // and has its own durability/lifecycle, so the session merely
-    // references it.
-    vc_persistent_edits_table& persistent() noexcept {
+    // references it. Typed `i_edit_table&` (not the concrete store type) —
+    // see the DIP note on the class comment above.
+    i_edit_table& persistent() noexcept {
         return persistent_;
     }
-    vc_cached_edits_table& cache() noexcept {
+    i_edit_table& cache() noexcept {
         return cache_;
     }
 
   private:
-    vc_image source_;         // immutable; shallow-shared via its shared_ptr buffer
-    vc_edit_document edits_;  // by value; the source of truth for editing
-    image_metadata_handle meta_;    // owning handle; non-null after construction
-    vc_persistent_edits_table& persistent_; // non-owning; non-nullable
-    vc_cached_edits_table& cache_;       // non-owning; non-nullable
+    vc_image source_; // immutable; shallow-shared via its shared_ptr buffer
+    vc_edit_document edits_;     // by value; the source of truth for editing
+    image_metadata_handle meta_; // owning handle; non-null after construction
+    i_edit_table& persistent_;   // non-owning; non-nullable; upcast from the
+                                 // ctor's vc_persistent_edits_table& param
+    i_edit_table& cache_;        // non-owning; non-nullable; upcast from the
+                                 // ctor's vc_cached_edits_table& param
 };
 
 } // namespace vc::edit

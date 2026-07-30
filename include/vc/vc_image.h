@@ -10,6 +10,28 @@
 #include "vc/vc_image_writer.h"
 #include "vc/vc_types.h"
 
+// vc_image and vc_image_writer are mutually dependent BY DESIGN, not an
+// accidental cycle: this header #includes vc_image_writer.h (the inline
+// zeros()/with_fill() factories below construct a writer and call seal() to
+// get their return value), while vc_image_writer.h only forward-declares
+// vc_image (it needs the type to name seal()'s return type, but not its full
+// definition) and vc_image itself declares `friend class vc_image_writer` so
+// seal() reaches the private constructor below. Contrast with the analogous
+// forward declaration in vc_image_info.h (~lines 11-25 there): that one is a
+// ONE-WAY dependency (vc::edit depends on core, never the reverse), so a
+// forward declaration there is a genuine, if currently untested, layering
+// boundary — it would become load-bearing rather than just tidy if the
+// edit/core split ever gets its own CMake targets. This pair is different in
+// kind, not degree: the dependency runs BOTH ways (vc_image.h needs the
+// writer's full definition to call seal(); vc_image_writer.h needs vc_image
+// as a friend's return type), so there is no direction in which one could be
+// built without the other — nothing is gained by trying to keep them
+// physically separate. The immutability guarantee (Sec 4.2) is unaffected by
+// this coupling either way — it comes from vc_image's public interface
+// exposing no mutable accessor, not from which files include which. If
+// `core` (the vc_image/vc_image_writer/vc_pixel_buffer cluster) is ever
+// split into its own build target, these two would merge into one physical
+// component rather than being split across the boundary.
 namespace vc {
 
 // An immutable, shareable image — the value that flows between pipeline stages.
@@ -97,7 +119,7 @@ class vc_image {
     // construct an image from a raw buffer.
     friend class vc_image_writer;
     vc_image(vc_image_info meta, const_pixel_buffer_ptr pixels)
-        : meta_(meta), pixels_(std::move(pixels)) {
+        : meta_(std::move(meta)), pixels_(std::move(pixels)) {
     }
 
     vc_image_info meta_;

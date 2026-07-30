@@ -18,8 +18,8 @@ namespace vc::pipe {
 // by the caller at construction — NOT derived from an edit session (see the
 // header comment on vc_sample_blur_stage below).
 struct vc_sample_blur_params {
-    double radius = 1.0;     // blur radius, in source pixels
-    bool normalize = true;   // divide by the kernel weight (energy-preserving)
+    double radius = 1.0;   // blur radius, in source pixels
+    bool normalize = true; // divide by the kernel weight (energy-preserving)
 };
 
 // A SAMPLE stage (image -> image): a box blur, the worked reference for a
@@ -42,6 +42,10 @@ class vc_sample_blur_stage : public i_pipe {
   public:
     // Params are resolved BEFORE construction and captured here: the
     // stage is stateless per run, so process() needs no param argument.
+    // Throws vc::vc_exception if params.radius is not a positive, non-NaN
+    // value — radius is fully known at this point (it never depends on a
+    // run-time input), so it is validated HERE rather than deferred to
+    // validate_inputs()/process() time.
     vc_sample_blur_stage(stage_name name, vc_sample_blur_params params);
 
     // This stage's typed slots — the ONE place its ports are named and typed.

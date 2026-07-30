@@ -22,4 +22,9 @@ BinPackParameters: false             # one parameter per line when a signature w
 AlignTrailingComments:
   Kind: Always
   OverEmptyLines: 0
+
+# Comments in this codebase are hand-wrapped, deliberately laid-out prose.
+# Without this, clang-format re-flows (rewraps) comment text on every run,
+# fighting the author's line breaks instead of leaving them alone.
+ReflowComments:    false
 ...

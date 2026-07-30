@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Shantanu Agarwal
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "vc/edit/vc_image_meta.h"
+#include "vc/edit/vc_memory_image_meta.h"
 
 #include <utility>
 

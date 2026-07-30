@@ -6,7 +6,7 @@
 
 | Tool | Min version | macOS (Homebrew) | Ubuntu / Debian | Windows (winget) | Notes |
 |------|-------------|------------------|-----------------|------------------|-------|
-| C++17 compiler | clang ≥ 7 / gcc ≥ 8 / MSVC ≥ 19.14 | `xcode-select --install` | `sudo apt install clang` | Visual Studio 2019+ Build Tools¹ | |
+| C++20 compiler | any compiler with C++20 support⁴ | `xcode-select --install` | `sudo apt install clang` | Visual Studio Build Tools¹ | |
 | CMake | 3.20 | `brew install cmake` | `sudo apt install cmake` | `winget install Kitware.CMake` | |
 | Ninja | any | `brew install ninja` | `sudo apt install ninja-build` | `winget install Ninja-build.Ninja` | required (enforced by presets)² |
 | ccache | any | `brew install ccache` | `sudo apt install ccache` | `winget install ccache.ccache` | optional, faster rebuilds |
@@ -39,6 +39,14 @@ pre-commit install
 ³ Go is also used in `tools/go.mod` to track the `addlicense` version for Dependabot.
   `tools/go.sum` is committed; no extra steps on a fresh clone. Re-run `go mod tidy`
   inside `tools/` only after Dependabot bumps the version in `go.mod`.
+
+⁴ `CMakeLists.txt` sets `CMAKE_CXX_STANDARD 20` (`CMAKE_CXX_STANDARD_REQUIRED ON`) — see
+  `docs/coding_guidelines.md` §0 for why C++20 (not the C++17 the Week 0 curriculum
+  originally noted). No specific per-compiler minimum version is pinned or tested: CI
+  (`.github/workflows/build.yml`) builds on `ubuntu-latest`'s default toolchain, and this repo
+  has otherwise only been built with Apple Clang. Pick any C++20-capable release of your
+  toolchain; if it lacks a feature the code uses (concepts, `std::span`, `std::ranges`), the
+  build will fail to configure/compile and say so.
 
 ## Build (command line)
 

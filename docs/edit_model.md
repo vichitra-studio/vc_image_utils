@@ -33,7 +33,8 @@ portability · 10. Undo/redo · 11. Coordinate spaces & geometry
 **Part II — Evidence & rationale**
 12. NOW vs LATER · 13. Open questions · 14. Linkage & learning-build ·
 15. Reference studies (the five engines) · 16. Decision levers · 17. Scenarios &
-scalability · 18. The schema/serialization mechanism · 19. Glossary
+scalability · 18. The schema/serialization mechanism **[SUPERSEDED 2026-07-25]** ·
+19. Glossary
 
 ---
 
@@ -167,15 +168,20 @@ class edit_session {                 // everything about ONE image
 > };
 > ```
 > **[DECIDED 2026-07-18, built — Part C-1]** The two derived stores are **injected**
-> (not owned by value), as **two separate nullable non-owning pointers**
-> (`vc_persistent_edits_table*`, `vc_cached_edits_table*`): they differ in both key scheme and
+> (not owned by value), as **two separate non-nullable non-owning references**
+> (`vc_persistent_edits_table&`, `vc_cached_edits_table&`): they differ in both key scheme and
 > serialization lifecycle and each outlives the session, so the session merely
-> references them, and injection enables test/mock substitution. The metadata overlay
-> is an **owning `unique_ptr<i_image_meta>`** (alias `image_metadata_handle`) — session-local
-> mutable state, not an externally-owned backend — which makes the aggregate
-> **move-only** (a snapshot copy would need a metadata `clone()`, a later rep). The
-> built 5-arg ctor is `vc_edit_session(vc_image source, vc_edit_document edits,
-> image_metadata_handle meta, vc_persistent_edits_table*, vc_cached_edits_table*)`, superseding the
+> references them, and injection enables test/mock substitution. **[Corrected
+> 2026-07-27]** — this bullet previously (and wrongly) described these as
+> "nullable non-owning pointers"; checked against `git log --follow` for
+> `vc_edit_session.h`, the ctor has taken references, not pointers, since the
+> file's very first commit (`d6e3bb0`) — this was never true of any built code,
+> just a doc error. The metadata overlay is an **owning `unique_ptr<i_image_meta>`** (alias
+> `image_metadata_handle`) — session-local mutable state, not an externally-owned
+> backend — which makes the aggregate **move-only** (a snapshot copy would need a
+> metadata `clone()`, a later rep). The built 5-arg ctor is `vc_edit_session(vc_image
+> source, vc_edit_document edits, image_metadata_handle meta,
+> vc_persistent_edits_table&, vc_cached_edits_table&)`, superseding the
 > owned-by-value member sketch above. This also settles the metadata-handle question:
 > one alias does **not** suffice — the image-composed (captured) metadata is a
 > `shared_ptr<const i_image_meta>` (on `vc_image_info`) while the session's edited
@@ -187,6 +193,21 @@ class edit_session {                 // everything about ONE image
 > attached" state to represent. This supersedes the "meta is NULLABLE" framing
 > above; every caller must inject a real (even if trivial in-memory
 > `vc_memory_image_meta`) backend.
+
+> **[DECIDED 2026-07-27]** The **members** (`persistent_`, `cache_`, and their
+> accessors `persistent()`/`cache()`) are retyped from the concrete
+> `vc_persistent_edits_table&`/`vc_cached_edits_table&` to `i_edit_table&` — both
+> concrete stores' entire public surface is exactly ctor + `get()` + `set()`, i.e.
+> nothing beyond `i_edit_table`, so a consumer of `persistent()`/`cache()` should
+> depend on the interface it actually uses, not the concrete type. The
+> **constructor parameters deliberately stay the concrete types**
+> (`vc_persistent_edits_table&`, `vc_cached_edits_table&`) rather than following the
+> members to `i_edit_table&`: two same-typed `i_edit_table&` parameters could be
+> silently swapped positionally by a caller (both compile identically), whereas
+> distinct concrete parameter types make that mistake a compile error. The rule is
+> "abstraction where storage is **used** [accessors/members], type safety where
+> identity is **established** [the ctor]" — the two members are upcast-initialized
+> from the concrete ctor params in `vc_edit_session.cpp`.
 
 **Scattered storage, unified access.** This is Lightroom's catalog entry / darktable's
 "image" concept **[unverified as to internal structure]**. It is: what **undo/redo**
@@ -493,6 +514,62 @@ struct metadata {
   (separation of concerns): the writer's job is composing a sealed, ready image,
   not decoding metadata formats.
 
+> **[DECIDED 2026-07-28] `i_image_meta` demoted from `vc::edit` into core (`vc::`).**
+> A five-lens design review (Meyers/Sutter/Lakos/Ousterhout/Martin, landed
+> `a05229d`) flagged that `vc_image_info` (core) forward-declared
+> `vc::edit::i_image_meta` and composed `shared_ptr<const vc::edit::i_image_meta>`
+> — a core type naming a symbol from the higher `vc::edit` package — but that
+> review's fix list did not act on it, and no rationale was recorded either
+> way. Re-evaluated here, and the interface is now **demoted to
+> `vc::i_image_meta`** (`include/vc/vc_image_meta.h`), taking the
+> `vc_metadata_value`/`vc_metadata_value_tag` alias with it. The concrete
+> backend, `vc_memory_image_meta`, **stays in `vc::edit`**
+> (`include/vc/edit/vc_memory_image_meta.h`), deriving from `vc::i_image_meta`
+> across the namespace boundary — the same "abstract seam down, concrete
+> backend up" split `vc::debug::dump_image_builder` already uses against
+> `vc::utils::log_info_builder_base<T>` (`docs/coding_guidelines.md` §2.1).
+>
+> **This does NOT reopen or overturn B4's "composition, not fusion" decision
+> above** — `vc_image_info` still *composes* a `shared_ptr<const i_image_meta>`
+> exactly as B4 describes; only the interface's namespace qualification
+> changes (`vc::edit::i_image_meta` → `vc::i_image_meta`), not the
+> composition relationship, the EXIF-orientation reasoning, the captured-vs-
+> edited two-layer split, or the mask-is-null-metadata invariant. Kind B data
+> (this section) is still an edit-model *concept*; what moved is only which
+> C++ package owns the abstract seam, not which layer owns the domain
+> decisions about it.
+>
+> **Why now, not when first flagged:** the interface's own dependencies were
+> already 100% core (`<memory>`/`<optional>`/`<string>` + `vc_any_box.h` —
+> nothing in `i_image_meta` ever used anything from `vc::edit`), and
+> `a05229d` had already performed the identical move for the sibling
+> `vc_any_box<Tag>` mechanism ("extracted into core; `vc_pipe_packet` and
+> `vc_metadata_value` become distinct aliases over it"). Demoting
+> `i_image_meta` alongside it completes that same move rather than starting a
+> new one, and the header had already been split (interface vs.
+> `vc_memory_image_meta` backend) in the same commit, which made the move a
+> pure rename-and-requalify rather than a redesign.
+>
+> **What this fixes, precisely — not "a cycle."** There is one static library
+> target (`vc_image_utils_lib`) and no core header ever `#include`d a
+> `vc/edit/*` header, so the *physical* (translation-unit / link-time,
+> Lakos-sense) dependency graph was already acyclic — nothing failed to
+> compile or link before this change. What existed was a **logical/naming**
+> dependency: a core header's public contract (`vc_image_info::metadata()`'s
+> return type) was defined by a type it did not own, and a pure-core consumer
+> that wanted to actually call `get()`/`set()` on that handle had to reach
+> into `vc::edit` to find the interface. That is what is fixed. The
+> `vc_image_info.h` forward declaration itself is unchanged in *technique* —
+> forward-declare + `shared_ptr<const T>` is still the right compile-firewall
+> move — only in *which package* the forward-declared name now lives in.
+>
+> **Reopen this if:** a genuinely edit-specific dependency creeps into
+> `i_image_meta` itself (e.g. a real per-platform backend's interface grows a
+> method that needs an edit-model type — at that point the interface would no
+> longer be dependency-clean and belongs back in `vc::edit`), or if the
+> taxonomy in §2/§6 is revised such that Kind B metadata is no longer
+> considered something a core aggregate may compose directly.
+
 ## 7. Storage interfaces [LATER; shape settled]
 
 "Program to an interface" applies — at the **storage engine**, not the data role
@@ -646,13 +723,23 @@ one.
   preview, output profile for export), **not** the edit doc. `build_pipeline` appends it
   per render destination. This keeps "edit" (in the doc) and "view transform" (from the
   target) cleanly separate while both run as stages (§16 L18).
-- **`render_image` / `export_image` [NOW, scaffolded 2026-07-21].** `build_pipeline` →
-  `run()` (the diagram in §1) is composed into one callable,
-  `vc::edit::render_image(session, request) → vc_image` — the ONE place both a future
-  preview path and export call, rather than each re-deriving the composition.
-  `vc::edit::export_image(session, vc_export_config)` renders (always at the default,
-  full-res whole-image request — see below) and writes the result through a
-  `vc::io::stb_image_writer` it constructs itself. Both currently throwing shells.
+- **`render_image` [NOW, built 2026-07-27] / `export_image` [scaffolded 2026-07-21,
+  still a shell].** `build_pipeline` → `run()` (the diagram in §1) is composed into
+  one callable, `vc::edit::render_image(session, request, run_context = {}) →
+  vc_image` — the ONE place both a future preview path and export call, rather than
+  each re-deriving the composition. **Implemented:** it calls `build_pipeline`,
+  `run()`s the returned graph with the caller's `run_context`, requires the run
+  produce **exactly one** open output (throwing `vc::vc_exception` otherwise — a
+  render graph produces exactly one image, never zero or several), and returns that
+  output's image. `vc::edit::export_image(session, vc_export_config, run_context =
+  {})` is meant to render (always at the default, full-res whole-image request —
+  see below) and write the result through a `vc::io::stb_image_writer` it
+  constructs itself — this one is still a throwing `TODO(you)` shell. Both take a
+  trailing, defaulted `const vc::pipe::vc_render_context& run_context` — forwarded
+  unmodified, `export_image` into `render_image` into `vc_pipeline::run()`'s own
+  parameter of the same name — which is what makes the cancellation subsystem
+  (the Run context / Cancellation bullet below) reachable from the public API at
+  all; previously it was not wired through the composition layer.
 
   `vc_export_config { path; write /* vc::io::write_config */ }` deliberately excludes
   two things a first pass might expect:
@@ -669,14 +756,31 @@ one.
     round trip. Contrast `i_table` / `i_image_meta`, which DO clear that bar and stay
     injected.
 
-  **Port discovery is an open question, deliberately not settled here.**
+  **Port discovery was an open question, deliberately not settled here — it is now.**
   `render_image`'s body needs to feed `session.source()` onto the open input of the
   graph `build_pipeline` returns and harvest its open output, but `vc_pipeline` exposes
   no public port query today (§4.2's "no public stage accessor" is deliberate), and the
   SPINE's ports are only knowable because `build_pipeline` currently assembles exactly
-  one `vc_passthrough_stage`. A general mechanism — a port-query API on `vc_pipeline`,
-  or `build_pipeline` returning pre-wired inputs alongside the pipeline — is left for
-  whoever writes `render_image`'s body, not pre-decided now.
+  one `vc_passthrough_stage`. Two mechanisms were named as candidates: a port-query API
+  on `vc_pipeline`, or `build_pipeline` returning pre-wired inputs alongside the
+  pipeline.
+
+  > **[DECIDED 2026-07-27]** The second option. `build_pipeline` now returns a
+  > `vc_built_graph { vc::pipe::vc_pipeline pipeline; vc::pipe::render_io_map
+  > inputs; }` aggregate (`include/vc/edit/vc_build_pipeline.h`) — the pipeline PLUS
+  > its already-populated input map, keyed by `stage_port`, populated onto the
+  > graph's open input ports before the aggregate is returned (`validate()` is also
+  > called before returning, so a `vc_built_graph` that exists is guaranteed
+  > already-validated). `render_image` never needs a port-query API on
+  > `vc_pipeline` (still doesn't exist, and this resolves the question by never
+  > adding one) — it just `run()`s `built.pipeline` with `built.inputs` and reads
+  > back `run()`'s own open-output map. `build_pipeline` is the only code that ever
+  > needed to know the SPINE's ports (it is the one that wired them), so no caller
+  > has to discover them independently. `vc_built_graph` is a plain aggregate with
+  > public fields — there is no invariant between its two members worth defending
+  > with accessors (feeding `inputs` into a *different* pipeline would be a caller
+  > bug, not a state this type needs to prevent), the same reasoning already
+  > applied to `vc_render_request`/`vc_export_config`.
 - **Run context [design NOW; B8/B9] / Cancellation** — `run()` takes a
   **`vc_render_context`** (see the note below) that carries a cooperative cancellation
   token, checked between stages and at checkpoints inside long stages. Interactive
@@ -705,8 +809,10 @@ one.
   > run context **now** — the runner threads it in (held BY VALUE, defaulted so
   > every existing call site is unaffected) and exposes `run_context()`, so a
   > stage's `process()` MAY read `run_context().cancelled()` as an in-process
-  > checkpoint. No stage does yet (the blur `process()` stays a rep shell), but the
-  > seam is in place without a future interface change.
+  > checkpoint. No stage does yet — not even `vc_sample_blur_stage`
+  > (`tests/samples/`), the longest-running one, whose kernel IS implemented but
+  > checks cancellation only between stages — but the seam is in place without a
+  > future interface change.
 - **Concurrency [LATER]** — pure stages enable parallel execution; the executor/
   threading/tiling is built later without touching stage semantics (Halide's algorithm/
   schedule split validates this, §15.5).

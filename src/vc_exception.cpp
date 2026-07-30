@@ -8,7 +8,8 @@
 namespace vc {
 
 vc_exception::vc_exception(vc_error_code code, vc::utils::message message)
-    : code_(code), message_(std::move(message)) {
+    : code_(code),
+      message_(std::make_shared<vc::utils::message>(std::move(message))) {
 }
 
 } // namespace vc
