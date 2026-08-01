@@ -36,6 +36,14 @@
       }
     },
     {
+      "name": "bench",
+      "displayName": "Release + Benchmarks",
+      "inherits": "release",
+      "cacheVariables": {
+        "VC_BUILD_BENCHMARKS": "ON"
+      }
+    },
+    {
       "name": "debug-sanitizers",
       "displayName": "Debug + Sanitizers (ASan/UBSan)",
       "inherits": "debug",
@@ -62,6 +70,11 @@
       "name": "release",
       "displayName": "Release",
       "configurePreset": "release"
+    },
+    {
+      "name": "bench",
+      "displayName": "Release + Benchmarks",
+      "configurePreset": "bench"
     },
     {
       "name": "relwithdebinfo",

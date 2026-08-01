@@ -1,2 +1,26 @@
+# Benchmarks are Release-only (CMakeLists.txt: VC_BUILD_BENCHMARKS "requires
+# CMAKE_BUILD_TYPE=Release"), so they are absent from the Debug compilation
+# database the root .clangd points at. Without a database of their own, clangd
+# has no command for any file here and falls back to a guess with no include
+# paths — every bench TU then shows a wall of phantom errors ("undeclared
+# identifier 'ankerl'", "no member named 'bench' in namespace 'vc'") that the
+# real build does not have.
+#
+# This pointed at ../cmake-build-bench, which does not exist in this tree. The
+# path is now build/bench, which is the `bench` preset's binaryDir, so the one
+# command that creates it is the same one you would build with:
+#   cmake --preset bench
+# Configuring is enough — nothing needs to be compiled, and in particular no
+# benchmark should be RUN with --baseline from a source-tree build, which
+# overwrites the committed baselines under bench/baselines/.
+#
+# NOT the `release` preset's build/release: that preset leaves
+# VC_BUILD_BENCHMARKS OFF, so pointing here at its directory would both miss
+# the bench targets and leave a benchmarks-on cache for the next person who
+# runs `cmake --preset release`.
+#
+# Editor indexing only; the build is unaffected. If the directory is missing,
+# clangd degrades to exactly the old behaviour, so this is never worse than
+# not having it.
 CompileFlags:
-  CompilationDatabase: ../cmake-build-bench
+  CompilationDatabase: ../build/bench

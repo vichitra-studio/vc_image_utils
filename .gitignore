@@ -29,6 +29,9 @@ vcpkg_installed/
 *.swp
 *~
 
+# clangd's --background-index writes its index here (see .vscode/settings.json)
+.cache/
+
 # Android / Gradle (post-MVP app)
 .gradle/
 local.properties
