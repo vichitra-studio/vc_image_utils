@@ -9,15 +9,15 @@
 #include <span>
 #include <utility>
 
+#include "vc/vc_error_code.h"
+#include "vc/vc_exception.h"
 #include "vc/vc_image_info.h"
 #include "vc/vc_pixel_buffer.h"
 #include "vc/vc_types.h"
 
 namespace vc {
 
-// seal() produces a vc_image; only the NAME is needed here (the return type
-// of a member function declaration), not the full definition, so a forward
-// declaration is enough and .cpp is where vc_image.h actually gets included.
+// seal() produces a vc_image;
 // This header and vc_image.h are mutually dependent by design — see the
 // comment beside vc_image.h's #include "vc/vc_image_writer.h" for the full
 // rationale (why the cycle exists, why it's harmless, and when it would stop
@@ -31,7 +31,7 @@ class vc_image;
 // Move-only by design: a writer is uniquely owned while it is being filled, so a
 // half-written image can never be shared or aliased — the "shared + mutable"
 // hazard is simply not representable, and a downstream stage that receives a
-// vc_image can never mutate it (docs/coding_guidelines.md Sec 4.2). Its
+// vc_image can never mutate it. Its
 // lifecycle ENDS at seal(): the pixels move out, const-qualified, into a
 // vc_image, and the writer is spent.
 //
@@ -81,9 +81,26 @@ class vc_image_writer {
     // seal(). Written plumbing, not a rep: the writer composes a READY
     // vc_image_info and never parses EXIF itself — some loader/backend
     // builds the i_image_meta and hands it in here. Forwards to
-    // vc_image_info::set_metadata(); null (the default) means "no
-    // metadata" (e.g. a mask).
-    void set_metadata(const_image_meta_ptr metadata) noexcept {
+    // vc_image_info::set_metadata().
+    //
+    // REJECTS null. "No metadata" (a mask — see vc_image_info's metadata_
+    // member) remains fully reachable, but as the DEFAULT rather than as an
+    // argument: a caller that wants a mask simply never calls this. What is
+    // gone is the second spelling of that same state, where set_metadata(p)
+    // with an accidentally-empty p silently produced a mask instead of the
+    // metadata-carrying image the caller believed it was building — the loader
+    // handing p in is exactly where an empty shared_ptr comes from. One way to
+    // say "no metadata", and it is the way you cannot reach by accident.
+    //
+    // Not noexcept, and it cannot be: a throw from a noexcept function calls
+    // std::terminate rather than unwinding.
+    void set_metadata(const_image_meta_ptr metadata) {
+        if (!metadata) {
+            throw vc::vc_exception(
+                vc::vc_error_code::invalid_argument,
+                "vc_image_writer::set_metadata(): metadata must not be null; "
+                "leave it unset for an image with no metadata");
+        }
         meta_.set_metadata(std::move(metadata));
     }
 

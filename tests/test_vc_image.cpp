@@ -77,6 +77,21 @@ TEST_CASE(
     CHECK(iso->get<std::string>() == "400");
 }
 
+// The other half of that write path: "no metadata" is reachable ONLY as the
+// default, never as an argument. Without this, the throw could be deleted and
+// every other test here would still pass — the mask default above is what a
+// silently-accepted null would look like.
+TEST_CASE("vc_image_writer: set_metadata rejects null") {
+    vc::vc_image_writer writer{4, 2, 3, vc::buf_f32{0.0f}};
+    CHECK_THROWS_AS(writer.set_metadata(nullptr), vc::vc_exception);
+
+    // The rejection leaves the writer usable and its metadata untouched, so a
+    // caller that recovers still seals a valid (mask-shaped) image.
+    CHECK(writer.meta().metadata() == nullptr);
+    const vc::vc_image img = std::move(writer).seal();
+    CHECK(img.meta().metadata() == nullptr);
+}
+
 TEST_CASE("vc_image_writer: with_pixels() mutation survives seal()") {
     vc::vc_image_writer writer{4, 2, 3, vc::buf_f32{0.0f}};
     writer.with_pixels<vc::buf_f32>([](std::span<vc::buf_f32> px) {
