@@ -540,7 +540,8 @@ include/vc/vc_pixel_buffer.h  — vc_pixel_element_req concept + vc_pixel_buffer
 include/vc/vc_types.h         — pixel_dtype enum + remaining vc:: aliases (pixel_buffer_ptr, image_dim, etc.)
 include/vc/vc_error_code.h    — vc_error_code enum + to_int/to_error_code/to_string
 include/vc/vc_exception.h     — vc_exception class
-include/vc/vc_any_box.h       — vc_any_box<Tag> class: shared type-erased single-value box behind
+include/vc/vc_any.h           — vc_any_tag enum + vc_any_tag_req concept + vc_any<Tag> class:
+                                 shared type-erased single-value box behind
                                  vc_pipe_packet / vc_metadata_value (header-only, no .cpp)
 include/vc/vc_image_meta.h    — i_image_meta interface + vc_metadata_value alias (header-only, no
                                  .cpp — pure interface, no non-pure members to define). Demoted
@@ -584,12 +585,13 @@ One class / one interface per header. No omnibus headers.
 `src/` mirrors `include/vc/` for implementation files above — not an exhaustive rule over the whole
 tree (the later `pipe`/`edit` layers are not enumerated in this box — see their own design docs).
 Five worth calling out because a reader might expect a `.cpp` and not find one:
-`vc_pixel_buffer.h`, `vc_log_info_builder.h`, `vc_any_box.h`, `vc_image_info.h`, and
+`vc_pixel_buffer.h`, `vc_log_info_builder.h`, `vc_any.h`, `vc_image_info.h`, and
 `vc_image_meta.h` have none. For the first two, every member that isn't a template is a one-liner
 (`dtype()`/`size()`; `set_tag_enabled()`/`tag_enabled()`), and the rest — the constructor and
 `as<T>()` for `vc_pixel_buffer`, `operator()`/`resolve()` for `log_info_builder_base<T>` — are
-templates that must be defined where instantiated. `vc_any_box<Tag>` is templated on `Tag`
-itself, so the same reasoning covers the whole class, not just some members. `vc_image_info` has
+templates that must be defined where instantiated. `vc_any<Tag>` is itself a template — on a
+`vc_any_tag` *value*, a non-type parameter rather than a type — so the same reasoning covers
+the whole class, not just some members. `vc_image_info` has
 no template at all — every member (including `element_count()`/`index()`) is simply a one-liner —
 so there is nothing non-trivial to put in a `.cpp` regardless. `vc_image_meta.h`'s reason is
 different from all four: `i_image_meta` is a pure interface (every member is either `= default`,

@@ -8,6 +8,8 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <type_traits>
 #include <typeindex>
 #include <typeinfo>
 #include <unordered_map>
@@ -22,9 +24,13 @@
 #include "vc/pipe/vc_pipe_packet.h"
 #include "vc/pipe/vc_pipe_types.h"
 #include "vc/pipe/vc_pipeline.h"
+#include "vc/vc_any.h"
 #include "vc/vc_error_code.h"
 #include "vc/vc_exception.h"
 #include "vc/vc_image.h"
+#include "vc/vc_image_meta.h" // vc_metadata_value — the OTHER vc_any tag, so
+                              // the static_asserts below can prove the two
+                              // boxes are unrelated types.
 #include "vc/vc_image_writer.h"
 
 // =====================================================================
@@ -48,6 +54,47 @@ TEST_CASE("vc_pipe_packet: get with the wrong type throws") {
 TEST_CASE("vc_pipe_packet: default-constructed holds nothing") {
     const vc::pipe::vc_pipe_packet p;
     CHECK_FALSE(p.has_value());
+}
+
+// vc_any's whole reason for taking a tag is that two boxes sharing one
+// implementation must NOT be interchangeable — a durable metadata value and an
+// ephemeral pipe packet are different things. Assert that directly, in both
+// directions, rather than trusting that two template arguments happened to
+// produce two types.
+static_assert(!std::is_same_v<vc::pipe::vc_pipe_packet, vc::vc_metadata_value>);
+static_assert(
+    !std::is_convertible_v<vc::pipe::vc_pipe_packet, vc::vc_metadata_value>);
+static_assert(
+    !std::is_convertible_v<vc::vc_metadata_value, vc::pipe::vc_pipe_packet>);
+
+// Each box reports its own ALIAS name, not the shared template's — the only
+// thing the tag changes about behaviour, and the reason the two were ever one
+// template with a parameter instead of two copies. These being static_asserts
+// also pins vc_any_tag_name() as usable in a constant expression, which is
+// what vc_any::kTagName depends on.
+static_assert(vc::vc_any_tag_name(vc::vc_any_tag::pipe_packet) ==
+              "vc_pipe_packet");
+static_assert(vc::vc_any_tag_name(vc::vc_any_tag::meta_value) ==
+              "vc_metadata_value");
+
+// vc_any_tag_req is non-vacuous: it accepts the tag enum and nothing else, so
+// vc_any<0> or a tag borrowed from some other enum is rejected by name rather
+// than by a bare conversion error. Without the negative cases a concept that
+// was accidentally true for everything would still let the whole suite pass —
+// the silently-green failure mode.
+static_assert(vc::vc_any_tag_req<vc::vc_any_tag>);
+static_assert(!vc::vc_any_tag_req<int>);
+static_assert(!vc::vc_any_tag_req<vc::pixel_dtype>);
+
+// The concept CANNOT catch an unnamed value of the right type — every value in
+// vc_any_tag's underlying range has type vc_any_tag — so that case is caught
+// one layer down, by vc_any_tag_name() throwing and vc_any::kTagName being
+// constant-evaluated. Assert the runtime half here; the compile-time half is
+// verified by a probe TU that must FAIL to compile, since a test that must not
+// compile cannot live in this file.
+TEST_CASE("vc_any_tag_name: an unnamed tag throws rather than falling back") {
+    CHECK_THROWS_AS(vc::vc_any_tag_name(static_cast<vc::vc_any_tag>(99)),
+                    vc::vc_exception);
 }
 
 TEST_CASE("vc_pipe_context: reads typed inputs and harvests typed outputs") {

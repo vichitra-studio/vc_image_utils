@@ -522,7 +522,7 @@ struct metadata {
 > review's fix list did not act on it, and no rationale was recorded either
 > way. Re-evaluated here, and the interface is now **demoted to
 > `vc::i_image_meta`** (`include/vc/vc_image_meta.h`), taking the
-> `vc_metadata_value`/`vc_metadata_value_tag` alias with it. The concrete
+> `vc_metadata_value` alias with it. The concrete
 > backend, `vc_memory_image_meta`, **stays in `vc::edit`**
 > (`include/vc/edit/vc_memory_image_meta.h`), deriving from `vc::i_image_meta`
 > across the namespace boundary — the same "abstract seam down, concrete
@@ -540,11 +540,15 @@ struct metadata {
 > decisions about it.
 >
 > **Why now, not when first flagged:** the interface's own dependencies were
-> already 100% core (`<memory>`/`<optional>`/`<string>` + `vc_any_box.h` —
-> nothing in `i_image_meta` ever used anything from `vc::edit`), and
+> already 100% core (standard-library headers + `vc_any.h` — nothing in
+> `i_image_meta` ever used anything from `vc::edit`), and
 > `a05229d` had already performed the identical move for the sibling
-> `vc_any_box<Tag>` mechanism ("extracted into core; `vc_pipe_packet` and
-> `vc_metadata_value` become distinct aliases over it"). Demoting
+> type-erased-box mechanism, extracting it into core so that `vc_pipe_packet`
+> and `vc_metadata_value` became distinct aliases over one implementation.
+> (That box was named `vc_any_box<Tag>` at the time; it is now `vc_any<Tag>`
+> in `include/vc/vc_any.h`, keyed on a `vc_any_tag` enumerator rather than on
+> a tag struct.)
+> Demoting
 > `i_image_meta` alongside it completes that same move rather than starting a
 > new one, and the header had already been split (interface vs.
 > `vc_memory_image_meta` backend) in the same commit, which made the move a

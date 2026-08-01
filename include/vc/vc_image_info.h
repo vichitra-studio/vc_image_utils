@@ -19,7 +19,7 @@ namespace vc {
 // so vc_image_info stays a value type with no out-of-line special members
 // even though i_image_meta is never #included here — a consumer that only
 // holds/copies/compares the handle (most of vc_image_info's own clients)
-// never pays for pulling in <optional>/<string>/vc_any_box.h; a consumer
+// never pays for pulling in <optional>/<string>/vc_any.h; a consumer
 // that actually calls get()/set() on it includes vc/vc_image_meta.h itself.
 class i_image_meta;
 

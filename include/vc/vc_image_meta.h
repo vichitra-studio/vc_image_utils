@@ -7,7 +7,7 @@
 #include <optional>
 #include <string>
 
-#include "vc/vc_any_box.h"
+#include "vc/vc_any.h"
 
 namespace vc {
 
@@ -15,17 +15,16 @@ namespace vc {
 // color matrix, a GPS coordinate struct, a rating integer, a copyright
 // string all need to fit through the same `set`/`get`), so a plain
 // std::string cannot represent the full value vocabulary. Backed by
-// vc::vc_any_box (include/vc/vc_any_box.h) — the SAME wrap/get<T>/
-// has_value/type mechanism as vc::pipe::vc_pipe_packet
-// (include/vc/pipe/vc_pipe_packet.h) — but kept an INDEPENDENT type via a
-// distinct tag: metadata values are durable, (eventually) serializable state
-// that outlives a single render, unlike vc_pipe_packet's ephemeral
-// per-render-slot payload, so the two must not be silently interchangeable
-// even though the underlying mechanism is identical.
-struct vc_metadata_value_tag {
-    static constexpr const char* type_name = "vc_metadata_value";
-};
-using vc_metadata_value = vc::vc_any_box<vc_metadata_value_tag>;
+// vc::vc_any (include/vc/vc_any.h) — the SAME wrap/get<T>/has_value/type
+// mechanism as vc::pipe::vc_pipe_packet (include/vc/pipe/vc_pipe_packet.h) —
+// but kept an INDEPENDENT type via a distinct tag: metadata values are
+// durable, (eventually) serializable state that outlives a single render,
+// unlike vc_pipe_packet's ephemeral per-render-slot payload, so the two must
+// not be silently interchangeable even though the underlying mechanism is
+// identical. Distinctness is exactly what the tag buys: the two aliases name
+// two different specializations of one template, so neither converts to the
+// other.
+using vc_metadata_value = vc::vc_any<vc_any_tag::meta_value>;
 
 // Image metadata: EXIF (ISO/shutter/GPS), color matrices, IPTC/copyright,
 // ratings, flags, keywords. Unlike edits, STANDARDS and INTEROP genuinely
@@ -43,8 +42,8 @@ using vc_metadata_value = vc::vc_any_box<vc_metadata_value_tag>;
 // carry whatever a field turns out to need.
 //
 // Lives at vc/ (core), not vc/edit/: the interface's OWN dependencies are
-// already 100% core (<memory>/<optional>/<string> + vc_any_box.h — nothing
-// here needs anything from vc::edit), and vc_image_info (core) composes a
+// already 100% core (standard-library headers + vc_any.h — nothing here
+// needs anything from vc::edit), and vc_image_info (core) composes a
 // shared_ptr<const i_image_meta> as its captured-metadata field (see
 // vc_image_info.h) — a core aggregate's field type belongs at or below core,
 // not above it. The concrete, EXIF/IPTC-parsing backend

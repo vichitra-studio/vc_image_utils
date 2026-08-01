@@ -12,7 +12,7 @@
 // i_image_meta now lives in core (vc/vc_image_meta.h, demoted 2026-07-28 —
 // see that header's comment and docs/edit_model.md Sec 6). This member only
 // names the INTERFACE, never vc_memory_image_meta, so the interface-only
-// header (<memory>/<optional>/<string> + vc/vc_any_box.h) is enough — a
+// header (standard-library headers + vc/vc_any.h) is enough — a
 // light header, so including it directly is cheap and avoids an extra
 // forward declaration. The image_metadata_handle alias below is NOT part of
 // that core header: it names the session's OWNING overlay handle, which is
