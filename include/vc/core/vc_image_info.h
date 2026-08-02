@@ -25,9 +25,9 @@ class i_image_meta;
 
 // A shared, read-only handle onto a vc::i_image_meta — the composed-
 // metadata field's exact type, spelled once here rather than at every
-// accessor/parameter that needs it. Matches the pixel_buffer_ptr /
-// const_pixel_buffer_ptr precedent in vc_types.h: a shared_ptr handle over a
-// domain type gets a named alias instead of being spelled out repeatedly.
+// accessor/parameter that needs it. Matches the const_pixel_buffer_ptr
+// precedent in vc_types.h: a shared_ptr handle over a domain type gets a
+// named alias instead of being spelled out repeatedly.
 using const_image_meta_ptr = std::shared_ptr<const vc::i_image_meta>;
 
 // An image's descriptor: its geometry (dimensions) plus the element-index math

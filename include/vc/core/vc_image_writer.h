@@ -24,6 +24,14 @@ namespace vc {
 // being two files).
 class vc_image;
 
+// The writer's owning handle onto its in-progress buffer — see the pixels_
+// member comment for why unique_ptr, not shared_ptr. NOT declared in
+// vc_types.h beside const_pixel_buffer_ptr: that alias is a widely-shared,
+// library-wide handle type (vc_image and others depend on it), while this one
+// has exactly one owner, vc_image_writer, so it is declared here instead —
+// the same reasoning vc_edit_session.h gives for image_metadata_handle.
+using pixel_buffer_handle = std::unique_ptr<vc_pixel_buffer>;
+
 // The MUTABLE, under-construction form of an image — and the ONLY type in the
 // system with write access to image pixels. Its single responsibility is to
 // build an image's pixels and then seal them into an immutable vc_image.
@@ -51,7 +59,7 @@ class vc_image_writer {
                     T fill)
         : meta_(validated(width, height, channels)),
           pixels_(
-              std::make_shared<vc_pixel_buffer>(meta_.element_count(), fill)) {
+              std::make_unique<vc_pixel_buffer>(meta_.element_count(), fill)) {
     }
 
     // Move-only: uniquely owned during construction, never copied or shared.
@@ -163,25 +171,31 @@ class vc_image_writer {
     validated(image_dim width, image_dim height, channel_count channels);
 
     vc_image_info meta_;
-    // Mutable and uniquely held (use_count == 1) until seal() moves it out, so
-    // the move is a cheap ownership transfer, not a copy. CAUTION: the spans/
-    // refs handed out by pixels<T>()/at<T>() are NON-OWNING views into this
-    // buffer; seal() moves the shared_ptr but NOT the buffer (it keeps its
-    // address, now owned const by the vc_image), so a view RETAINED across
-    // seal() still aliases — and could mutate — the sealed immutable image.
-    // Moving the shared_ptr does not help either: moving a std::vector
-    // transfers the same heap block, so an escaped span stays valid (and
-    // stays a live back door into the sealed image) either way — this is a
-    // view-lifetime hazard, not an ownership one, and no amount of smart-
-    // pointer bookkeeping fixes it. with_pixels() (above) removes the
-    // accidental path — there is no returned handle to assign into an
-    // outliving variable — but a caller that deliberately captures a
-    // reference can still smuggle the span out through it, so this remains
-    // a convention, not a structural guarantee. Same discipline as any view
-    // into a moved-from object: do not use a writer-derived span/ref after
-    // seal(). (use_count alone does not enforce this — it governs the
-    // shared_ptr, not view lifetimes.)
-    pixel_buffer_ptr pixels_;
+    // EXCLUSIVELY owned while the writer is alive — a std::unique_ptr, not a
+    // shared_ptr, because nothing before seal() ever needs a second owner:
+    // the writer is move-only (never copied), so there is never a second
+    // reference to alias. seal() is the one moment ownership genuinely
+    // becomes shared, and that transition is where the type changes too —
+    // moving this unique_ptr into a shared_ptr<const vc_pixel_buffer> (see
+    // vc_image_writer.cpp) allocates a control block then, not before. The
+    // move itself (here, or via vc_image_writer's own defaulted move ctor) is
+    // still a cheap pointer steal, same cost as moving a shared_ptr would be.
+    //
+    // CAUTION: the spans/refs handed out by pixels<T>()/at<T>() are
+    // NON-OWNING views into this buffer; seal() moves ownership of the
+    // buffer but not its address (the heap block a std::vector owns doesn't
+    // move when the vector does — only the handle to it does), so a view
+    // RETAINED across seal() still aliases — and could mutate — the sealed
+    // immutable image. This is a view-lifetime hazard, not an ownership one,
+    // and no smart-pointer choice fixes it — unique_ptr vs. shared_ptr changes
+    // who may own the buffer, not how long a span into it stays valid.
+    // with_pixels() (above) removes the accidental path — there is no
+    // returned handle to assign into an outliving variable — but a caller
+    // that deliberately captures a reference can still smuggle the span out
+    // through it, so this remains a convention, not a structural guarantee.
+    // Same discipline as any view into a moved-from object: do not use a
+    // writer-derived span/ref after seal().
+    pixel_buffer_handle pixels_;
 };
 
 } // namespace vc

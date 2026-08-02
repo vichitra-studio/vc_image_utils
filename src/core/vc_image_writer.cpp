@@ -45,10 +45,14 @@ vc_image vc_image_writer::seal() && {
     // loudly in debug (compiled out in release, off the hot path).
     assert(pixels_ &&
            "seal() called on a spent writer (already sealed / moved-from)");
-    // std::move(pixels_) is a shared_ptr<vc_pixel_buffer>; vc_image's ctor takes
-    // const_pixel_buffer_ptr (shared_ptr<const vc_pixel_buffer>) — the
-    // qualifying conversion is implicit and refcount-only. pixels_ is left null:
-    // the writer is spent.
+    // std::move(pixels_) is a std::unique_ptr<vc_pixel_buffer>; vc_image's
+    // ctor takes const_pixel_buffer_ptr (shared_ptr<const vc_pixel_buffer>).
+    // shared_ptr's unique_ptr-converting constructor ([util.smartptr.shared]
+    // — non-explicit, so this braced call resolves it implicitly) takes over
+    // the buffer and allocates a NEW control block here: this is the one
+    // point where ownership goes from exclusive to shared, so it is also the
+    // one point where sharing's bookkeeping is first paid for. pixels_ is
+    // left null: the writer is spent.
     return vc_image{std::move(meta_), std::move(pixels_)};
 }
 

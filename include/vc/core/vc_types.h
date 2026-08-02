@@ -10,7 +10,13 @@ namespace vc {
 
 class vc_pixel_buffer;
 
-using pixel_buffer_ptr = std::shared_ptr<vc_pixel_buffer>;
+// A shared, read-only handle onto a vc_pixel_buffer — vc_image::pixels()'s
+// return type. There is deliberately no non-const `pixel_buffer_ptr` sibling:
+// the only place that ever held a mutable buffer exclusively
+// (vc_image_writer::pixels_) is a std::unique_ptr, not a shared_ptr — nothing
+// in this library shares a MUTABLE buffer, so a shared-ownership alias for
+// one would have no user and would misstate the ownership model to anyone
+// who found it.
 using const_pixel_buffer_ptr = std::shared_ptr<const vc_pixel_buffer>;
 
 using image_dim = std::uint32_t;     // width or height in pixels

@@ -43,7 +43,7 @@ All identifiers use `snake_case`. No `PascalCase`, no `camelCase`, no `SCREAMING
 | Interfaces (abstract) | `i_` prefix + snake_case | `i_image_reader`, `i_image_writer` |
 | Enums (scoped) | snake_case | `vc_error_code`, `vc_image_format` |
 | Enum values | snake_case | `vc_error_code::file_not_found` |
-| Typedefs / aliases | snake_case | `pixel_buffer_ptr`, `image_dim` |
+| Typedefs / aliases | snake_case | `const_pixel_buffer_ptr`, `image_dim` |
 | Functions / methods | snake_case | `to_string()`, `pixel_count()` |
 | Variables | snake_case | `pixel_count`, `output_path` |
 | Private members | snake_case + trailing `_` | `width_`, `channels_`, `pixels_` |
@@ -63,8 +63,8 @@ Every user-defined type exported from this library carries the `vc_` prefix:
 We do not use the `_t` convention (a C/POSIX pattern). Aliases read like stdlib types:
 
 ```cpp
-using pixel_buffer_ptr = std::shared_ptr<vc_pixel_buffer>; // not pixel_buffer_ptr_t
-using image_dim        = std::uint32_t;                    // not image_dim_t
+using const_pixel_buffer_ptr = std::shared_ptr<const vc_pixel_buffer>; // not const_pixel_buffer_ptr_t
+using image_dim              = std::uint32_t;                          // not image_dim_t
 ```
 
 ### 1.4 Interface prefix
@@ -162,18 +162,22 @@ public API signatures. Every primitive has a named alias that encodes its semant
 namespace vc {
     enum class pixel_dtype : std::uint8_t { f32, u8, u16 };      // which concrete type is stored
     class  vc_pixel_buffer        { /* fixed-size, dtype-tagged — see Sec 4.2 */ };
-    using pixel_buffer_ptr       = std::shared_ptr<vc_pixel_buffer>;
     using const_pixel_buffer_ptr = std::shared_ptr<const vc_pixel_buffer>;
     using image_dim              = std::uint32_t;                // width or height in pixels
     using channel_count          = std::uint32_t;                // 1=grey 2=greyA 3=RGB 4=RGBA
 }
 ```
 
-`pixel_dtype` is declared in `vc_types.h`, alongside the `shared_ptr` aliases and
+`pixel_dtype` is declared in `vc_types.h`, alongside the `shared_ptr` alias and
 `image_dim`/`channel_count` — `vc_types.h` only forward-declares `vc_pixel_buffer` itself (a
 `shared_ptr` alias needs no complete type). `vc_pixel_buffer.h` includes `vc_types.h` for
 `pixel_dtype` and defines the actual `vc_pixel_buffer` class, plus the `vc_pixel_element_req`
 concept its constructor and `as<T>()` are constrained by.
+
+There is deliberately no non-const `pixel_buffer_ptr` sibling (there was one, before
+2026-08-02): the one place that ever held a MUTABLE buffer exclusively —
+`vc_image_writer::pixels_` — is a `std::unique_ptr<vc_pixel_buffer>`, not a `shared_ptr`, since
+the writer is move-only and nothing before `seal()` ever needs a second owner. See §4.1b.
 
 `vc_pixel_buffer` stores one of a closed set of element types (currently `float`, `uint8_t`,
 `uint16_t`) in a `std::variant`, not a single fixed type — dtype is discovered at load time (a JPEG
@@ -229,6 +233,34 @@ is a real, recurring need (not just Week 0.2 scope), so `pixels()` stays the one
 *reading* buffer access — see §4.2 for how mutation is confined to construction instead of
 being offered as a second accessor on `vc_image` itself.
 
+### 4.1b Pixel buffer, while being written — exclusive ownership
+
+`vc_image_writer` holds its in-progress buffer through `pixel_buffer_handle`
+(`include/vc/core/vc_image_writer.h`, `= std::unique_ptr<vc_pixel_buffer>`), not `shared_ptr` —
+the opposite choice from §4.1, and deliberately so: `vc_image_writer` is
+move-only (never copied — §4.2), so there is never a second reference for a buffer to alias
+while it's being filled. A `shared_ptr` member there would model a sharing relationship that
+never actually happens; `unique_ptr` states the true invariant instead of leaving it to a
+comment, and does so at the type level — if a future edit ever removed the writer's explicit
+`= delete` copy operations (§4.2) thinking them redundant, `unique_ptr` alone still makes the
+class implicitly non-copyable, whereas a `shared_ptr` member would have silently let the class
+become copyable, defeating the "half-written image can never be shared or aliased" guarantee
+the class exists to provide.
+
+`pixel_buffer_handle` is declared in `vc_image_writer.h` itself, not in `vc_types.h` beside
+`const_pixel_buffer_ptr` — that alias is a widely-shared, library-wide handle type (`vc_image`
+and others depend on it), while `pixel_buffer_handle` has exactly one owner. Same reasoning
+`vc_edit_session.h` gives for keeping `image_metadata_handle` beside `vc_edit_session` rather
+than centralizing it: a single-owner alias belongs with its owner.
+
+`seal()` is the one moment ownership genuinely becomes shared: it moves the `unique_ptr` into
+`vc_image`'s `const_pixel_buffer_ptr` via `shared_ptr`'s (non-explicit) `unique_ptr`-converting
+constructor, which allocates the buffer's control block right there rather than upfront. This
+costs one allocation that `std::make_shared` used to combine with the buffer's own allocation
+(paid once per image, at construction — not on any per-pixel or per-write path, and not inside
+any benchmarked loop in `bench/`), in exchange for the buffer never being shareable at all
+during the window when it is still mutable.
+
 ### 4.2 Pixel access — const truly prevents mutation, size truly cannot change
 
 ```cpp
@@ -270,7 +302,7 @@ with `clang++ -std=c++20 -Wall -Wextra -fsyntax-only`. Always return by value.
 |---|---|
 | Small value types (enums, `uint32_t`, `bool`) | pass by value |
 | Large / heap-owning types (`vc_image`, `string`) | `const&` for read; value for sink (moves in) |
-| `shared_ptr` | `const pixel_buffer_ptr&` — avoid copying unless sharing ownership is intended |
+| `shared_ptr` | `const const_pixel_buffer_ptr&` — avoid copying unless sharing ownership is intended |
 
 ### 4.4 Non-owning dependencies — `T&`, not a nullable pointer
 
@@ -537,7 +569,7 @@ Mandatory exceptions:
 
 ```
 include/vc/core/vc_pixel_buffer.h  — vc_pixel_element_req concept + vc_pixel_buffer class
-include/vc/core/vc_types.h         — pixel_dtype enum + remaining vc:: aliases (pixel_buffer_ptr, image_dim, etc.)
+include/vc/core/vc_types.h         — pixel_dtype enum + remaining vc:: aliases (const_pixel_buffer_ptr, image_dim, etc.)
 include/vc/core/vc_error_code.h    — vc_error_code enum + to_int/to_error_code/to_string
 include/vc/core/vc_exception.h     — vc_exception class
 include/vc/core/vc_any.h           — vc_any_tag enum + vc_any_tag_req concept + vc_any<Tag> class:
@@ -550,7 +582,8 @@ include/vc/core/vc_image_meta.h    — i_image_meta interface + vc_metadata_valu
                                  stays in vc::edit (include/vc/edit/vc_memory_image_meta.h).
 include/vc/core/vc_image_info.h    — vc_image_info class: image geometry + composed metadata (header-only)
 include/vc/core/vc_image.h         — vc_image class (header-only; see §9.1)
-include/vc/core/vc_image_writer.h  — vc_image_writer class: validated(), seal() (header-only ctor)
+include/vc/core/vc_image_writer.h  — pixel_buffer_handle alias + vc_image_writer class:
+                                 validated(), seal() (header-only ctor)
 include/vc/utils/vc_strings.h — vc::utils string typedefs
 include/vc/utils/vc_log_info_builder.h — vc::utils::log_info_builder_base<T>: shared base for
                                  log_info_builder/dump_image_builder (header-only, no .cpp — see §9)
