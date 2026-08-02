@@ -1,15 +1,15 @@
 // Copyright (c) 2026 Shantanu Agarwal
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "vc/vc_image_writer.h"
+#include "vc/core/vc_image_writer.h"
 
 #include <cassert>
 #include <utility>
 
-#include "vc/vc_image.h"
+#include "vc/core/vc_image.h"
 
-#include "vc/vc_error_code.h"
-#include "vc/vc_exception.h"
+#include "vc/core/vc_error_code.h"
+#include "vc/core/vc_exception.h"
 
 namespace vc {
 

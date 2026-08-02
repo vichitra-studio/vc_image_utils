@@ -11,14 +11,14 @@
 #include <span>
 #include <string>
 
+#include "vc/core/vc_error_code.h"
+#include "vc/core/vc_exception.h"
+#include "vc/core/vc_image.h"
+#include "vc/core/vc_image_meta.h"
+#include "vc/core/vc_image_writer.h"
+#include "vc/core/vc_pixel_buffer.h"
 #include "vc/edit/vc_memory_image_meta.h"
 #include "vc/io/vc_io_stb.h"
-#include "vc/vc_error_code.h"
-#include "vc/vc_exception.h"
-#include "vc/vc_image.h"
-#include "vc/vc_image_meta.h"
-#include "vc/vc_image_writer.h"
-#include "vc/vc_pixel_buffer.h"
 
 #ifndef VC_TEST_DATA_DIR
 #error "VC_TEST_DATA_DIR must be defined by CMake (see CMakeLists.txt)"

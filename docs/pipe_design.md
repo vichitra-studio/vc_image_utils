@@ -385,7 +385,7 @@ dormant.
 `const_pixel_buffer_ptr` (a `shared_ptr<const vc_pixel_buffer>`) — the raw `width_ /
 height_ / channels_` members this paragraph originally described were later extracted
 into `vc_image_info` so `vc_image_writer` could share the same geometry logic
-(`include/vc/vc_image_info.h`).
+(`include/vc/core/vc_image_info.h`).
 
 The choice of a **runtime variant** rather than a templated `vc_pixel_buffer<T>` is deliberate
 and correct (see `vc_pixel_buffer.h` and `coding_guidelines.md` §3.1): templating the element

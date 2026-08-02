@@ -5,10 +5,10 @@
 
 #include <optional>
 
+#include "vc/core/vc_image.h"
 #include "vc/io/vc_io_types.h"
 #include "vc/utils/vc_log_info_builder.h"
 #include "vc/utils/vc_strings.h"
-#include "vc/vc_image.h"
 
 // Unlike vc_types.h's forward declaration of vc_image (sufficient there,
 // since shared_ptr only needs a reference),

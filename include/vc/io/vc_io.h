@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "vc/core/vc_image.h"
 #include "vc/io/vc_io_types.h"
-#include "vc/vc_image.h"
 
 namespace vc::io {
 

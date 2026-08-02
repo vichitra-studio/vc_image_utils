@@ -12,8 +12,8 @@
 #include <typeinfo>
 #include <utility>
 
-#include "vc/vc_error_code.h"
-#include "vc/vc_exception.h"
+#include "vc/core/vc_error_code.h"
+#include "vc/core/vc_exception.h"
 
 // Lives at vc/ (core), NOT vc/utils/: this box throws vc::vc_exception, and
 // vc_error_code.h/vc_exception.h both include vc/utils/vc_strings.h, so

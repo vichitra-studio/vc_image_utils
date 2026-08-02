@@ -22,9 +22,9 @@
 #include "nanobench.h"
 #include "vc_bench_support.h"
 
+#include "vc/core/vc_image.h"
+#include "vc/core/vc_pixel_buffer.h"
 #include "vc/pipe/vc_pipe_packet.h"
-#include "vc/vc_image.h"
-#include "vc/vc_pixel_buffer.h"
 
 namespace {
 

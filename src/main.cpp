@@ -4,8 +4,8 @@
 #include <cstdlib>
 #include <iostream>
 
+#include "vc/core/vc_exception.h"
 #include "vc/io/vc_io_stb.h"
-#include "vc/vc_exception.h"
 
 int main(int argc, char** argv) {
     if (argc != 3) {

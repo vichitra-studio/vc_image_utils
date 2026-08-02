@@ -6,8 +6,8 @@
 #include <exception>
 #include <memory>
 
+#include "vc/core/vc_error_code.h"
 #include "vc/utils/vc_strings.h"
-#include "vc/vc_error_code.h"
 
 namespace vc {
 

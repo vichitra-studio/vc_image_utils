@@ -5,9 +5,9 @@
 
 #include <unordered_map>
 
-#include "vc/vc_image_meta.h" // i_image_meta now lives in core — see that
-                              // header's comment for why the interface
-                              // demoted while this concrete backend did not.
+#include "vc/core/vc_image_meta.h" // i_image_meta now lives in core — see that
+                                   // header's comment for why the interface
+// demoted while this concrete backend did not.
 
 namespace vc::edit {
 

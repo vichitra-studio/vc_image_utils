@@ -6,9 +6,9 @@
 #include "nlohmann/json.hpp" // third_party/, SYSTEM PRIVATE (like stb) — kept
                              // OUT of vc_edit_document_io.h; see that
                              // header's comment.
+#include "vc/core/vc_error_code.h"
+#include "vc/core/vc_exception.h"
 #include "vc/io/vc_io_fs.h"
-#include "vc/vc_error_code.h"
-#include "vc/vc_exception.h"
 
 namespace vc::edit {
 

@@ -88,10 +88,10 @@ endif()
 # Shared source list — reused verbatim by the benchmark-only library copy
 # (vc_bench_lib, built with pinned -march) so the two never drift.
 set(VC_LIB_SOURCES
-    src/vc_exception.cpp
-    src/vc_error_code.cpp
-    src/vc_image.cpp
-    src/vc_image_writer.cpp
+    src/core/vc_exception.cpp
+    src/core/vc_error_code.cpp
+    src/core/vc_image.cpp
+    src/core/vc_image_writer.cpp
     src/io/vc_io_stb.cpp
     src/io/vc_io_fs.cpp
     src/utils/vc_log.cpp

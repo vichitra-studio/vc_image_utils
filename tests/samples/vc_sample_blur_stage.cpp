@@ -7,15 +7,15 @@
 #include <cmath>
 #include <utility>
 
+#include "vc/core/vc_error_code.h"
+#include "vc/core/vc_exception.h"
+#include "vc/core/vc_image.h"
+#include "vc/core/vc_image_writer.h"
+#include "vc/core/vc_pixel_buffer.h"
+#include "vc/core/vc_types.h"
 #include "vc/pipe/vc_pipe_context.h"
 #include "vc/pipe/vc_pipe_contract.h"
 #include "vc/pipe/vc_pipe_packet.h"
-#include "vc/vc_error_code.h"
-#include "vc/vc_exception.h"
-#include "vc/vc_image.h"
-#include "vc/vc_image_writer.h"
-#include "vc/vc_pixel_buffer.h"
-#include "vc/vc_types.h"
 
 namespace vc::pipe {
 

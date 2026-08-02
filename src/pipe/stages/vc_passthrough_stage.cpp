@@ -5,10 +5,10 @@
 
 #include <utility>
 
+#include "vc/core/vc_image.h"
 #include "vc/pipe/vc_pipe_context.h"
 #include "vc/pipe/vc_pipe_contract.h"
 #include "vc/pipe/vc_pipe_packet.h"
-#include "vc/vc_image.h"
 
 namespace vc::pipe {
 

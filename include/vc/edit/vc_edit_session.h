@@ -9,17 +9,18 @@
                                       // definition, not a forward declaration
                                       // (an incomplete-type value member is
                                       // ill-formed).
-// i_image_meta now lives in core (vc/vc_image_meta.h, demoted 2026-07-28 —
-// see that header's comment and docs/edit_model.md Sec 6). This member only
-// names the INTERFACE, never vc_memory_image_meta, so the interface-only
-// header (standard-library headers + vc/vc_any.h) is enough — a
+// i_image_meta now lives in core (vc/core/vc_image_meta.h, demoted
+// 2026-07-28 — see that header's comment and docs/edit_model.md Sec 6). This
+// member only names the INTERFACE, never vc_memory_image_meta, so the
+// interface-only header (standard-library headers + vc/core/vc_any.h) is
+// enough — a
 // light header, so including it directly is cheap and avoids an extra
 // forward declaration. The image_metadata_handle alias below is NOT part of
 // that core header: it names the session's OWNING overlay handle, which is
 // edit-local state (docs/edit_model.md Sec 6's "two layers, merged on
 // export"), not a core concept, so it is declared here instead.
-#include "vc/vc_image.h"
-#include "vc/vc_image_meta.h"
+#include "vc/core/vc_image.h"
+#include "vc/core/vc_image_meta.h"
 
 namespace vc::edit {
 

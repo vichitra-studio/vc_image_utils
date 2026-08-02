@@ -6,9 +6,9 @@
 #include <cstddef>
 #include <utility>
 
-#include "vc/vc_image_info.h"
-#include "vc/vc_image_writer.h"
-#include "vc/vc_types.h"
+#include "vc/core/vc_image_info.h"
+#include "vc/core/vc_image_writer.h"
+#include "vc/core/vc_types.h"
 
 // vc_image and vc_image_writer are mutually dependent BY DESIGN, not an
 // accidental cycle: this header #includes vc_image_writer.h (the inline

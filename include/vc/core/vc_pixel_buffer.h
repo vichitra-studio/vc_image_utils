@@ -11,9 +11,9 @@
 #include <variant>
 #include <vector>
 
-#include "vc/vc_error_code.h"
-#include "vc/vc_exception.h"
-#include "vc/vc_types.h"
+#include "vc/core/vc_error_code.h"
+#include "vc/core/vc_exception.h"
+#include "vc/core/vc_types.h"
 
 namespace vc {
 

@@ -7,9 +7,9 @@
 #include <typeindex>
 #include <vector>
 
+#include "vc/core/vc_error_code.h"
+#include "vc/core/vc_exception.h"
 #include "vc/pipe/vc_pipe_types.h"
-#include "vc/vc_error_code.h"
-#include "vc/vc_exception.h"
 
 namespace vc::pipe {
 

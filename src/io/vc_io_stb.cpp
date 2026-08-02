@@ -6,11 +6,11 @@
 #include "vc/io/vc_io_fs.h"
 #include "vc/io/vc_io_stb.h"
 
-#include "vc/vc_error_code.h"
-#include "vc/vc_exception.h"
-#include "vc/vc_image_writer.h"
-#include "vc/vc_pixel_buffer.h"
-#include "vc/vc_types.h"
+#include "vc/core/vc_error_code.h"
+#include "vc/core/vc_exception.h"
+#include "vc/core/vc_image_writer.h"
+#include "vc/core/vc_pixel_buffer.h"
+#include "vc/core/vc_types.h"
 
 // This is the only translation unit that includes these headers, so it's
 // also the only place the *_IMPLEMENTATION macros can be defined — no risk

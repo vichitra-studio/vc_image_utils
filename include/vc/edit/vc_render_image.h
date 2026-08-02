@@ -3,10 +3,10 @@
 
 #pragma once
 
+#include "vc/core/vc_image.h"
 #include "vc/edit/vc_edit_session.h"
 #include "vc/edit/vc_render_request.h"
 #include "vc/pipe/vc_render_context.h"
-#include "vc/vc_image.h"
 
 namespace vc::edit {
 

@@ -8,6 +8,9 @@
 #include <cstddef>
 
 #include "samples/vc_sample_blur_stage.h"
+#include "vc/core/vc_exception.h"
+#include "vc/core/vc_image.h"
+#include "vc/core/vc_image_meta.h"
 #include "vc/edit/vc_build_pipeline.h"
 #include "vc/edit/vc_cached_edits_table.h"
 #include "vc/edit/vc_edit_document.h"
@@ -30,9 +33,6 @@
 #include "vc/pipe/vc_pipe_types.h"
 #include "vc/pipe/vc_pipeline.h"
 #include "vc/pipe/vc_render_context.h"
-#include "vc/vc_exception.h"
-#include "vc/vc_image.h"
-#include "vc/vc_image_meta.h"
 
 #include <concepts>
 #include <filesystem>

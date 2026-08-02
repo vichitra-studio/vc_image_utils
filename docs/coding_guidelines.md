@@ -536,21 +536,21 @@ Mandatory exceptions:
 ## 9. File layout
 
 ```
-include/vc/vc_pixel_buffer.h  — vc_pixel_element_req concept + vc_pixel_buffer class
-include/vc/vc_types.h         — pixel_dtype enum + remaining vc:: aliases (pixel_buffer_ptr, image_dim, etc.)
-include/vc/vc_error_code.h    — vc_error_code enum + to_int/to_error_code/to_string
-include/vc/vc_exception.h     — vc_exception class
-include/vc/vc_any.h           — vc_any_tag enum + vc_any_tag_req concept + vc_any<Tag> class:
+include/vc/core/vc_pixel_buffer.h  — vc_pixel_element_req concept + vc_pixel_buffer class
+include/vc/core/vc_types.h         — pixel_dtype enum + remaining vc:: aliases (pixel_buffer_ptr, image_dim, etc.)
+include/vc/core/vc_error_code.h    — vc_error_code enum + to_int/to_error_code/to_string
+include/vc/core/vc_exception.h     — vc_exception class
+include/vc/core/vc_any.h           — vc_any_tag enum + vc_any_tag_req concept + vc_any<Tag> class:
                                  shared type-erased single-value box behind
                                  vc_pipe_packet / vc_metadata_value (header-only, no .cpp)
-include/vc/vc_image_meta.h    — i_image_meta interface + vc_metadata_value alias (header-only, no
+include/vc/core/vc_image_meta.h    — i_image_meta interface + vc_metadata_value alias (header-only, no
                                  .cpp — pure interface, no non-pure members to define). Demoted
                                  from vc::edit 2026-07-28 — see docs/edit_model.md Sec 6 and this
                                  header's own comment; the concrete backend (vc_memory_image_meta)
                                  stays in vc::edit (include/vc/edit/vc_memory_image_meta.h).
-include/vc/vc_image_info.h    — vc_image_info class: image geometry + composed metadata (header-only)
-include/vc/vc_image.h         — vc_image class (header-only; see §9.1)
-include/vc/vc_image_writer.h  — vc_image_writer class: validated(), seal() (header-only ctor)
+include/vc/core/vc_image_info.h    — vc_image_info class: image geometry + composed metadata (header-only)
+include/vc/core/vc_image.h         — vc_image class (header-only; see §9.1)
+include/vc/core/vc_image_writer.h  — vc_image_writer class: validated(), seal() (header-only ctor)
 include/vc/utils/vc_strings.h — vc::utils string typedefs
 include/vc/utils/vc_log_info_builder.h — vc::utils::log_info_builder_base<T>: shared base for
                                  log_info_builder/dump_image_builder (header-only, no .cpp — see §9)
@@ -565,10 +565,10 @@ include/vc/io/vc_io_fs.h      — vc::io filesystem helpers: existence checks, d
                                  atomic writes (see src/io/vc_io_fs.cpp)
 include/vc/debug/vc_image_dumper.h — vc::debug: dump, dump_image_builder
 
-src/vc_error_code.cpp         — vc_error_code utilities implementation
-src/vc_exception.cpp          — vc_exception implementation
-src/vc_image.cpp              — empty TU (vc_image is header-only; see §9.1)
-src/vc_image_writer.cpp       — vc_image_writer::validated()/seal() implementation
+src/core/vc_error_code.cpp    — vc_error_code utilities implementation
+src/core/vc_exception.cpp     — vc_exception implementation
+src/core/vc_image.cpp         — empty TU (vc_image is header-only; see §9.1)
+src/core/vc_image_writer.cpp  — vc_image_writer::validated()/seal() implementation
 src/io/vc_io_stb.cpp          — stb adapter implementations; also the sole TU that defines
                                  the stb `_IMPLEMENTATION` macros (see §10)
 src/io/vc_io_fs.cpp           — vc::io filesystem helpers implementation
@@ -584,6 +584,16 @@ docs/                         — project documentation
 One class / one interface per header. No omnibus headers.
 `src/` mirrors `include/vc/` for implementation files above — not an exhaustive rule over the whole
 tree (the later `pipe`/`edit` layers are not enumerated in this box — see their own design docs).
+
+`core/` is a DIRECTORY-ONLY grouping, unlike every sibling here: `pipe/`, `edit/`, `io/`, `utils/`,
+and `debug/` each hold a matching sub-namespace (`vc::pipe`, `vc::edit`, ...), but the classes
+under `include/vc/core/` and `src/core/` stay in plain `vc::` — `vc::vc_image`, not
+`vc::core::vc_image`. Moved 2026-08-02 (renamed from a flat `include/vc/`/`src/` layout) purely to
+stop nine unrelated headers sitting flush against five subdirectories; introducing a `vc::core`
+sub-namespace to match was considered and rejected as out of scope — it would have renamed every
+qualified use of these types across the codebase for a purely organizational request. If `vc::` ever
+needs splitting into narrower namespaces on its own merits, that is a separate, larger decision.
+
 Five worth calling out because a reader might expect a `.cpp` and not find one:
 `vc_pixel_buffer.h`, `vc_log_info_builder.h`, `vc_any.h`, `vc_image_info.h`, and
 `vc_image_meta.h` have none. For the first two, every member that isn't a template is a one-liner
@@ -597,9 +607,9 @@ so there is nothing non-trivial to put in a `.cpp` regardless. `vc_image_meta.h`
 different from all four: `i_image_meta` is a pure interface (every member is either `= default`,
 `= 0`, or `virtual ~... = default`) with no non-pure member to define anywhere — its one concrete
 implementation, `vc_memory_image_meta`, lives in `vc::edit` and is implemented in
-`src/edit/vc_image_meta.cpp` (named for the interface it backs — same convention as
-`src/edit/vc_table.cpp` implementing `vc_memory_table`, see the `pipe`/`edit` layers' own file
-layout).
+`src/edit/vc_image_meta.cpp` (named for the interface it backs, NOT colocated with
+`include/vc/core/vc_image_meta.h` — see the `pipe`/`edit` layers' own file layout — same
+convention as `src/edit/vc_table.cpp` implementing `vc_memory_table`).
 
 ### 9.1 Week 0.2 scaffold — original suggested implementation order (now mostly complete)
 
@@ -609,8 +619,8 @@ likewise fully implemented, header-only (see §9). Of the originally-suggested o
 1 and 2 are now implemented; 3 remains a `TODO(you)` stub:
 
 1. `vc_image`'s construction path — the validate-then-allocate logic now lives in
-   `vc_image_writer::validated()`/`seal()` (`src/vc_image_writer.cpp`,
-   `include/vc/vc_image_writer.h`), not `src/vc_image.cpp` (now an empty TU; the class is
+   `vc_image_writer::validated()`/`seal()` (`src/core/vc_image_writer.cpp`,
+   `include/vc/core/vc_image_writer.h`), not `src/core/vc_image.cpp` (now an empty TU; the class is
    header-only, see §9). `pixel_count()` and `pixels()` are implemented; there is no
    `mutable_pixels()` — `vc_image` is uniformly read-only (§4.2). The `vc_image` test cases
    this was gating pass.

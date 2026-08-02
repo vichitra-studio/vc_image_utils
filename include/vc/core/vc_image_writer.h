@@ -9,17 +9,17 @@
 #include <span>
 #include <utility>
 
-#include "vc/vc_error_code.h"
-#include "vc/vc_exception.h"
-#include "vc/vc_image_info.h"
-#include "vc/vc_pixel_buffer.h"
-#include "vc/vc_types.h"
+#include "vc/core/vc_error_code.h"
+#include "vc/core/vc_exception.h"
+#include "vc/core/vc_image_info.h"
+#include "vc/core/vc_pixel_buffer.h"
+#include "vc/core/vc_types.h"
 
 namespace vc {
 
 // seal() produces a vc_image;
 // This header and vc_image.h are mutually dependent by design — see the
-// comment beside vc_image.h's #include "vc/vc_image_writer.h" for the full
+// comment beside vc_image.h's #include "vc/core/vc_image_writer.h" for the full
 // rationale (why the cycle exists, why it's harmless, and when it would stop
 // being two files).
 class vc_image;

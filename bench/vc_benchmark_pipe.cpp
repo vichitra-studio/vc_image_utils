@@ -30,10 +30,10 @@
 #include "nanobench.h"
 #include "vc_bench_support.h"
 
+#include "vc/core/vc_image.h"
 #include "vc/pipe/stages/vc_passthrough_stage.h"
 #include "vc/pipe/vc_pipe_context.h"
 #include "vc/pipe/vc_pipe_packet.h"
-#include "vc/vc_image.h"
 
 namespace {
 

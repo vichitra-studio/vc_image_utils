@@ -7,8 +7,8 @@
 #include <optional>
 #include <string>
 
+#include "vc/core/vc_image.h"
 #include "vc/debug/vc_image_dumper.h"
-#include "vc/vc_image.h"
 
 #ifndef VC_TEST_OUTPUT_DIR
 #error "VC_TEST_OUTPUT_DIR must be defined by CMake (see CMakeLists.txt)"

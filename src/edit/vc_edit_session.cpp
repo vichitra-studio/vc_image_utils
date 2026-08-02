@@ -9,11 +9,11 @@
 // headers) and i_edit_table (vc_edit_table.h) definitions — needed here for
 // the concrete&->i_edit_table& upcast in the member-init list below (the
 // header only forward-declares all three).
+#include "vc/core/vc_error_code.h"
+#include "vc/core/vc_exception.h"
 #include "vc/edit/vc_cached_edits_table.h"
 #include "vc/edit/vc_edit_table.h"
 #include "vc/edit/vc_persistent_edits_table.h"
-#include "vc/vc_error_code.h"
-#include "vc/vc_exception.h"
 
 namespace vc::edit {
 

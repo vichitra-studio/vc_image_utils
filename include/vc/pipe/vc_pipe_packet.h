@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "vc/vc_any.h"
+#include "vc/core/vc_any.h"
 
 namespace vc::pipe {
 
@@ -17,7 +17,7 @@ namespace vc::pipe {
 // cost of a heap allocation + RTTI. That choice is [OPEN] in the design and
 // revisited once the real payload set is known.
 //
-// Backed by vc::vc_any (include/vc/vc_any.h), the mechanism shared with
+// Backed by vc::vc_any (include/vc/core/vc_any.h), the mechanism shared with
 // vc::vc_metadata_value; the tag is what keeps the two INDEPENDENT types
 // rather than one, and is what get<T>()'s mismatch message names. In a graph
 // that cleared assembly-time validation (Sec 6) get<T>() never throws, because

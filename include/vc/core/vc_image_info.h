@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <memory>
 
-#include "vc/vc_types.h"
+#include "vc/core/vc_types.h"
 
 namespace vc {
 

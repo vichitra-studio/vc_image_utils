@@ -3,8 +3,8 @@
 
 #include "doctest/doctest.h"
 
-#include "vc/vc_exception.h"
-#include "vc/vc_pixel_buffer.h"
+#include "vc/core/vc_exception.h"
+#include "vc/core/vc_pixel_buffer.h"
 
 TEST_CASE("vc_pixel_buffer: float construction reports size and dtype") {
     vc::vc_pixel_buffer buf(5, vc::buf_f32{1.0f});

@@ -521,7 +521,7 @@ struct metadata {
 > — a core type naming a symbol from the higher `vc::edit` package — but that
 > review's fix list did not act on it, and no rationale was recorded either
 > way. Re-evaluated here, and the interface is now **demoted to
-> `vc::i_image_meta`** (`include/vc/vc_image_meta.h`), taking the
+> `vc::i_image_meta`** (`include/vc/core/vc_image_meta.h`), taking the
 > `vc_metadata_value` alias with it. The concrete
 > backend, `vc_memory_image_meta`, **stays in `vc::edit`**
 > (`include/vc/edit/vc_memory_image_meta.h`), deriving from `vc::i_image_meta`
@@ -546,8 +546,8 @@ struct metadata {
 > type-erased-box mechanism, extracting it into core so that `vc_pipe_packet`
 > and `vc_metadata_value` became distinct aliases over one implementation.
 > (That box was named `vc_any_box<Tag>` at the time; it is now `vc_any<Tag>`
-> in `include/vc/vc_any.h`, keyed on a `vc_any_tag` enumerator rather than on
-> a tag struct.)
+> in `include/vc/core/vc_any.h`, keyed on a `vc_any_tag` enumerator rather
+> than on a tag struct.)
 > Demoting
 > `i_image_meta` alongside it completes that same move rather than starting a
 > new one, and the header had already been split (interface vs.

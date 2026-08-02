@@ -18,20 +18,20 @@
 #include "samples/vc_sample_blur_stage.h"
 #include "samples/vc_sample_grayscale_stage.h"
 #include "samples/vc_sample_mean_brightness_stage.h"
+#include "vc/core/vc_any.h"
+#include "vc/core/vc_error_code.h"
+#include "vc/core/vc_exception.h"
+#include "vc/core/vc_image.h"
+#include "vc/core/vc_image_meta.h" // vc_metadata_value — the OTHER vc_any tag, so
 #include "vc/pipe/stages/vc_passthrough_stage.h"
 #include "vc/pipe/vc_pipe_context.h"
 #include "vc/pipe/vc_pipe_contract.h"
 #include "vc/pipe/vc_pipe_packet.h"
 #include "vc/pipe/vc_pipe_types.h"
 #include "vc/pipe/vc_pipeline.h"
-#include "vc/vc_any.h"
-#include "vc/vc_error_code.h"
-#include "vc/vc_exception.h"
-#include "vc/vc_image.h"
-#include "vc/vc_image_meta.h" // vc_metadata_value — the OTHER vc_any tag, so
-                              // the static_asserts below can prove the two
-                              // boxes are unrelated types.
-#include "vc/vc_image_writer.h"
+// the static_asserts below can prove the two
+// boxes are unrelated types.
+#include "vc/core/vc_image_writer.h"
 
 // =====================================================================
 // GREEN — the framework primitives are fully implemented, so these pass
