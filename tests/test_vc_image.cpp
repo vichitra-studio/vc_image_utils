@@ -8,8 +8,10 @@
 #include <cstddef>
 #include <memory>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
+#include <vector>
 
 #include "vc/core/vc_error_code.h"
 #include "vc/core/vc_exception.h"
@@ -58,6 +60,55 @@ TEST_CASE("vc_image_info: composed metadata is null by default") {
     CHECK(meta.metadata() == nullptr);
 }
 
+TEST_CASE("vc_image_info: index() accepts every in-range coordinate") {
+    const vc::vc_image_info meta{4, 2, 3};
+    CHECK(meta.index(0, 0, 0) == 0);
+    CHECK(meta.index(3, 1, 2) == meta.index(0, 0, 0) + (4 * 2 * 3 - 1));
+
+    // Actually sweep the whole extent, rather than trusting the two corners:
+    // every in-range coordinate must both survive the checks AND land on a
+    // distinct offset inside [0, element_count()) — a bounds check that
+    // accidentally rejected an interior coordinate, or index math that
+    // collided two of them, would pass a corners-only test.
+    std::set<std::size_t> seen;
+    for (vc::image_dim y = 0; y < meta.height(); ++y) {
+        for (vc::image_dim x = 0; x < meta.width(); ++x) {
+            for (vc::channel_count ch = 0; ch < meta.channels(); ++ch) {
+                const std::size_t i = meta.index(x, y, ch);
+                CHECK(i < meta.element_count());
+                CHECK(seen.insert(i).second); // no collisions
+            }
+        }
+    }
+    CHECK(seen.size() == meta.element_count());
+}
+
+TEST_CASE("vc_image_info: index() throws on an out-of-range coordinate") {
+    const vc::vc_image_info meta{4, 2, 3};
+    CHECK_THROWS_AS((void)meta.index(4, 0, 0), vc::vc_exception);
+    CHECK_THROWS_AS((void)meta.index(0, 2, 0), vc::vc_exception);
+    CHECK_THROWS_AS((void)meta.index(0, 0, 3), vc::vc_exception);
+}
+
+TEST_CASE("vc_image_info: a default-constructed descriptor is 0x0x0, so even "
+          "index(0, 0, 0) is out of range") {
+    // Contract change worth pinning: before index() checked its arguments this
+    // returned 0. An empty descriptor addresses no elements, so it throws.
+    const vc::vc_image_info meta;
+    CHECK(meta.element_count() == 0);
+    CHECK_THROWS_AS((void)meta.index(0, 0, 0), vc::vc_exception);
+}
+
+TEST_CASE("vc_image_writer: at() propagates index()'s range check") {
+    // at() is the call path the check exists for — it feeds index()'s result
+    // straight to std::span::operator[], which would not catch it.
+    vc::vc_image_writer writer{4, 2, 3, vc::buf_f32{0.0f}};
+    CHECK_NOTHROW(writer.at<vc::buf_f32>(3, 1, 2) = 1.0f);
+    CHECK_THROWS_AS(writer.at<vc::buf_f32>(4, 0, 0), vc::vc_exception);
+    CHECK_THROWS_AS(writer.at<vc::buf_f32>(0, 2, 0), vc::vc_exception);
+    CHECK_THROWS_AS(writer.at<vc::buf_f32>(0, 0, 3), vc::vc_exception);
+}
+
 TEST_CASE(
     "vc_image_writer/vc_image_info: set_metadata is visible through seal()") {
     auto md = std::make_shared<vc::edit::vc_memory_image_meta>();
@@ -75,6 +126,179 @@ TEST_CASE(
     const auto iso = img.meta().metadata()->get("iso");
     REQUIRE(iso.has_value());
     CHECK(iso->get<std::string>() == "400");
+}
+
+// ---- i_image_meta's in-place write path ----
+//
+// with_value() exists so a caller can edit a stored value WITHOUT the copy
+// that get()-modify-set() forces, and — via the const overload — read one the
+// same way. The cases below pin each part separately: the edit lands, a miss
+// is reported rather than thrown, no payload copy is made on either the write
+// or the read path, and get() by contrast still copies (asserted directly, so
+// that cost stays a documented property instead of drifting silently).
+
+// The read path is read-ONLY, and that is a compile-time guarantee rather than
+// a convention. get() returns optional<const value>, so a write through the
+// box it hands back does not compile. This matters because the failure mode it
+// replaces was SILENT: with optional<value>, the line below compiled clean and
+// mutated the temporary get() had just returned, which died at the end of the
+// full expression — the store never changed and nothing said so. Asserted as a
+// requires-expression so reverting get()'s return type breaks the build here
+// instead of quietly reopening the hole.
+//
+// Both checks are written against a template parameter on purpose: a
+// requires-expression only turns a bad expression into `false` when it is
+// DEPENDENT. Spelled with the concrete type it is non-dependent, so the
+// compiler diagnoses it immediately and the test file simply fails to build —
+// which is the opposite of testing it.
+namespace {
+template <typename M>
+concept writable_through_get = requires(M& m) {
+    m.get("iso")->template get<std::string>() = std::string{};
+};
+
+template <typename V>
+concept writable_in_place =
+    requires(V& v) { v.template get<std::string>() = std::string{}; };
+} // namespace
+
+static_assert(
+    !writable_through_get<vc::edit::vc_memory_image_meta>,
+    "i_image_meta::get() must stay read-only — writes go through with_value()");
+
+// ...while the same write through with_value()'s reference DOES compile: the
+// const above must block the discarded-temporary path only, not in-place
+// editing, or it would have taken the feature with it.
+static_assert(writable_in_place<vc::vc_metadata_value>,
+              "vc_any's mutable get<T>() is what with_value() exists to reach");
+
+TEST_CASE("i_image_meta: with_value() edits the stored value in place") {
+    vc::edit::vc_memory_image_meta meta;
+    meta.set("iso", vc::vc_metadata_value{std::string{"400"}});
+
+    CHECK(meta.with_value(
+        "iso", [](vc::vc_metadata_value& v) { v.get<std::string>() = "800"; }));
+
+    const auto iso = meta.get("iso");
+    REQUIRE(iso.has_value());
+    CHECK(iso->get<std::string>() == "800");
+}
+
+TEST_CASE("i_image_meta: with_value() reports a miss instead of throwing") {
+    vc::edit::vc_memory_image_meta meta;
+    bool called = false;
+    CHECK_FALSE(meta.with_value(
+        "absent", [&](vc::vc_metadata_value&) { called = true; }));
+    CHECK_FALSE(called); // the callback must not run on a miss
+}
+
+// A payload whose copy is observable, standing in for the real motivating case
+// (a color matrix). At namespace scope because a local class may not have a
+// static data member. Used by the copy-count case below.
+namespace {
+struct counted_payload {
+    static inline int copies = 0;
+    std::vector<double> data{1.0, 2.0, 3.0};
+    counted_payload() = default;
+    counted_payload(const counted_payload& o) : data(o.data) {
+        ++copies;
+    }
+    counted_payload(counted_payload&&) = default;
+    counted_payload& operator=(const counted_payload&) = default;
+    counted_payload& operator=(counted_payload&&) = default;
+};
+} // namespace
+
+TEST_CASE("i_image_meta: with_value() copies no payload — the whole point") {
+    // Going through get()-modify-set() would copy the payload out of the store
+    // and move a whole new one back; with_value() edits it where it lives.
+    vc::edit::vc_memory_image_meta meta;
+    meta.set("matrix", vc::vc_metadata_value{counted_payload{}});
+
+    counted_payload::copies = 0;
+    REQUIRE(meta.with_value("matrix", [](vc::vc_metadata_value& v) {
+        v.get<counted_payload>().data[0] = 42.0;
+    }));
+    CHECK(counted_payload::copies == 0);
+
+    // And the edit is genuinely in the store, not in a discarded temporary.
+    // REQUIRE, not a bare call: every assertion below lives INSIDE the
+    // callback, so a with_value() that returned false would skip all of them
+    // and leave this case passing while verifying nothing.
+    counted_payload::copies = 0;
+    REQUIRE(meta.with_value("matrix", [](vc::vc_metadata_value& v) {
+        CHECK(v.get<counted_payload>().data[0] == 42.0);
+    }));
+    CHECK(counted_payload::copies == 0);
+}
+
+TEST_CASE("i_image_meta: a throwing callback propagates and keeps the partial "
+          "edit (basic guarantee, not strong)") {
+    // Pinned because it is a deliberate trade, not an accident: rolling back
+    // would require copying the payload aside before every call, which is the
+    // exact cost with_value() exists to avoid. A backend that silently
+    // swallowed the exception, or one that discarded the partial write, would
+    // both be wrong — and both would pass without this case.
+    vc::edit::vc_memory_image_meta meta;
+    meta.set("iso", vc::vc_metadata_value{std::string{"400"}});
+
+    CHECK_THROWS_AS(meta.with_value("iso",
+                                    [](vc::vc_metadata_value& v) {
+                                        v.get<std::string>() = "PARTIAL";
+                                        throw vc::vc_exception(
+                                            vc::vc_error_code::invalid_argument,
+                                            "callback failed");
+                                    }),
+                    vc::vc_exception);
+
+    const auto iso = meta.get("iso");
+    REQUIRE(iso.has_value());
+    CHECK(iso->get<std::string>() == "PARTIAL"); // kept, not rolled back
+}
+
+TEST_CASE("i_image_meta: the const with_value() reads without copying, where "
+          "get() cannot") {
+    vc::edit::vc_memory_image_meta meta;
+    meta.set("matrix", vc::vc_metadata_value{counted_payload{}});
+    const vc::i_image_meta& reader = meta;
+
+    // get() is the copying read — that is inherent to returning by value, and
+    // is exactly the cost the const overload exists to let a caller avoid.
+    counted_payload::copies = 0;
+    CHECK(reader.get("matrix").has_value());
+    CHECK(counted_payload::copies == 1);
+
+    counted_payload::copies = 0;
+    CHECK(reader.with_value("matrix", [](const vc::vc_metadata_value& v) {
+        CHECK(v.get<counted_payload>().data.size() == 3);
+    }));
+    CHECK(counted_payload::copies == 0);
+
+    CHECK_FALSE(reader.with_value("absent", [](const vc::vc_metadata_value&) {
+        FAIL("callback must not run on a miss");
+    }));
+}
+
+// The case the const overload actually exists for: a sealed vc_image exposes
+// its captured metadata as shared_ptr<const i_image_meta>, so the mutable
+// with_value() is unreachable there. Without a const overload this caller has
+// no copy-free way to read its own metadata at all.
+TEST_CASE("vc_image: metadata on a sealed image is readable without a copy") {
+    auto md = std::make_shared<vc::edit::vc_memory_image_meta>();
+    md->set("matrix", vc::vc_metadata_value{counted_payload{}});
+
+    vc::vc_image_writer writer{4, 2, 3, vc::buf_f32{0.0f}};
+    writer.set_metadata(md);
+    const vc::vc_image img = std::move(writer).seal();
+
+    const vc::const_image_meta_ptr& meta = img.meta().metadata();
+    REQUIRE(meta != nullptr);
+
+    counted_payload::copies = 0;
+    CHECK(meta->with_value("matrix", [](const vc::vc_metadata_value& v) {
+        CHECK(v.get<counted_payload>().data[0] == 1.0);
+    }));
+    CHECK(counted_payload::copies == 0);
 }
 
 // The other half of that write path: "no metadata" is reachable ONLY as the
@@ -138,10 +362,10 @@ TEST_CASE("vc_image_writer: with_pixels() span size equals the writer's"
 }
 
 TEST_CASE("vc_image_writer: with_pixels() throws on a dtype that does not"
-          " match the buffer, same contract as pixels()/at()") {
+          " match the buffer, same contract as at()") {
     // The buffer was allocated as buf_f32 (see the fill value below); asking
-    // with_pixels() for buf_u8 must fail the same way pixels<u8>() and
-    // at<u8>() already do — both forward straight to
+    // with_pixels() for buf_u8 must fail the same way at<u8>() already does —
+    // both forward straight to
     // vc_pixel_buffer::as<T>(), which throws vc::vc_exception when the
     // requested T doesn't match the stored dtype (vc_pixel_buffer.h).
     vc::vc_image_writer writer{4, 2, 3, vc::buf_f32{0.0f}};
@@ -170,6 +394,39 @@ TEST_CASE("vc_error_code: round-trips through to_int/to_error_code") {
           vc::vc_error_code::pipe_invalid_topology);
     CHECK(vc::to_string(vc::vc_error_code::pipe_invalid_topology) ==
           "pipe_invalid_topology");
+}
+
+// LEAK REGRESSION GUARD. read() decodes into a raw stb buffer before it builds
+// the writer, so every throw between those two points has to release it. This
+// exercises the one such path a caller can reach deterministically:
+// read_config::dtype is an unvalidated field, so an out-of-range value falls
+// through read()'s switch to its `default:` throw with the decoded image
+// already allocated. Before that buffer became a unique_ptr, twenty iterations
+// of this leaked 63.5 MB (measured with macOS `leaks`); it is now 0.
+//
+// Why no test caught the original: this was the only reachable post-decode
+// throw and nothing exercised it. Note the guard only BITES in CI —
+// .github/workflows/build.yml runs the debug-sanitizers preset on
+// ubuntu-latest, where LeakSanitizer is on by default. On macOS/arm64 ASan
+// reports "detect_leaks is not supported on this platform", so running this
+// locally proves the throw, never the absence of a leak.
+TEST_CASE("stb_image_reader: an unsupported dtype throws without leaking the "
+          "decoded buffer") {
+    vc::io::stb_image_reader reader;
+    const vc::io::path input =
+        std::string(VC_TEST_DATA_DIR) + "/test_1_jpeg_3ch.jpg";
+    const vc::io::read_config bad{.dtype = static_cast<vc::pixel_dtype>(99)};
+
+    // Repeated so a reintroduced leak is large enough to be unmistakable
+    // rather than a single allocation lost in the noise.
+    for (int i = 0; i < 8; ++i) {
+        try {
+            (void)reader.read(input, bad);
+            FAIL("read() should have thrown on an unsupported dtype");
+        } catch (const vc::vc_exception& e) {
+            CHECK(e.code() == vc::vc_error_code::decode_error);
+        }
+    }
 }
 
 TEST_CASE("stb round-trip: JPEG in, PNG out, dimensions and pixels match") {

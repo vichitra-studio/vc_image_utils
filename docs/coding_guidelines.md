@@ -269,7 +269,7 @@ during the window when it is still mutable.
 vc::const_pixel_buffer_ptr pixels() const noexcept;
 
 // vc_image_writer — the ONLY type with write access, and only until seal(). Typed element
-// write; at()/pixels<T>()/with_pixels<T>() below are the three ways in.
+// write; at()/with_pixels<T>() below are the two ways in.
 template <vc_pixel_element_req T> T& at(image_dim x, image_dim y, channel_count ch);
 ```
 
@@ -277,7 +277,7 @@ template <vc_pixel_element_req T> T& at(image_dim x, image_dim y, channel_count 
 copy). The pointed-to `vc_pixel_buffer` is `const`, so the compiler prevents any write through
 it, and `vc_image` declares no mutable accessor at all — not a private one, not a
 carefully-gated one, none. The only way to get pixels into an image is to fill a
-`vc_image_writer` (`at<T>()`, `pixels<T>()`, or the preferred `with_pixels<T>()`) and then
+`vc_image_writer` (`at<T>()`, or the preferred `with_pixels<T>()`) and then
 `seal()` it; sealing moves the buffer out, const-qualified, and the writer is spent. Mutation
 is confined to that one construction window, never reachable afterward.
 
@@ -407,6 +407,20 @@ where silently discarding the return value is a plausible, specific bug:
   ```
   Mark both the interface declaration and every override explicitly — do not rely on the
   attribute propagating through virtual dispatch alone.
+
+  The counterpart case, so its absence reads as decided rather than forgotten:
+  `i_image_meta::with_value` returns a **`bool` found/not-found flag** and is deliberately
+  **not** `[[nodiscard]]`. "Edit this field if it is present, and I do not care whether it
+  was" is a legitimate call, so discarding it is not the plausible, specific bug this
+  attribute exists to catch — it is exactly the ignorable status return the paragraph above
+  says this codebase does not have to protect against.
+
+  Note this is *not* "bools never get the attribute": `vc_pipeline::has_consumer`,
+  `io::file_exists` and `io::directory_exists` are all `[[nodiscard]] bool`. The line is
+  **pure predicate vs. status flag**. Those three have no effect other than answering the
+  question, so discarding the answer means the call did nothing — the same reasoning as the
+  pure-converter bullet below. `with_value`'s primary effect is running the callback; the
+  bool is secondary information about whether it ran.
 - **Pure factories and one-way transitions**, whose entire effect is the value they hand
   back (`vc_image::zeros`/`with_fill`, `vc_image_writer::seal()`) and pure converters
   (`to_int`, `to_error_code`, `to_string`).
@@ -580,7 +594,8 @@ include/vc/core/vc_image_meta.h    — i_image_meta interface + vc_metadata_valu
                                  from vc::edit 2026-07-28 — see docs/edit_model.md Sec 6 and this
                                  header's own comment; the concrete backend (vc_memory_image_meta)
                                  stays in vc::edit (include/vc/edit/vc_memory_image_meta.h).
-include/vc/core/vc_image_info.h    — vc_image_info class: image geometry + composed metadata (header-only)
+include/vc/core/vc_image_info.h    — vc_image_info class: image geometry + composed metadata (every
+                                 member inline EXCEPT index()'s throw helper, see the .cpp below)
 include/vc/core/vc_image.h         — vc_image class (header-only; see §9.1)
 include/vc/core/vc_image_writer.h  — pixel_buffer_handle alias + vc_image_writer class:
                                  validated(), seal() (header-only ctor)
@@ -601,6 +616,8 @@ include/vc/debug/vc_image_dumper.h — vc::debug: dump, dump_image_builder
 src/core/vc_error_code.cpp    — vc_error_code utilities implementation
 src/core/vc_exception.cpp     — vc_exception implementation
 src/core/vc_image.cpp         — empty TU (vc_image is header-only; see §9.1)
+src/core/vc_image_info.cpp    — vc_image_info::throw_out_of_range(), the only non-inline member
+                                 of vc_image_info.h (its rationale is at the declaration)
 src/core/vc_image_writer.cpp  — vc_image_writer::validated()/seal() implementation
 src/io/vc_io_stb.cpp          — stb adapter implementations; also the sole TU that defines
                                  the stb `_IMPLEMENTATION` macros (see §10)
@@ -627,17 +644,15 @@ sub-namespace to match was considered and rejected as out of scope — it would 
 qualified use of these types across the codebase for a purely organizational request. If `vc::` ever
 needs splitting into narrower namespaces on its own merits, that is a separate, larger decision.
 
-Five worth calling out because a reader might expect a `.cpp` and not find one:
-`vc_pixel_buffer.h`, `vc_log_info_builder.h`, `vc_any.h`, `vc_image_info.h`, and
+Four worth calling out because a reader might expect a `.cpp` and not find one:
+`vc_pixel_buffer.h`, `vc_log_info_builder.h`, `vc_any.h`, and
 `vc_image_meta.h` have none. For the first two, every member that isn't a template is a one-liner
 (`dtype()`/`size()`; `set_tag_enabled()`/`tag_enabled()`), and the rest — the constructor and
 `as<T>()` for `vc_pixel_buffer`, `operator()`/`resolve()` for `log_info_builder_base<T>` — are
 templates that must be defined where instantiated. `vc_any<Tag>` is itself a template — on a
 `vc_any_tag` *value*, a non-type parameter rather than a type — so the same reasoning covers
-the whole class, not just some members. `vc_image_info` has
-no template at all — every member (including `element_count()`/`index()`) is simply a one-liner —
-so there is nothing non-trivial to put in a `.cpp` regardless. `vc_image_meta.h`'s reason is
-different from all four: `i_image_meta` is a pure interface (every member is either `= default`,
+the whole class, not just some members. `vc_image_meta.h`'s reason is
+different from all three: `i_image_meta` is a pure interface (every member is either `= default`,
 `= 0`, or `virtual ~... = default`) with no non-pure member to define anywhere — its one concrete
 implementation, `vc_memory_image_meta`, lives in `vc::edit` and is implemented in
 `src/edit/vc_image_meta.cpp` (named for the interface it backs, NOT colocated with

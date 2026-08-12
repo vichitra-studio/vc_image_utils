@@ -123,7 +123,16 @@ class vc_edit_session {
     // The constructor enforces meta_ is non-null, so meta() can safely
     // dereference and stay noexcept — there is no "no backend attached"
     // state to handle here.
-    i_image_meta& meta() noexcept {
+    i_image_meta& meta() noexcept { // mutated by editing
+        return *meta_;
+    }
+    // Paired const overload, same shape as edits() above. Without it a
+    // `const vc_edit_session&` could not read its own metadata at all — every
+    // i_image_meta accessor is reached through this one handle, so a
+    // non-const-only meta() makes the whole backend unreachable from a const
+    // session, including i_image_meta's const with_value() (vc_image_meta.h),
+    // which exists precisely to read a stored value without copying it.
+    const i_image_meta& meta() const noexcept {
         return *meta_;
     }
 

@@ -177,6 +177,22 @@ TEST_CASE("vc_edit_session: composes an immutable source and mutable edits") {
     // round-trip through it directly.
     session.meta().set("rating", vc::vc_metadata_value{std::string{"5"}});
     CHECK(session.meta().get("rating").value().get<std::string>() == "5");
+
+    // meta() is a const/non-const PAIR, like edits(). Without the const
+    // overload a `const vc_edit_session&` could not reach its metadata backend
+    // at all, since every i_image_meta accessor goes through this one handle.
+    const vc::edit::vc_edit_session& reader = session;
+    CHECK(reader.meta().get("rating").value().get<std::string>() == "5");
+
+    // And the const handle reaches i_image_meta's const with_value(), which is
+    // the copy-free read path — the reason the overload is worth having rather
+    // than just being symmetric.
+    bool read_in_place = false;
+    CHECK(
+        reader.meta().with_value("rating", [&](const vc::vc_metadata_value& v) {
+            read_in_place = v.get<std::string>() == "5";
+        }));
+    CHECK(read_in_place);
 }
 
 TEST_CASE("vc_memory_table: put/get round-trips bytes; a miss is nullopt") {

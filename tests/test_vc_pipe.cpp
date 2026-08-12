@@ -56,6 +56,23 @@ TEST_CASE("vc_pipe_packet: default-constructed holds nothing") {
     CHECK_FALSE(p.has_value());
 }
 
+TEST_CASE("vc_any: get<T>() on a non-const box returns a mutable reference "
+          "that updates the stored value in place") {
+    vc::pipe::vc_pipe_packet p{std::string{"before"}};
+    p.get<std::string>() = "after";
+    CHECK(p.get<std::string>() == "after");
+}
+
+TEST_CASE("vc_any: get<T>() on a const box still throws on a type mismatch") {
+    const vc::pipe::vc_pipe_packet p{std::string{"hello"}};
+    CHECK_THROWS_AS(p.get<int>(), vc::vc_exception);
+}
+
+TEST_CASE("vc_any: get<T>() on a non-const box throws on a type mismatch") {
+    vc::pipe::vc_pipe_packet p{std::string{"hello"}};
+    CHECK_THROWS_AS(p.get<int>(), vc::vc_exception);
+}
+
 // vc_any's whole reason for taking a tag is that two boxes sharing one
 // implementation must NOT be interchangeable — a durable metadata value and an
 // ephemeral pipe packet are different things. Assert that directly, in both

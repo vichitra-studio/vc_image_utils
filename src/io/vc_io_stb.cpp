@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 #include <algorithm>
+#include <memory>
+#include <span>
 
 #include "vc/io/vc_io_fs.h"
 #include "vc/io/vc_io_stb.h"
@@ -30,7 +32,24 @@ vc::vc_image stb_image_reader::read(const path& p, const read_config& config) {
     require_file_exists(p, "stb_image_reader::read");
 
     int w = 0, h = 0, channels_in_file = 0;
-    unsigned char* data = stbi_load(p.c_str(), &w, &h, &channels_in_file, 0);
+
+    // OWNING from the moment stb hands the buffer over, because everything
+    // between here and the return can throw: vc_image_writer's constructor
+    // validates the geometry and then allocates the pixel buffer (std::bad_alloc
+    // on a large decode), and the switch below throws outright on a dtype it
+    // does not recognise — read_config::dtype is a plain field with no
+    // validation, so a caller can reach that branch with one bad argument. A
+    // bare `unsigned char*` freed at the bottom of the function leaks the entire
+    // decoded image down every one of those paths. Measured at 3.2 MB per throw
+    // on the 3-channel JPEG fixture before this was a unique_ptr.
+    //
+    // Nothing caught it: no test made read() throw after stbi_load() succeeded,
+    // and LeakSanitizer does not run on macOS/arm64 ("detect_leaks is not
+    // supported on this platform"), so the debug-sanitizers preset is blind to
+    // leaks by construction. The regression test is in tests/test_vc_image.cpp.
+    const std::unique_ptr<unsigned char, decltype(&stbi_image_free)> data{
+        stbi_load(p.c_str(), &w, &h, &channels_in_file, 0), &stbi_image_free};
+
     auto uw = static_cast<vc::image_dim>(w);
     auto uh = static_cast<vc::image_dim>(h);
     auto channels = static_cast<vc::channel_count>(channels_in_file);
@@ -46,28 +65,34 @@ vc::vc_image stb_image_reader::read(const path& p, const read_config& config) {
         case vc::pixel_dtype::f32: {
             auto temp_writer =
                 vc_image_writer(uw, uh, channels, vc::buf_f32{0.0f});
-            auto pix = temp_writer.pixels<vc::buf_f32>();
-            std::transform(data, data + pix.size(), pix.begin(),
-                           [](unsigned char v) {
-                               return static_cast<vc::buf_f32>(v) / 255.0f;
-                           });
+            temp_writer.with_pixels<vc::buf_f32>(
+                [&](std::span<vc::buf_f32> pix) {
+                    std::transform(data.get(), data.get() + pix.size(),
+                                   pix.begin(), [](unsigned char v) {
+                                       return static_cast<vc::buf_f32>(v) /
+                                              255.0f;
+                                   });
+                });
             return temp_writer;
         }
         case vc::pixel_dtype::u8: {
             auto temp_writer = vc_image_writer(uw, uh, channels, vc::buf_u8{0});
-            auto pix = temp_writer.pixels<vc::buf_u8>();
-            std::copy(data, data + pix.size(), pix.begin());
+            temp_writer.with_pixels<vc::buf_u8>([&](std::span<vc::buf_u8> pix) {
+                std::copy(data.get(), data.get() + pix.size(), pix.begin());
+            });
             return temp_writer;
         }
         case vc::pixel_dtype::u16: {
             auto temp_writer =
                 vc_image_writer(uw, uh, channels, vc::buf_u16{0});
-            auto pix = temp_writer.pixels<vc::buf_u16>();
-            std::transform(data, data + pix.size(), pix.begin(),
-                           [](unsigned char v) {
-                               return static_cast<vc::buf_u16>(
-                                   (static_cast<unsigned>(v) << 8) | v);
-                           });
+            temp_writer.with_pixels<vc::buf_u16>(
+                [&](std::span<vc::buf_u16> pix) {
+                    std::transform(data.get(), data.get() + pix.size(),
+                                   pix.begin(), [](unsigned char v) {
+                                       return static_cast<vc::buf_u16>(
+                                           (static_cast<unsigned>(v) << 8) | v);
+                                   });
+                });
             return temp_writer;
         }
         default:
@@ -76,7 +101,6 @@ vc::vc_image stb_image_reader::read(const path& p, const read_config& config) {
         }
     }();
 
-    stbi_image_free(data);
     return std::move(writer).seal();
 }
 

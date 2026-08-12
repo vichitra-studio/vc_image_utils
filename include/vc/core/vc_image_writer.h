@@ -6,7 +6,6 @@
 #include <cassert>
 #include <cstddef>
 #include <memory>
-#include <span>
 #include <utility>
 
 #include "vc/core/vc_error_code.h"
@@ -116,37 +115,23 @@ class vc_image_writer {
 
     // Typed 2D element write. T must match the buffer's dtype, else as<T>()
     // throws vc::vc_exception — the same contract as vc_pixel_buffer. Scattered
-    // writes use at(); a hot loop normally takes pixels<T>() below and indexes
-    // via meta().index(...).
+    // writes use at(); a hot loop normally takes with_pixels<T>() below.
     template <vc_pixel_element_req T>
     T& at(image_dim x, image_dim y, channel_count ch) {
         assert(pixels_ && "vc_image_writer used after seal() (spent writer)");
         return pixels_->as<T>()[meta_.index(x, y, ch)];
     }
 
-    // Whole-buffer typed span — the fast path for pixel loops. Mutable: this is
-    // the writer. CAUTION: the returned span is a non-owning view that stays
-    // valid only until seal() — see the pixels_ member comment below and
-    // with_pixels() just after this. Prefer with_pixels() unless the span
-    // genuinely needs to outlive this call (e.g. handing it to a callee that
-    // returns before this writer is sealed); pixels() exists for that case and
-    // for callers already structured around holding the span themselves.
-    template <vc_pixel_element_req T> std::span<T> pixels() {
-        assert(pixels_ && "vc_image_writer used after seal() (spent writer)");
-        return pixels_->as<T>();
-    }
-
     // Scoped pixel access — the PREFERRED accessor for hot loops. Calls
     // f(std::span<T>{...}) and returns nothing, which removes the common
-    // accidental-retention path: there is no returned handle for a caller to
-    // casually assign into a variable that outlives this call, the way
-    // `auto px = writer.pixels<T>();` invites. That is a real ergonomic win
-    // over pixels()/at() above, whose whole return value IS such a handle.
-    // It is NOT a structural guarantee, though: a lambda that captures a
-    // reference (`[&]`) can still copy the span out through that capture,
-    // and the underlying hazard is unchanged either way — any span retained
-    // past seal(), by whatever path, still aliases the sealed image's buffer
-    // (see the pixels_ member comment below for why).
+    // accidental-retention path: a span returned BY VALUE invites a caller to
+    // assign it into a variable that outlives this call (`auto px = ...;`);
+    // routing it through a callback instead removes that returned handle
+    // entirely. It is NOT a structural guarantee, though: a lambda that
+    // captures a reference (`[&]`) can still copy the span out through that
+    // capture, and the underlying hazard is unchanged either way — any span
+    // retained past seal(), by whatever path, still aliases the sealed
+    // image's buffer (see the pixels_ member comment below).
     template <vc_pixel_element_req T, typename F> void with_pixels(F&& f) {
         assert(pixels_ && "vc_image_writer used after seal() (spent writer)");
         std::forward<F>(f)(pixels_->as<T>());
@@ -158,9 +143,9 @@ class vc_image_writer {
     // Rvalue-qualified because sealing spends the writer:
     //   vc_image img = std::move(w).seal();
     // After this the writer is spent and must not be touched again: it holds a
-    // null buffer, so at()/pixels() would dereference null, a second seal()
-    // would mint an image with null pixels, and any span/ref obtained earlier is
-    // now a view into the sealed image (see the pixels_ note below).
+    // null buffer, so at()/with_pixels() would dereference null, a second
+    // seal() would mint an image with null pixels, and any span/ref obtained
+    // earlier is now a view into the sealed image (see the pixels_ note below).
     [[nodiscard]] vc_image seal() &&;
 
   private:
@@ -181,8 +166,8 @@ class vc_image_writer {
     // move itself (here, or via vc_image_writer's own defaulted move ctor) is
     // still a cheap pointer steal, same cost as moving a shared_ptr would be.
     //
-    // CAUTION: the spans/refs handed out by pixels<T>()/at<T>() are
-    // NON-OWNING views into this buffer; seal() moves ownership of the
+    // CAUTION: the span/ref handed out by with_pixels<T>()/at<T>() is a
+    // NON-OWNING view into this buffer; seal() moves ownership of the
     // buffer but not its address (the heap block a std::vector owns doesn't
     // move when the vector does — only the handle to it does), so a view
     // RETAINED across seal() still aliases — and could mutate — the sealed

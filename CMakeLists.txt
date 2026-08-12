@@ -91,6 +91,7 @@ set(VC_LIB_SOURCES
     src/core/vc_exception.cpp
     src/core/vc_error_code.cpp
     src/core/vc_image.cpp
+    src/core/vc_image_info.cpp
     src/core/vc_image_writer.cpp
     src/io/vc_io_stb.cpp
     src/io/vc_io_fs.cpp

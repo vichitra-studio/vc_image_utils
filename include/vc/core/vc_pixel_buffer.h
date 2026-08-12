@@ -73,19 +73,12 @@ class vc_pixel_buffer {
     // caller gets element access but not resize()/clear() on the backing
     // storage — same invariant this class exists to enforce, one layer in.
     template <vc_pixel_element_req T> std::span<T> as() {
-        if (!std::holds_alternative<std::vector<T>>(data_)) {
-            throw vc::vc_exception(vc::vc_error_code::invalid_argument,
-                                   "vc_pixel_buffer::as<T>(): requested dtype "
-                                   "does not match stored dtype");
-        }
+        throw_on_mismatch<T>();
         return std::span<T>{std::get<std::vector<T>>(data_)};
     }
+
     template <vc_pixel_element_req T> std::span<const T> as() const {
-        if (!std::holds_alternative<std::vector<T>>(data_)) {
-            throw vc::vc_exception(vc::vc_error_code::invalid_argument,
-                                   "vc_pixel_buffer::as<T>(): requested dtype "
-                                   "does not match stored dtype");
-        }
+        throw_on_mismatch<T>();
         return std::span<const T>{std::get<std::vector<T>>(data_)};
     }
 
@@ -106,6 +99,18 @@ class vc_pixel_buffer {
                                  std::vector<buf_u8>>);
     static_assert(std::is_same_v<std::variant_alternative_t<2, pixel_buffer>,
                                  std::vector<buf_u16>>);
+
+    // The one throw site behind both as<T>() overloads above. Templated
+    // because the check itself needs T (holds_alternative<vector<T>>) —
+    // unlike vc_any::throw_type_mismatch() (vc_any.h), whose message names
+    // only the box's tag and so needs no template parameter of its own.
+    template <vc_pixel_element_req T> void throw_on_mismatch() const {
+        if (!std::holds_alternative<std::vector<T>>(data_)) {
+            throw vc::vc_exception(vc::vc_error_code::invalid_argument,
+                                   "vc_pixel_buffer::as<T>(): requested dtype "
+                                   "does not match stored dtype");
+        }
+    }
 
     pixel_buffer data_;
 };

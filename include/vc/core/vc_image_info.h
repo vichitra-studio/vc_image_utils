@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <string_view>
 
 #include "vc/core/vc_types.h"
 
@@ -77,8 +78,36 @@ class vc_image_info {
     //   (static_cast<std::size_t>(ch) * height_ + y) * width_ + x
     // when planar working buffers actually arrive. Kept interleaved now because
     // no code depends on the layout yet and the first consumer is stb I/O.
-    std::size_t
-    index(image_dim x, image_dim y, channel_count ch) const noexcept {
+    //
+    // THROWS on an out-of-range x/y/ch. A coordinate is caller input the same
+    // way validated()'s width/height/channels are (vc_image_writer.cpp) — and
+    // every other kind of invalid input in this library already fails loudly
+    // (that geometry validation, vc_pixel_buffer::as<T>()'s dtype mismatch,
+    // set_metadata()'s null check). Without this check a bad coordinate would
+    // silently compute a bogus offset and vc_image_writer::at() would read or
+    // write through it via std::span::operator[], which has no bounds check of
+    // its own (span gained no checked accessor in C++20). Not noexcept for
+    // that reason.
+    //
+    // This guards the coordinate path ONLY — it is not a bounds check on the
+    // buffer. A caller that takes the whole span (vc_image_writer's
+    // with_pixels<T>(), vc_image::pixels()->as<T>()) and indexes it directly
+    // bypasses this entirely; span::operator[] is still unchecked there.
+    //
+    // NOTE: a default-constructed vc_image_info is 0x0x0, so EVERY coordinate
+    // is out of range for it — index(0, 0, 0) throws rather than returning 0
+    // as it did before the check existed. That is the intended reading (an
+    // empty descriptor has no elements to address), not an oversight.
+    std::size_t index(image_dim x, image_dim y, channel_count ch) const {
+        if (x >= width_) {
+            throw_out_of_range("x", x, "width", width_);
+        }
+        if (y >= height_) {
+            throw_out_of_range("y", y, "height", height_);
+        }
+        if (ch >= channels_) {
+            throw_out_of_range("ch", ch, "channels", channels_);
+        }
         return (static_cast<std::size_t>(y) * width_ + x) * channels_ + ch;
     }
 
@@ -110,6 +139,29 @@ class vc_image_info {
     }
 
   private:
+    // The one throw site behind index()'s three range checks — same shape as
+    // vc_pixel_buffer::throw_on_mismatch<T>() (vc_pixel_buffer.h): the checks
+    // stay as three separate `if`s (each needs its own comparison), but the
+    // message-building/throw is written once instead of three times.
+    //
+    // Declared here, DEFINED in vc_image_info.cpp: this is the rare/error
+    // path, not the common-case comparisons above, so it does not need to be
+    // inline. Keeping it out-of-line means vc_error_code.h/vc_exception.h and
+    // the message's string concatenation are compiled once, in that one .cpp,
+    // rather than parsed and re-inlined into every TU that includes this
+    // header (most of the library) — the same reason libstdc++'s
+    // vector::at() outlines its own throw path instead of inlining it.
+    //
+    // std::size_t rather than image_dim/channel_count: one helper serves both
+    // an image_dim coordinate (x/y) and a channel_count one (ch), so naming
+    // either alias here would be wrong for the other caller, and spelling the
+    // underlying std::uint32_t would hardcode what vc_types.h exists to keep
+    // changeable. size_t holds any widening of either alias.
+    [[noreturn]] static void throw_out_of_range(std::string_view coord,
+                                                std::size_t value,
+                                                std::string_view bound_name,
+                                                std::size_t bound);
+
     image_dim width_ = 0;
     image_dim height_ = 0;
     channel_count channels_ = 0;

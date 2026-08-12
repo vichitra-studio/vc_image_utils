@@ -16,8 +16,12 @@ namespace vc::edit {
 // vc_memory_table, so it is written in full (it is NOT a rep).
 class vc_memory_image_meta : public i_image_meta {
   public:
-    [[nodiscard]] std::optional<value> get(const field& f) const override;
+    [[nodiscard]] std::optional<const value> get(const field& f) const override;
     void set(const field& f, value v) override;
+    bool with_value(const field& f,
+                    const std::function<void(value&)>& fn) override;
+    bool with_value(const field& f,
+                    const std::function<void(const value&)>& fn) const override;
 
   private:
     std::unordered_map<field, value> map_;

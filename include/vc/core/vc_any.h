@@ -130,15 +130,28 @@ class vc_any {
     explicit vc_any(T value) : value_(std::move(value)) {
     }
 
-    // Unbox to T. Throws vc::vc_exception if the stored payload is not a T.
+    // Unbox to T, read-only. Throws vc::vc_exception if the stored payload is
+    // not a T.
     template <typename T> const T& get() const {
         const T* held = std::any_cast<T>(&value_);
         if (held == nullptr) {
-            throw vc::vc_exception(
-                vc::vc_error_code::invalid_argument,
-                std::string(kTagName) +
-                    "::get<T>(): requested type does not match the stored "
-                    "payload type");
+            throw_type_mismatch();
+        }
+        return *held;
+    }
+
+    // Unbox to T, mutable — updates the stored value IN PLACE (e.g.
+    // `box.get<Matrix>()(i, j) = x;`), rather than requiring a caller to copy
+    // the whole T out, modify the copy, and wrap+assign a brand-new box over
+    // it. For a payload where a copy is expensive (a matrix, a large
+    // buffer), that round trip is a real, avoidable cost — this overload
+    // avoids it the same way vc_pixel_buffer::as<T>() (vc_pixel_buffer.h)
+    // pairs a mutable and a const accessor rather than offering only one.
+    // Same mismatch contract as the const overload above.
+    template <typename T> T& get() {
+        T* held = std::any_cast<T>(&value_);
+        if (held == nullptr) {
+            throw_type_mismatch();
         }
         return *held;
     }
@@ -151,6 +164,27 @@ class vc_any {
     }
 
   private:
+    // Shared by both get<T>() overloads above — neither's mismatch message
+    // depends on T, so unlike vc_pixel_buffer's throw_on_mismatch<T>() (which
+    // needs T to check holds_alternative<vector<T>>), this needs no template
+    // parameter of its own. static because it reads only kTagName.
+    //
+    // Kept IN-CLASS, unlike vc_image_info::throw_out_of_range()
+    // (vc_image_info.h), which outlines its twin into a .cpp to keep the
+    // throw's machinery out of every including TU. That argument applies here
+    // too — it is simply outranked: vc_any is a class template, so this member
+    // cannot be outlined without inventing a non-template helper, and
+    // vc_any.h's whole point is being header-only (docs/coding_guidelines.md
+    // §9 records it as deliberately .cpp-free). One extra TU-local throw path
+    // is the cheaper of the two costs.
+    [[noreturn]] static void throw_type_mismatch() {
+        throw vc::vc_exception(
+            vc::vc_error_code::invalid_argument,
+            std::string(kTagName) +
+                "::get<T>(): requested type does not match the stored "
+                "payload type");
+    }
+
     // Resolved once, so get<T>()'s message costs no switch at run time. The
     // static_assert at the top of the class, not this, is what makes an
     // unnamed tag a compile error.

@@ -452,12 +452,32 @@ Ratings, flags, keywords, EXIF, color matrices, IPTC/copyright, GPS. Unlike edit
 
 ```cpp
 struct metadata {
-    virtual std::optional<value> get(field) const = 0;   // read EXIF/IPTC/XMP
-    virtual void set(field, value) = 0;                  // rating, copyright, keyword
+    virtual std::optional<const value> get(field) const = 0;  // read EXIF/IPTC/XMP
+    virtual void set(field, value) = 0;                       // rating, copyright, keyword
+    virtual bool with_value(field, const std::function<void(value&)>&) = 0;              // edit in place
+    virtual bool with_value(field, const std::function<void(const value&)>&) const = 0;  // read, no copy
 };
 // implementations: per-platform backends (Apple Image I/O / Android ExifInterface /
 // desktop parser / DNG SDK) — NEVER exiv2
 ```
+
+`get()` returns `std::optional<const value>` — note the **`const`** — and `with_value()` exists
+because the read path
+hands back a **copy**: with a non-const `value`, `meta.get(f)->get<T>() = x` compiles, mutates
+the returned temporary, and is discarded — a silent no-op. The `const` makes that a compile
+error, and `with_value()` is the supported way to edit a stored value without copying the
+payload out and moving a new one back (which matters for a color matrix or any other payload
+whose copy is real work). It is a **scoped callback rather than a `value*`** precisely because
+this is an interface: a native backend sitting on `CGImageMetadata` or `ExifInterface` has no
+`vc_metadata_value` in memory to return a pointer into, but *can* materialize one, run the
+callback, and commit before returning.
+
+The **`const` overload is not just symmetry**: `get()` copies on the way out, so *reading* a
+large payload costs as much as writing one used to. A sealed `vc_image` exposes its captured
+metadata as `shared_ptr<const i_image_meta>` (§3), which cannot reach the mutable overload at
+all — so the `const` `with_value()` is the only copy-free read such a caller has. Same name for
+both: overload resolution is driven by the implicit object argument, so a `const` handle picks
+the read-only one automatically.
 
 > **Revises the earlier exiv2-on-desktop choice (B4, 2026-07-18).** The line below
 > previously read "exiv2 is GPL → desktop only," with `exiv2_metadata`/
