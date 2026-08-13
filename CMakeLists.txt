@@ -318,3 +318,46 @@ if(VC_BUILD_BENCHMARKS)
         target_link_libraries(${target} PRIVATE vc_bench_support_lib vc_bench_opts)
     endforeach()
 endif()
+
+# ---------- examples ----------
+# Registered with CTEST, and turned ON by the `debug` preset (and therefore by
+# `debug-sanitizers`, which inherits it) — deliberately UNLIKE benchmarks.
+# Benchmarks are off by default because they are Release-only with pinned
+# flags and must never be built by an ordinary run; examples have no such
+# constraint, they are three cheap Debug programs. More importantly each one
+# CHECKS ITS OWN RESULTS, so leaving them out of the default build would mean
+# CI never runs those checks. An example nobody runs is an example that rots.
+#
+# The option itself still defaults to OFF so a hand-rolled configure is
+# unaffected; the presets are what turn it on.
+#
+# Examples are for READING. Unit tests and edge cases stay in tests/ — an
+# example demonstrates one idea end to end, it does not replace coverage.
+option(VC_BUILD_EXAMPLES "Build the runnable curriculum examples" OFF)
+
+if(VC_BUILD_EXAMPLES)
+    # Numbered so they read in order; add new examples here.
+    set(VC_EXAMPLE_TARGETS
+        00_load_and_dump
+        01_pixel_ops
+        02_patch_distance
+    )
+
+    foreach(example ${VC_EXAMPLE_TARGETS})
+        set(target vc_example_${example})
+        add_executable(${target} examples/${example}.cpp)
+        target_link_libraries(${target} PRIVATE
+            vc_image_utils_lib
+            vc_warnings
+            $<$<BOOL:${ENABLE_SANITIZERS}>:vc_sanitizers>
+            $<$<BOOL:${ENABLE_TSAN}>:vc_tsan>
+        )
+        # Examples read the same fixtures the tests use, and write beside the
+        # build tree rather than into the source tree.
+        target_compile_definitions(${target} PRIVATE
+            VC_EXAMPLES_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/data"
+            VC_EXAMPLES_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}/examples_out"
+        )
+        add_test(NAME ${target} COMMAND ${target})
+    endforeach()
+endif()

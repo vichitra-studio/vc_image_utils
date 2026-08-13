@@ -16,7 +16,8 @@
       "displayName": "Debug",
       "inherits": "base",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VC_BUILD_EXAMPLES": "ON"
       }
     },
     {
@@ -41,6 +42,14 @@
       "inherits": "release",
       "cacheVariables": {
         "VC_BUILD_BENCHMARKS": "ON"
+      }
+    },
+    {
+      "name": "examples",
+      "displayName": "Debug + Examples",
+      "inherits": "debug",
+      "cacheVariables": {
+        "VC_BUILD_EXAMPLES": "ON"
       }
     },
     {
@@ -75,6 +84,11 @@
       "name": "bench",
       "displayName": "Release + Benchmarks",
       "configurePreset": "bench"
+    },
+    {
+      "name": "examples",
+      "displayName": "Debug + Examples",
+      "configurePreset": "examples"
     },
     {
       "name": "relwithdebinfo",
@@ -113,6 +127,14 @@
       "name": "debug-tsan",
       "displayName": "Debug + ThreadSanitizer + UBSan",
       "configurePreset": "debug-tsan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "examples",
+      "displayName": "Debug + Examples",
+      "configurePreset": "examples",
       "output": {
         "outputOnFailure": true
       }
