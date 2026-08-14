@@ -11,6 +11,9 @@
 
 namespace vc::math {
 
+// TODO: collapse vec2/3 and mat2/3 impl into a single template
+// once the library has a template system in place
+
 vc_vec2 operator*(const vc_mat2& a, const vc_vec2& v) {
     return vc_vec2{.x = a.m[0][0] * v.x + a.m[0][1] * v.y,
                    .y = a.m[1][0] * v.x + a.m[1][1] * v.y};
@@ -99,6 +102,76 @@ vc_mat3 inverse(const vc_mat3& a) {
     result.m[2][1] = -(a.m[0][0] * a.m[2][1] - a.m[0][1] * a.m[2][0]) * inv_det;
     result.m[2][2] = (a.m[0][0] * a.m[1][1] - a.m[0][1] * a.m[1][0]) * inv_det;
     return result;
+}
+
+// ---- analytic geometry ----
+//
+// Only the arithmetic that has a caller is defined: a difference (the
+// residual, v - project(v, onto)) and a scalar multiple (the projection
+// itself). There is deliberately no vector operator+ — nothing needs one, and
+// this surface is kept to what is used, the same reason the header offers no
+// distance(), no L1 norm and no normalize().
+
+vc_vec2 operator-(const vc_vec2& a, const vc_vec2& b) {
+    return vc_vec2{.x = a.x - b.x, .y = a.y - b.y};
+}
+
+vc_vec2 operator*(const vc_vec2& v, float s) {
+    return vc_vec2{.x = v.x * s, .y = v.y * s};
+}
+
+vc_vec3 operator-(const vc_vec3& a, const vc_vec3& b) {
+    return vc_vec3{.x = a.x - b.x, .y = a.y - b.y, .z = a.z - b.z};
+}
+
+vc_vec3 operator*(const vc_vec3& v, float s) {
+    return vc_vec3{.x = v.x * s, .y = v.y * s, .z = v.z * s};
+}
+
+float dot(const vc_vec2& a, const vc_vec2& b) {
+    return a.x * b.x + a.y * b.y;
+}
+
+float dot(const vc_vec3& a, const vc_vec3& b) {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+float norm_squared(const vc_vec2& v) {
+    return dot(v, v);
+}
+
+float norm_squared(const vc_vec3& v) {
+    return dot(v, v);
+}
+
+float norm(const vc_vec2& v) {
+    return std::sqrt(norm_squared(v));
+}
+
+float norm(const vc_vec3& v) {
+    return std::sqrt(norm_squared(v));
+}
+
+vc_vec2 project(const vc_vec2& v, const vc_vec2& onto) {
+    const float onto_norm_sq = norm_squared(onto);
+    if (onto_norm_sq < degenerate_norm_squared_tolerance) {
+        throw vc::vc_exception(
+            vc::vc_error_code::invalid_argument,
+            "vc::math::project(vc_vec2): `onto` vector is degenerate");
+    }
+    const float k = dot(v, onto) / onto_norm_sq;
+    return onto * k;
+}
+
+vc_vec3 project(const vc_vec3& v, const vc_vec3& onto) {
+    const float onto_norm_sq = norm_squared(onto);
+    if (onto_norm_sq < degenerate_norm_squared_tolerance) {
+        throw vc::vc_exception(
+            vc::vc_error_code::invalid_argument,
+            "vc::math::project(vc_vec3): `onto` vector is degenerate");
+    }
+    const float k = dot(v, onto) / onto_norm_sq;
+    return onto * k;
 }
 
 } // namespace vc::math

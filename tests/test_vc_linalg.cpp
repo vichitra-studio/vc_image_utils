@@ -276,3 +276,141 @@ TEST_CASE("vc_mat3: carries a 2-D translation in homogeneous coordinates") {
     CHECK(close(
         T * U, mat3_of(1.0f, 0.0f, 6.0f, 0.0f, 1.0f, -1.0f, 0.0f, 0.0f, 1.0f)));
 }
+
+// ------------------------------------------------ analytic geometry ----
+//
+// RED by design until dot/norm_squared/norm/project are written.
+//
+// Note the two KINDS of test below, because the split is the point. The
+// hand-value cases pin specific arithmetic. The property cases state what a
+// projection IS — parallel to the target, with an orthogonal residual — and
+// those two properties together pin project() uniquely, without naming a
+// formula. A wrong coefficient fails them instantly; a right one cannot.
+
+TEST_CASE("vc_vec2: dot is the sum of componentwise products") {
+    CHECK(close(vc::math::dot(vec2_of(3.0f, 4.0f), vec2_of(2.0f, 1.0f)),
+                10.0f)); // 3*2 + 4*1
+}
+
+TEST_CASE("vc_vec2: dot is zero exactly when the vectors are perpendicular") {
+    CHECK(close(vc::math::dot(vec2_of(1.0f, 0.0f), vec2_of(0.0f, 1.0f)), 0.0f));
+    // Not axis-aligned, so this cannot pass by accident: (3,4) turned a
+    // quarter turn is (-4,3), and the dot product vanishes.
+    CHECK(
+        close(vc::math::dot(vec2_of(3.0f, 4.0f), vec2_of(-4.0f, 3.0f)), 0.0f));
+    // ...and is NOT zero for a pair that is merely close to perpendicular,
+    // which is what stops a stub `return 0` from passing this test case.
+    CHECK(
+        !close(vc::math::dot(vec2_of(3.0f, 4.0f), vec2_of(-4.0f, 3.1f)), 0.0f));
+}
+
+TEST_CASE("vc_vec2: norm_squared skips the square root that norm takes") {
+    const auto v = vec2_of(3.0f, 4.0f);
+    CHECK(close(vc::math::norm_squared(v), 25.0f));
+    CHECK(close(vc::math::norm(v), 5.0f));
+}
+
+TEST_CASE("vc_vec2: the dot product recovers the 3-4-5 triangle's angle") {
+    // The 3-4-5 right triangle, as two vectors from the shared vertex: the
+    // adjacent side (3,0) and the hypotenuse (3,4). cos of the angle between
+    // them is adjacent/hypotenuse = 3/5, which the dot product must agree
+    // with — dot / (|a| * |b|) = 9 / (3*5).
+    const auto adjacent = vec2_of(3.0f, 0.0f);
+    const auto hypotenuse = vec2_of(3.0f, 4.0f);
+    const float cos_angle =
+        vc::math::dot(adjacent, hypotenuse) /
+        (vc::math::norm(adjacent) * vc::math::norm(hypotenuse));
+    CHECK(close(cos_angle, 0.6f));
+}
+
+TEST_CASE("vc_vec2: projecting onto an axis keeps only that component") {
+    CHECK(close(vc::math::project(vec2_of(3.0f, 4.0f), vec2_of(1.0f, 0.0f)),
+                vec2_of(3.0f, 0.0f)));
+    // The target's LENGTH must not matter — only its direction. A projection
+    // onto (5,0) is the same vector as onto (1,0); if it is not, the
+    // coefficient is missing its division by the target's squared norm.
+    CHECK(close(vc::math::project(vec2_of(3.0f, 4.0f), vec2_of(5.0f, 0.0f)),
+                vec2_of(3.0f, 0.0f)));
+}
+
+TEST_CASE("vc_vec2: project is parallel to the target with an orthogonal "
+          "residual") {
+    // THE acceptance criterion for this row, and it names no formula: these
+    // two properties hold for the projection and for nothing else.
+    const auto v = vec2_of(4.0f, 3.0f);
+    const auto onto = vec2_of(2.0f, 1.0f);
+    const auto p = vc::math::project(v, onto);
+
+    // Parallel: in 2-D, the cross-product z-component of two parallel vectors
+    // is zero.
+    CHECK(close(p.x * onto.y - p.y * onto.x, 0.0f));
+
+    // Orthogonal residual — what makes it the CLOSEST point on the line
+    // through `onto`, rather than just some multiple of it.
+    CHECK(close(vc::math::dot(v - p, onto), 0.0f));
+}
+
+TEST_CASE("vc_vec2: project throws on a degenerate target, and only then") {
+    CHECK_THROWS_AS(
+        (void)vc::math::project(vec2_of(1.0f, 2.0f), vec2_of(0.0f, 0.0f)),
+        vc::vc_exception);
+
+    // Both sides of the threshold, close to it. The tolerance is on the
+    // SQUARED norm (1e-12), so these are lengths of 5e-7 and 2e-6 — squaring
+    // to 2.5e-13 (below, throws) and 4e-12 (above, must not). A probe several
+    // orders of magnitude clear of the boundary would pass for almost any
+    // threshold and so would test nothing.
+    CHECK_THROWS_AS(
+        (void)vc::math::project(vec2_of(1.0f, 2.0f), vec2_of(5e-7f, 0.0f)),
+        vc::vc_exception);
+    CHECK_NOTHROW(
+        (void)vc::math::project(vec2_of(1.0f, 2.0f), vec2_of(2e-6f, 0.0f)));
+}
+
+// The 3-component overloads are a SEPARATE implementation, not the 2-D one
+// reused, so they can drift independently — a typo in the third term, or a
+// copy-pasted guard with a flipped comparison, would be caught by nothing the
+// vec2 cases above assert. They therefore get the same coverage rather than a
+// token smoke test.
+
+TEST_CASE("vc_vec3: dot and the two norms match their hand values") {
+    CHECK(close(
+        vc::math::dot(vec3_of(1.0f, 2.0f, 3.0f), vec3_of(4.0f, 5.0f, 6.0f)),
+        32.0f)); // 4 + 10 + 18 — a dropped third term would give 14
+
+    // (1,2,2) has length 3 — the 3-D analogue of a 3-4-5 triangle, chosen so
+    // the expected value is exact in float rather than a rounded surd.
+    CHECK(close(vc::math::norm_squared(vec3_of(1.0f, 2.0f, 2.0f)), 9.0f));
+    CHECK(close(vc::math::norm(vec3_of(1.0f, 2.0f, 2.0f)), 3.0f));
+}
+
+TEST_CASE("vc_vec3: project is parallel to the target with an orthogonal "
+          "residual") {
+    // Deliberately NOT axis-aligned: projecting onto (0,0,2) would still look
+    // right if two of the three components were being dropped.
+    const auto v = vec3_of(1.0f, 2.0f, 3.0f);
+    const auto onto = vec3_of(2.0f, 1.0f, 2.0f);
+    const auto p = vc::math::project(v, onto);
+
+    // Parallel in 3-D is a zero CROSS product — all three components.
+    CHECK(close(p.y * onto.z - p.z * onto.y, 0.0f));
+    CHECK(close(p.z * onto.x - p.x * onto.z, 0.0f));
+    CHECK(close(p.x * onto.y - p.y * onto.x, 0.0f));
+
+    CHECK(close(vc::math::dot(v - p, onto), 0.0f));
+}
+
+TEST_CASE("vc_vec3: only the target's direction matters, not its length") {
+    const auto v = vec3_of(1.0f, 2.0f, 3.0f);
+    const auto onto = vec3_of(2.0f, 1.0f, 2.0f);
+    CHECK(close(vc::math::project(v, onto), vc::math::project(v, onto * 3.0f)));
+}
+
+TEST_CASE("vc_vec3: project throws on a degenerate target, and only then") {
+    const auto v = vec3_of(1.0f, 2.0f, 3.0f);
+    CHECK_THROWS_AS((void)vc::math::project(v, vec3_of(0.0f, 0.0f, 0.0f)),
+                    vc::vc_exception);
+    CHECK_THROWS_AS((void)vc::math::project(v, vec3_of(0.0f, 0.0f, 5e-7f)),
+                    vc::vc_exception);
+    CHECK_NOTHROW((void)vc::math::project(v, vec3_of(0.0f, 0.0f, 2e-6f)));
+}
