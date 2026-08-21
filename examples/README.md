@@ -41,3 +41,4 @@ and test run are unaffected.
 | 00 | `00_load_and_dump.cpp` | Loading an image, the `(x, y, ch)` index map, writing a PNG |
 | 01 | `01_pixel_ops.cpp` | Per-pixel maps in colour space: grayscale, channel gains, invert, brightness. Linearity as a runnable assertion; why brightness is reversible only in float |
 | 02 | `02_patch_distance.cpp` | SSD / SAD / L2 between patches — the same difference vector under three norms. The primitive block-matching and NLM are built from |
+| 03 | `03_warp.cpp` | Affine warp by inverse mapping — transforming the *domain* rather than the range. Homogeneous coordinates, bilinear resampling, edge policy, and why downscaling aliases |

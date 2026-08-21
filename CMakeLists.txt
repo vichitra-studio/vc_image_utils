@@ -96,6 +96,7 @@ set(VC_LIB_SOURCES
     src/io/vc_io_stb.cpp
     src/io/vc_io_fs.cpp
     src/math/vc_linalg.cpp
+    src/math/vc_transform.cpp
     src/utils/vc_log.cpp
     src/utils/vc_perf.cpp
     src/debug/vc_image_dumper.cpp
@@ -150,6 +151,7 @@ add_executable(vc_image_utils_tests
     tests/test_vc_pipe.cpp
     tests/test_vc_edit.cpp
     tests/test_vc_linalg.cpp
+    tests/test_vc_transform.cpp
     tests/samples/vc_sample_grayscale_stage.cpp
     tests/samples/vc_sample_mean_brightness_stage.cpp
     tests/samples/vc_sample_blur_stage.cpp
@@ -343,6 +345,7 @@ if(VC_BUILD_EXAMPLES)
         00_load_and_dump
         01_pixel_ops
         02_patch_distance
+        03_warp
     )
 
     foreach(example ${VC_EXAMPLE_TARGETS})

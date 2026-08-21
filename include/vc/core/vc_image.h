@@ -113,6 +113,34 @@ class vc_image {
         return pixels_;
     }
 
+    // Typed 2D element READ, the mirror of vc_image_writer::at<T>(). Returns
+    // `const T&` — there is still no mutable pixel accessor on this type, so
+    // Sec 4.2's guarantee is unchanged; this only spares callers spelling out
+    // pixels()->as<T>()[meta().index(...)] for a single element.
+    template <vc_pixel_element_req T>
+    const T& at(image_dim x, image_dim y, channel_count ch) const {
+        return pixels_->as<T>()[meta_.index(x, y, ch)];
+    }
+
+    // Scoped read access — the counterpart to vc_image_writer::with_pixels<T>()
+    // and, for the same reason, the PREFERRED accessor for hot loops.
+    //
+    // at<T>() above calls as<T>() per element, and as<T>() re-checks the
+    // variant and materialises a fresh span every time. The stored dtype is
+    // fixed at construction and the buffer is const, so that question cannot
+    // change between two reads of one image — reading a million elements
+    // through at<T>() re-answers it a million times. This answers it once, for
+    // the whole loop, which is exactly the split the writer already makes:
+    // at<T>() for scattered access, with_pixels<T>() when the access is a loop.
+    //
+    // The writer's retention caveat is weaker here but not absent: nothing can
+    // mutate through a span<const T>, but a span outliving the vc_image that
+    // owns the buffer still dangles, as any view does.
+    template <vc_pixel_element_req T, typename F>
+    void with_pixels(F&& f) const {
+        std::forward<F>(f)(pixels_->as<T>());
+    }
+
   private:
     // The one true minter: vc_image_writer::seal() moves its filled buffer in
     // here (qualified to const) alongside the descriptor. No other code can
