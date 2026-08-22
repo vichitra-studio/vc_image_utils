@@ -23,9 +23,12 @@
 // the extraction; the algebra happens afterwards.
 //
 // This is the primitive that block-matching alignment (P11a) and non-local
-// means denoising (P9b) are built from. Sliding a window over an image to find
-// the best-matching patch comes later; this example only establishes the
-// distance itself.
+// means denoising (P9b) are built from. The second half of the file turns the
+// distance into a SEARCH: slide the window over every valid position, score
+// each one, and the position of the minimum is the match. That map of scores
+// is the object worth looking at -- a single best position is a summary of it,
+// and a summary hides whether the minimum was sharp or the whole surface was
+// flat.
 //
 // One property to note for later: SSD and SAD both compare LENGTHS, so a
 // uniform brightness change between two otherwise identical patches registers
@@ -33,11 +36,14 @@
 // wrong behaviour, which is why NCC — an angle rather than a distance — shows
 // up in that setting. Not implemented here.
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <initializer_list>
 #include <iostream>
+#include <limits>
+#include <span>
 #include <stdexcept>
 #include <string>
 
@@ -161,6 +167,168 @@ vc::vc_image make_ramp_with_duplicate() {
         for (vc::image_dim dx = 0; dx < 2; ++dx) {
             out.at<vc::buf_f32>(dx, dy, 0) =
                 static_cast<float>(10 * (3 + dx) + (2 + dy));
+        }
+    }
+    return std::move(out).seal();
+}
+
+// ---------------------------------------------------------------------
+// Part 2 -- the sliding-window search
+// ---------------------------------------------------------------------
+
+// Where the best match sits, and how good it was. The score travels with the
+// position deliberately: "position 7,3" alone cannot tell you whether that was
+// a confident match or the least-bad of a uniformly hopeless set.
+struct match_result {
+    vc::image_dim x;
+    vc::image_dim y;
+    float score;
+};
+
+// The SSD of `query` against every window position in `haystack`.
+//
+// The result is SMALLER than the haystack, and getting that boundary right is
+// most of the exercise: a w-wide patch has valid origins 0 .. W-w inclusive,
+// so the map is (W - w + 1) x (H - h + 1). Off by one here and the last column
+// either reads out of bounds or is silently never searched.
+//
+// Single channel regardless of the input's channel count -- one score per
+// position, summed over all channels by accumulate_over().
+vc::vc_image ssd_map(const vc::vc_image& haystack, const patch& query) {
+    if (query.width > haystack.width() || query.height > haystack.height()) {
+        throw std::invalid_argument(
+            "ssd_map: query patch is larger than the haystack");
+    }
+    vc::vc_image_writer out{haystack.width() - query.width + 1,
+                            haystack.height() - query.height + 1, 1,
+                            vc::buf_f32{0.0F}};
+    for (vc::image_dim y = 0; y <= haystack.height() - query.height; ++y) {
+        for (vc::image_dim x = 0; x <= haystack.width() - query.width; ++x) {
+            patch window{.image = &haystack,
+                         .x = x,
+                         .y = y,
+                         .width = query.width,
+                         .height = query.height};
+            float score = ssd(window, query);
+            out.at<vc::buf_f32>(x, y, 0) = score;
+        }
+    }
+    return std::move(out).seal();
+}
+
+// The position of the minimum. Separate from ssd_map() on purpose: the map is
+// what you dump and inspect, the argmin is what a caller acts on, and keeping
+// them apart means you can look at the surface without recomputing it.
+//
+// Ties: return the FIRST minimum in scan order. Arbitrary, but stated -- an
+// unstated tie-break is how a test passes on one machine and not another.
+match_result best_match(const vc::vc_image& map) {
+    auto px = map.pixels()->as<vc::buf_f32>();
+    float best_score = std::numeric_limits<float>::max();
+    vc::image_dim best_x = 0;
+    vc::image_dim best_y = 0;
+    for (vc::image_dim y = 0; y < map.height(); ++y) {
+        for (vc::image_dim x = 0; x < map.width(); ++x) {
+            float score = px[map.meta().index(x, y, 0)];
+            if (score < best_score) {
+                best_score = score;
+                best_x = x;
+                best_y = y;
+            }
+        }
+    }
+    return match_result{.x = best_x, .y = best_y, .score = best_score};
+}
+
+// Scale a map into [0, 1] so it can be written as a PNG. SSD values are
+// unbounded and would otherwise clip to white everywhere.
+//
+// Low SSD means a good match, so the match stays DARK -- a literal trough,
+// which is what makes the dump readable at a glance. Not inverted into a
+// "heat map" for that reason: the criterion is that the surface troughs at the
+// true position, and a trough should look like one.
+float peak_of(const vc::vc_image& map) {
+    float peak = 0.0F;
+    map.with_pixels<vc::buf_f32>([&](std::span<const vc::buf_f32> px) {
+        for (const float v : px) {
+            peak = std::max(peak, v);
+        }
+    });
+    return peak;
+}
+
+// What fraction of positions score within `slack` of the best?
+//
+// This is the MEASURABLE form of "the map troughs at the true match". The
+// argmin alone cannot express it: a map with one clear minimum and a map that
+// is a wide basin of near-ties both have an argmin, and in the second case
+// which position wins is luck rather than a match. The fraction says how much
+// competition the winner actually had.
+//
+// Absolute slack, not relative: a self-match scores exactly 0, so a relative
+// threshold would divide by zero. The units are SSD in the image's own scale.
+float ambiguity_fraction(const vc::vc_image& map, float slack) {
+    float best = std::numeric_limits<float>::max();
+    std::size_t near = 0;
+    std::size_t total = 0;
+    map.with_pixels<vc::buf_f32>([&](std::span<const vc::buf_f32> px) {
+        for (const float v : px) {
+            best = std::min(best, v);
+        }
+        for (const float v : px) {
+            if (v <= best + slack) {
+                ++near;
+            }
+            ++total;
+        }
+    });
+    return static_cast<float>(near) / static_cast<float>(total);
+}
+
+// The best score anywhere OUTSIDE a neighbourhood of (tx, ty).
+//
+// This is "the map troughs at the true match" made checkable WITHOUT choosing
+// a tolerance -- which matters, because the ambiguity sweep above shows the
+// answer flips depending on which tolerance you pick. A trough means the true
+// position is strictly better than every genuine alternative, and the margin
+// between them says how much better.
+//
+// The radius exists because immediate neighbours of an exact match are almost
+// exact too; they are the same match, not competitors.
+float best_outside(const vc::vc_image& map,
+                   vc::image_dim tx,
+                   vc::image_dim ty,
+                   vc::image_dim radius) {
+    float best = std::numeric_limits<float>::max();
+    for (vc::image_dim y = 0; y < map.height(); ++y) {
+        for (vc::image_dim x = 0; x < map.width(); ++x) {
+            const bool near_x = x + radius >= tx && x <= tx + radius;
+            const bool near_y = y + radius >= ty && y <= ty + radius;
+            if (near_x && near_y) {
+                continue;
+            }
+            best = std::min(best, map.at<vc::buf_f32>(x, y, 0));
+        }
+    }
+    return best;
+}
+
+// `peak` is passed IN rather than measured here so that two maps can be
+// rendered on ONE scale. Normalising each by its own maximum makes them
+// individually readable and mutually incomparable -- the darker of two such
+// images may simply have had a smaller peak, which is exactly the illusion a
+// side-by-side comparison must not create.
+vc::vc_image normalised(const vc::vc_image& map, float peak) {
+    // An all-zero peak means every position matched perfectly, which happens
+    // for a uniform image. Dividing by zero would produce NaN and a garbage
+    // PNG; a flat black image is the honest rendering of "no position is worse
+    // than any other".
+    const float scale = peak > 0.0F ? 1.0F / peak : 0.0F;
+
+    vc::vc_image_writer out{map.width(), map.height(), 1, vc::buf_f32{0.0F}};
+    for (vc::image_dim y = 0; y < map.height(); ++y) {
+        for (vc::image_dim x = 0; x < map.width(); ++x) {
+            out.at<vc::buf_f32>(x, y, 0) = map.at<vc::buf_f32>(x, y, 0) * scale;
         }
     }
     return std::move(out).seal();
@@ -318,6 +486,115 @@ int main() {
     ok = check(ssd(here, shifted) > 0.0F,
                "a one-pixel shift is detectable — the region is not flat") &&
          ok;
+
+    // ---- part 2: find the duplicate by searching for it ----
+    //
+    // `ramp` is 6x4 with the 2x2 block from (3, 2) also pasted at (0, 0), so
+    // there are two exact matches and the search must land on one of them.
+    // Ties resolve to the first in scan order, which is (0, 0).
+    const vc::vc_image map = ssd_map(ramp, window);
+
+    // The boundary, pinned. A 2x2 patch over a 6x4 image has origins
+    // 0..4 and 0..2, so the map is 5 x 3. Off by one and the map is 6 x 4
+    // (reading out of bounds) or 4 x 2 (never searching the last column).
+    ok = check(map.width() == 5 && map.height() == 3,
+               "the SSD map is (W - w + 1) x (H - h + 1)") &&
+         ok;
+
+    const match_result best = best_match(map);
+    std::cout << "search: best match at (" << best.x << ", " << best.y
+              << ") with SSD = " << best.score << "   (expected (0, 0), 0)\n";
+    ok = check(best.x == 0 && best.y == 0,
+               "the search finds the duplicated block at its known location") &&
+         ok;
+    ok = check(best.score == 0.0F, "an exact duplicate scores exactly 0") && ok;
+
+    // Both known-exact positions really are zero, and a neighbouring one is
+    // not -- so the minimum is a genuine trough rather than a flat surface
+    // that happens to start low.
+    ok = check(map.at<vc::buf_f32>(0, 0, 0) == 0.0F &&
+                   map.at<vc::buf_f32>(3, 2, 0) == 0.0F,
+               "both copies of the block score 0") &&
+         ok;
+    ok =
+        check(map.at<vc::buf_f32>(1, 0, 0) > 0.0F,
+              "a neighbouring position scores worse -- the minimum is sharp") &&
+        ok;
+
+    // ---- the same search on the photo, and the map as a picture ----
+    //
+    // A patch taken FROM the photo must find itself, at distance exactly 0.
+    // That is the strongest available ground truth: no tolerance, no
+    // eyeballing, and it exercises the full-size loop rather than a 6x4 toy.
+    // A query patch from a TEXTURED region, not from `here`.
+    //
+    // `here` sits at the image centre, which on this photo is a flat, dark
+    // area. A patch with no distinctive structure matches every OTHER flat
+    // area about as well, so its SSD map is a broad basin with the correct
+    // minimum buried in it -- numerically right, and useless as a picture.
+    // The acceptance criterion asks the map to TROUGH at the true match, and a
+    // basin is not a trough.
+    //
+    // This is not a quirk of one photo. It is the reason P3 builds a corner
+    // detector: Harris answers "which patches are worth matching at all", and
+    // a flat patch is the case it exists to reject. Block matching is only as
+    // good as the distinctiveness of what you choose to match.
+    const vc::image_dim tx = 400; // foliage -- high local contrast
+    const vc::image_dim ty = 500;
+    const patch textured{
+        .image = &photo, .x = tx, .y = ty, .width = 8, .height = 8};
+
+    const vc::vc_image photo_map = ssd_map(photo, textured);
+    const match_result photo_best = best_match(photo_map);
+    std::cout << "photo search: patch from (" << tx << ", " << ty
+              << ") found at (" << photo_best.x << ", " << photo_best.y
+              << ") with SSD = " << photo_best.score << '\n';
+    ok = check(photo_best.x == tx && photo_best.y == ty,
+               "a patch cut from the photo is found at its own location") &&
+         ok;
+    ok = check(photo_best.score == 0.0F,
+               "and matches itself at exactly zero distance") &&
+         ok;
+
+    // How much competition did each winner have? The sweep is reported, not
+    // asserted: which query looks more ambiguous REVERSES with the tolerance
+    // chosen -- foliage contains genuine near-duplicate windows, so it is
+    // worse at tight tolerance, while everything flat is vaguely alike, so the
+    // flat query is worse at loose tolerance. Any single-threshold assertion
+    // would be picking the regime that flatters the conclusion.
+
+    const vc::vc_image flat_map = ssd_map(photo, here);
+
+    std::cout << "SWEEP slack: textured%  flat%\n";
+    for (const float s : {0.1F, 0.5F, 1.0F, 2.0F, 5.0F, 10.0F, 20.0F}) {
+        std::cout << "  " << s << ": "
+                  << (ambiguity_fraction(photo_map, s) * 100.0F) << "   "
+                  << (ambiguity_fraction(flat_map, s) * 100.0F) << "\n";
+    }
+
+    // The criterion the argmin check cannot express, without depending on a
+    // tolerance. Note the sweep above deliberately does NOT get an assertion:
+    // which query looks more ambiguous flips with the tolerance chosen, so any
+    // single-threshold claim would be picking the regime that suits the story.
+    const float rival_textured = best_outside(photo_map, tx, ty, 4);
+    const float rival_flat = best_outside(flat_map, cx, cy, 4);
+    std::cout << "best rival outside a radius of 4:  textured = "
+              << rival_textured << "   flat = " << rival_flat << '\n';
+    ok = check(rival_textured > 0.0F && rival_flat > 0.0F,
+               "the true position is strictly better than every rival -- the "
+               "minimum is a trough, not a plateau") &&
+         ok;
+
+    vc::io::stb_image_writer writer;
+    const vc::io::write_config png{.format = vc::io::vc_image_format::png};
+    // ONE scale for both, so the two images can honestly be compared.
+    const float shared_peak = std::max(peak_of(photo_map), peak_of(flat_map));
+    writer.write(std::string(VC_EXAMPLES_OUTPUT_DIR) + "/02_ssd_map.png",
+                 normalised(photo_map, shared_peak), png);
+    writer.write(std::string(VC_EXAMPLES_OUTPUT_DIR) + "/02_ssd_map_flat.png",
+                 normalised(flat_map, shared_peak), png);
+    std::cout << "wrote 02_ssd_map.png -- dark is a good match; the trough at "
+                 "the patch's own position is the answer the search returns\n";
 
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }
