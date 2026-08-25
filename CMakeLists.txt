@@ -132,6 +132,10 @@ add_executable(vc_image_utils_app
     src/main.cpp
 )
 
+# The binary is `imgtoy` -- the P1 consolidation tool (curriculum S8). The
+# TARGET keeps its name so nothing else in this file has to change.
+set_target_properties(vc_image_utils_app PROPERTIES OUTPUT_NAME imgtoy)
+
 target_link_libraries(vc_image_utils_app PRIVATE
     vc_image_utils_lib
     vc_warnings
@@ -346,6 +350,7 @@ if(VC_BUILD_EXAMPLES)
         01_pixel_ops
         02_patch_distance
         03_warp
+        04_numderiv
     )
 
     foreach(example ${VC_EXAMPLE_TARGETS})

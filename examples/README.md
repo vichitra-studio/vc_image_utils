@@ -42,3 +42,4 @@ and test run are unaffected.
 | 01 | `01_pixel_ops.cpp` | Per-pixel maps in colour space: grayscale, channel gains, invert, brightness. Linearity as a runnable assertion; why brightness is reversible only in float |
 | 02 | `02_patch_distance.cpp` | SSD / SAD / L2 between patches — the same difference vector under three norms. The primitive block-matching and NLM are built from |
 | 03 | `03_warp.cpp` | Affine warp by inverse mapping — transforming the *domain* rather than the range. Homogeneous coordinates, bilinear resampling, edge policy, and why downscaling aliases |
+| 04 | `04_numderiv.cpp` | The derivative a computer can actually compute: forward differences, why the error stops improving as the step shrinks, and an image gradient as a subtraction of neighbours |
