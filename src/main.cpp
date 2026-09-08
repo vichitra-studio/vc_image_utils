@@ -17,36 +17,35 @@
 // subcommands and JSON output is a P4 deliverable, and building a small version
 // of it now would mean throwing that version away.
 //
-// ---- What is missing here, and why it is the interesting part ----
+// ---- Geometric operations, and how they got here ----
 //
-// Only PER-PIXEL operations. There is no rotate, no scale, no warp -- even
-// though example 03 implements all three and they are the most obviously
-// useful things a tool like this could do.
+// rotate and scale come from vc::pixelops. They did NOT, at first: warp lived
+// in an anonymous namespace inside examples/03_warp.cpp -- internal linkage,
+// invisible outside that file -- and this program could not reach it. The two
+// escape routes both looked closed. Duplicating the sampler meant ~150 lines
+// of copied algorithm with two copies to keep correct; promoting it to the
+// library meant deciding where image operations live, which is P4's job.
 //
-// The reason is worth recording rather than working around: warp lives in an
-// anonymous namespace inside examples/03_warp.cpp, and examples/README.md says
-// an example must be "a single .cpp with a main() -- no framework, no hidden
-// setup, readable top to bottom". So there are exactly two ways to reach it
-// from here, and both are decisions this phase should not be making:
+// The objection that broke the deadlock was wrong, and worth recording because
+// it is the kind that sounds right: "an example whose body is
+// vc::pixelops::warp(...) teaches nothing." It does not hold in THIS codebase,
+// because the explanation already lives at the declaration -- vc_linalg.h,
+// vc_image_writer.h and vc_warp.h are essays, not signatures. Move the
+// algorithm and its commentary moves with it. And what remains in
+// examples/03_warp.cpp is not a husk: hand-computed sampler values, the phase
+// plan's acceptance criteria, the rotate-back measurement, the dumps. An
+// example that demonstrates and VERIFIES beats one that re-implements.
 //
-//   duplicate the sampler into this file  -- ~150 lines of copied algorithm,
-//                                            with two copies to keep correct
-//   promote it into the library           -- which means deciding where image
-//                                            operations live, what the buffer
-//                                            abstraction owes them, and what
-//                                            the module interface looks like
-//
-// The second is P4's whole job. The first is what you do instead of doing the
-// second, and it is worse.
-//
-// So the friction is left standing and written down. That IS this session's
-// output: four phases of toys have now produced one operation family that
-// genuinely wants to be shared and cannot be, and the shape of what it wants
-// is the input P4 needs. Note it; do not fix it here.
+// So: vc::pixelops owns the operations, examples use them, and this program
+// gets rotate and scale for free. What P4 still owns is unchanged -- the
+// module/pipeline interface, the buffer abstraction for Bayer, and whether the
+// four operation categories (range / domain / neighbourhood / reduction) need
+// one interface or several. A namespace is cheap to re-cut; an interface is not.
 
 #include <cstdlib>
 #include <exception>
 #include <iostream>
+#include <numbers>
 #include <string>
 #include <string_view>
 
@@ -57,6 +56,8 @@
 #include "vc/core/vc_pixel_buffer.h"
 #include "vc/core/vc_types.h"
 #include "vc/io/vc_io_stb.h"
+#include "vc/math/vc_transform.h"
+#include "vc/pixelops/vc_warp.h"
 
 namespace {
 
@@ -124,15 +125,28 @@ constexpr float luma_b = 0.114F;
     return std::move(out).seal();
 }
 
+// Both geometric ops act about the image CENTRE, not the origin. Rotating a
+// photograph about its top-left corner swings almost all of it out of frame,
+// which looks like a bug and is not — but nobody means it. vc::math's
+// rotate_about/scale_about carry that sandwich, already tested, so it is not
+// re-derived here.
+//
+// Both also use fit_transform, so the canvas grows to hold the result and
+// nothing is clipped. That is what a command-line tool should do: the caller
+// asked to rotate a picture, not to rotate and crop one.
+
 void print_usage(const char* program) {
-    std::cerr << "usage: " << program << " <input> <output.png> <op> [arg]\n"
-              << "\nops:\n"
-              << "  copy               decode and re-encode, nothing else\n"
-              << "  grayscale          Rec.601 luma; 3+ channels in, 1 out\n"
-              << "  invert             1 - v, every channel\n"
-              << "  brightness <k>     multiply every channel by k\n"
-              << "\ngeometric operations (rotate/scale/warp) are deliberately\n"
-              << "absent -- see the note at the top of src/main.cpp\n";
+    std::cerr
+        << "usage: " << program << " <input> <output.png> <op> [arg]\n"
+        << "\nops:\n"
+        << "  copy               decode and re-encode, nothing else\n"
+        << "  grayscale          Rec.601 luma; 3+ channels in, 1 out\n"
+        << "  invert             1 - v, every channel\n"
+        << "  brightness <k>     multiply every channel by k\n"
+        << "  rotate <degrees>   about the centre; canvas grows to fit\n"
+        << "  scale <factor>     about the centre; canvas grows to fit\n"
+        << "\nscaling DOWN aliases -- there is no prefilter yet. See the\n"
+        << "note in include/vc/pixelops/vc_warp.h\n";
 }
 
 } // namespace
@@ -180,6 +194,23 @@ int main(int argc, char** argv) {
             // it. Checking the string by hand would be re-implementing what
             // the standard library already does correctly.
             output = scale_values(input, std::stof(argv[4]));
+        } else if (op == "rotate" || op == "scale") {
+            if (argc < 5) {
+                std::cerr << op << " needs a value, e.g. `" << op
+                          << (op == "rotate" ? " 30" : " 0.5") << "`\n";
+                return EXIT_FAILURE;
+            }
+            const float value = std::stof(argv[4]);
+            const auto cx = static_cast<float>(input.width()) / 2.0F;
+            const auto cy = static_cast<float>(input.height()) / 2.0F;
+            const vc::math::vc_mat3 m =
+                op == "rotate"
+                    ? vc::math::rotate_about(
+                          cx, cy, value * std::numbers::pi_v<float> / 180.0F)
+                    : vc::math::scale_about(cx, cy, value, value);
+            output =
+                vc::pixelops::warp(input, m, vc::pixelops::vc_edge_policy::zero,
+                                   vc::pixelops::vc_output_size::fit_transform);
         } else {
             std::cerr << "unknown op: " << op << "\n\n";
             print_usage(argv[0]);

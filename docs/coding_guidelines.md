@@ -97,7 +97,26 @@ vc::edit        — vc_edit_session, vc_edit_document, i_edit_table,
                   vc_cached_edits_table, vc_persistent_edits_table, vc_stage_registry,
                   vc_memory_image_meta, export_image
 vc::debug       — image dump/visualisation (dump, dump_image_builder)
+vc::math        — vc_vec2/3, vc_mat2/3, apply/compose/invert, dot/norm/project,
+                  and the affine transform builders (translate/scale/rotate/
+                  rotate_about/scale_about, transform_point)
+vc::pixelops    — operations ON images: vc_edge_policy, vc_output_size,
+                  vc_destination_geometry, fitted_destination, sample_bilinear, warp
 ```
+
+**`vc::math` has one invariant worth stating: it does not depend on image machinery.**
+`vc_linalg.h` includes `<array>` and nothing else. That is what keeps its tests pure
+arithmetic and what makes `vc::pixelops` a separate namespace rather than a folder inside
+it — a warp takes a `vc_image`, so putting it in `vc::math` would invert the dependency
+and cost the layer its defining property. The split rule, stated once: **does it take a
+`vc_image`?** No → `vc::math`. Yes → `vc::pixelops`.
+
+`vc::pixelops` currently holds only *domain* operations (those that move pixels). Operations
+on images divide four ways by what an interface must give them — range (per-pixel value
+maps), domain (a sampler + an output-size policy + an edge policy), neighbourhood (a kernel +
+a boundary policy) and reduction (a non-image result). Whether those want one interface or
+several is a P4 question; the namespace is deliberately named for the family rather than for
+one member of it.
 
 No namespace aliases anywhere (`using image = vc::vc_image` etc.). Write fully-qualified
 names in headers. Two levels (`vc::io::i_image_reader`) is readable without aliasing.
@@ -273,9 +292,19 @@ vc::const_pixel_buffer_ptr pixels() const noexcept;
 template <vc_pixel_element_req T> T& at(image_dim x, image_dim y, channel_count ch);
 ```
 
+**Reading has the same two-accessor split as writing** (added 2026-08-26): `at<T>()` for
+scattered element reads, `with_pixels<T>()` for loops. `as<T>()` re-checks the dtype variant
+and materialises a span on every call, and the stored dtype cannot change between two reads of
+one `const` image — so reading a million elements through `at<T>()` re-answers a settled
+question a million times. `warp()` runs its whole loop inside one `with_pixels<T>()`, taking a
+1024×1024 RGB pass from ~12.6M dtype checks to one. Both are `const` and `at<T>()` returns
+`const T&`, so the guarantee below is unchanged — this is about cost, not about mutation.
+
 `vc_image::pixels()` returns `const_pixel_buffer_ptr` by value (cheap — refcount bump, no data
-copy). The pointed-to `vc_pixel_buffer` is `const`, so the compiler prevents any write through
-it, and `vc_image` declares no mutable accessor at all — not a private one, not a
+copy) and remains the accessor to use when a caller needs to *extend the buffer's lifetime*
+past the owning image (§4.1); the two accessors above are for reading values, not for holding
+ownership. The pointed-to `vc_pixel_buffer` is `const`, so the compiler prevents any write
+through it, and `vc_image` declares no mutable accessor at all — not a private one, not a
 carefully-gated one, none. The only way to get pixels into an image is to fill a
 `vc_image_writer` (`at<T>()`, or the preferred `with_pixels<T>()`) and then
 `seal()` it; sealing moves the buffer out, const-qualified, and the writer is spent. Mutation
@@ -625,7 +654,14 @@ src/io/vc_io_fs.cpp           — vc::io filesystem helpers implementation
 src/utils/vc_log.cpp          — vc::utils::log implementation
 src/utils/vc_perf.cpp         — vc::utils::perf implementation
 src/debug/vc_image_dumper.cpp — vc::debug implementation
-src/main.cpp                  — application entry point
+include/vc/math/vc_linalg.h    — vc::math: vc_vec2/3, vc_mat2/3, apply/compose/invert,
+                                 dot/norm/project (header + src/math/vc_linalg.cpp)
+include/vc/math/vc_transform.h — vc::math: affine transform builders in homogeneous
+                                 coordinates (src/math/vc_transform.cpp)
+include/vc/pixelops/vc_warp.h  — vc::pixelops: inverse-mapped affine warp + bilinear
+                                 sampler + edge/output-size policies (src/pixelops/vc_warp.cpp)
+
+src/main.cpp                  — application entry point (`imgtoy`)
 
 tests/data/                   — bundled test fixtures (committed to repo)
 docs/                         — project documentation
@@ -674,12 +710,15 @@ likewise fully implemented, header-only (see §9). Of the originally-suggested o
    this was gating pass.
 2. `src/io/vc_io_stb.cpp` — `stb_image_reader::read()` and `stb_image_writer::write()` are
    implemented. The round-trip test case passes.
-3. `src/main.cpp` — wire the reader/writer together into a working CLI round-trip. Still a
-   `TODO(you)` stub (untested — no case in the suite exercises `main()`).
+3. `src/main.cpp` — **DONE (2026-08-26).** It is now `imgtoy` (binary name set via
+   `OUTPUT_NAME`): load → one operation → write a PNG, with `copy`/`grayscale`/`invert`/
+   `brightness`/`rotate`/`scale`. Positional arguments and an if/else chain, deliberately not
+   an option parser — the composable CLI is a P4 deliverable. Still untested by the suite; it
+   is exercised by hand, and its per-pixel operations duplicate logic that `examples/01` tests.
 
-Build stays green throughout; `src/main.cpp`'s round-trip and the three sanctioned edit-layer
-reps (`export_image`; `vc_cached_edits_table`/`vc_persistent_edits_table` `get`/`set`) are the
-remaining `TODO(you)` bodies in the repo.
+Build stays green throughout. The three sanctioned edit-layer reps (`export_image`;
+`vc_cached_edits_table`/`vc_persistent_edits_table` `get`/`set`) are now the only remaining
+`TODO(you)` bodies in the repo.
 
 ---
 

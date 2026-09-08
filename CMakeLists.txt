@@ -97,6 +97,7 @@ set(VC_LIB_SOURCES
     src/io/vc_io_fs.cpp
     src/math/vc_linalg.cpp
     src/math/vc_transform.cpp
+    src/pixelops/vc_warp.cpp
     src/utils/vc_log.cpp
     src/utils/vc_perf.cpp
     src/debug/vc_image_dumper.cpp
