@@ -100,8 +100,13 @@ vc::debug       — image dump/visualisation (dump, dump_image_builder)
 vc::math        — vc_vec2/3, vc_mat2/3, apply/compose/invert, dot/norm/project,
                   and the affine transform builders (translate/scale/rotate/
                   rotate_about/scale_about, transform_point)
-vc::pixelops    — operations ON images: vc_edge_policy, vc_output_size,
-                  vc_destination_geometry, fitted_destination, sample_bilinear, warp
+vc::pixelops    — operations ON images.
+                  edge policy : vc_edge_policy, fetch
+                  domain      : vc_output_size, vc_destination_geometry,
+                                fitted_destination, sample_bilinear, warp
+                  neighbourhood: kernel_offset, kernel_weights, vc_kernel,
+                                make_box, make_gaussian, make_gaussian_1d_x/y,
+                                convolve, correlate, convolve_separable
 ```
 
 **`vc::math` has one invariant worth stating: it does not depend on image machinery.**
@@ -111,12 +116,31 @@ it — a warp takes a `vc_image`, so putting it in `vc::math` would invert the d
 and cost the layer its defining property. The split rule, stated once: **does it take a
 `vc_image`?** No → `vc::math`. Yes → `vc::pixelops`.
 
-`vc::pixelops` currently holds only *domain* operations (those that move pixels). Operations
-on images divide four ways by what an interface must give them — range (per-pixel value
-maps), domain (a sampler + an output-size policy + an edge policy), neighbourhood (a kernel +
-a boundary policy) and reduction (a non-image result). Whether those want one interface or
-several is a P4 question; the namespace is deliberately named for the family rather than for
-one member of it.
+Operations on images divide four ways by what an interface must give them — range (per-pixel
+value maps), domain (a sampler + an output-size policy + an edge policy), neighbourhood (a
+kernel + a boundary policy) and reduction (a non-image result). Whether those want one
+interface or several is a P4 question; the namespace is deliberately named for the family
+rather than for one member of it.
+
+`vc::pixelops` now holds *domain* and *neighbourhood* operations, and having two occupied
+categories settled one thing the first left open: **edge policy belongs to neither of them.**
+It began inside `vc_warp.h`, which forced `vc_convolve.h` to include the warp header for a
+vocabulary it shared but did not depend on — and every future neighbourhood operation
+(gradients, demosaic, denoise) would have inherited that wrong edge in the dependency graph.
+It now lives in `vc_edge_policy.h`, which neither operation owns:
+
+```
+vc_edge_policy.h   ← vc_warp.h        (domain)
+                   ← vc_convolve.h    (neighbourhood)
+```
+
+`fetch()` moved with it, and that was not a judgement call — the two private `fetch`
+functions in `vc_warp.cpp` and `vc_convolve.cpp` had byte-identical signatures and
+byte-identical jobs. Whether a caller then weights four neighbours or a kernel footprint is
+the caller's business; `fetch` takes a coordinate and returns a value.
+
+**The rule the second category produced:** a shared concept belongs to neither of its users.
+If A needs a vocabulary B declared, the vocabulary moves out — it does not make A depend on B.
 
 No namespace aliases anywhere (`using image = vc::vc_image` etc.). Write fully-qualified
 names in headers. Two levels (`vc::io::i_image_reader`) is readable without aliasing.
@@ -221,6 +245,32 @@ namespace vc::io {
     using path = std::filesystem::path;   // filesystem path
 }
 ```
+
+### 3.3b Kernel types (namespace `vc::pixelops`)
+
+```cpp
+namespace vc::pixelops {
+    using kernel_offset  = std::int64_t;        // a tap's offset from the CENTRE
+    using kernel_weights = std::vector<float>;  // row-major kernel weights
+}
+```
+
+`kernel_offset` is **signed, and that is the point of naming it.** A tap offset runs
+`-radius..+radius`, so negative values are the ordinary case rather than an error case.
+Written with an unsigned type — `size_t` being the tempting one — a loop from `-radius`
+wraps to about 1.8e19, the loop body never executes, and *nothing warns*, because unsigned
+wraparound is defined behaviour. This is not hypothetical; it shipped in the first cut of
+`make_gaussian` and produced a kernel of NaNs (every weight zero, then divided by a zero
+sum). A named signed type makes the mistake unwritable.
+
+This is the same reasoning as §3.4's for dimensions, arriving at the opposite answer,
+and the pair is the actual rule: **pick signedness from what the value MEANS.** An extent
+cannot be negative, so `image_dim` is unsigned. An offset from a centre routinely is, so
+`kernel_offset` is signed. Neither choice is a default.
+
+`kernel_weights` is plain `float`, deliberately **not** the `vc::buf_f32` pixel storage uses
+— kernel weights and pixel elements are different things and are free to stay different
+types. The alias marks that seam rather than hiding it.
 
 ### 3.4 Why `uint32_t` for image dimensions and channels
 
@@ -658,8 +708,15 @@ include/vc/math/vc_linalg.h    — vc::math: vc_vec2/3, vc_mat2/3, apply/compose
                                  dot/norm/project (header + src/math/vc_linalg.cpp)
 include/vc/math/vc_transform.h — vc::math: affine transform builders in homogeneous
                                  coordinates (src/math/vc_transform.cpp)
+include/vc/pixelops/vc_edge_policy.h
+                               — vc::pixelops: vc_edge_policy + fetch — what it means to read
+                                 a pixel the image does not have. Depends on neither warp nor
+                                 convolve; both depend on it (src/pixelops/vc_edge_policy.cpp)
 include/vc/pixelops/vc_warp.h  — vc::pixelops: inverse-mapped affine warp + bilinear
-                                 sampler + edge/output-size policies (src/pixelops/vc_warp.cpp)
+                                 sampler + output-size policy (src/pixelops/vc_warp.cpp)
+include/vc/pixelops/vc_convolve.h
+                               — vc::pixelops: vc_kernel + convolve/correlate/separable —
+                                 the first neighbourhood operation (src/pixelops/vc_convolve.cpp)
 
 src/main.cpp                  — application entry point (`imgtoy`)
 

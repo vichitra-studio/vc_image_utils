@@ -16,39 +16,10 @@
 #include "vc/core/vc_image_writer.h"
 #include "vc/core/vc_pixel_buffer.h"
 #include "vc/math/vc_transform.h"
+#include "vc/pixelops/vc_edge_policy.h"
 
 namespace vc::pixelops {
 namespace {
-
-// One source element, with the edge policy applied. This is the ONLY place a
-// source index becomes a read, which is what makes the four-neighbour bounds
-// problem structural rather than something to remember: no path reaches
-// index() without the policy having been consulted.
-//
-// Clamping happens PER INDEX, never as one verdict on the whole sample. That
-// distinction is the whole point: at the right-hand edge x collapses (there is
-// no x+1 to weigh in) while y may still have both its neighbours present and
-// must still interpolate. A single upfront gate discards the y blend along
-// with the x one.
-float fetch(std::span<const vc::buf_f32> px,
-            const vc::vc_image& src,
-            std::int64_t x,
-            std::int64_t y,
-            vc::channel_count ch,
-            vc_edge_policy policy) {
-    const auto last_x = static_cast<std::int64_t>(src.width()) - 1;
-    const auto last_y = static_cast<std::int64_t>(src.height()) - 1;
-
-    if (x < 0 || x > last_x || y < 0 || y > last_y) {
-        if (policy == vc_edge_policy::zero) {
-            return 0.0F;
-        }
-        x = std::clamp(x, std::int64_t{0}, last_x);
-        y = std::clamp(y, std::int64_t{0}, last_y);
-    }
-    return px[src.meta().index(static_cast<vc::image_dim>(x),
-                               static_cast<vc::image_dim>(y), ch)];
-}
 
 // Read `src` at a FRACTIONAL coordinate by blending the four surrounding
 // pixels. The weights are the tent kernel evaluated at the fractional offsets,

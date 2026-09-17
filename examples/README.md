@@ -43,3 +43,4 @@ and test run are unaffected.
 | 02 | `02_patch_distance.cpp` | SSD / SAD / L2 between patches — the same difference vector under three norms. The primitive block-matching and NLM are built from |
 | 03 | `03_warp.cpp` | Affine warp by inverse mapping — transforming the *domain* rather than the range. Homogeneous coordinates, bilinear resampling, edge policy, and why downscaling aliases |
 | 04 | `04_numderiv.cpp` | The derivative a computer can actually compute: forward differences, why the error stops improving as the step shrinks, and an image gradient as a subtraction of neighbours |
+| 05 | `05_convolve.cpp` | Convolution, and the three conventions the formula leaves undeclared — where the kernel's origin sits, which way the offsets point, and what lies outside the image. Each fails silently: a shifted picture, a mirrored response, a darkened border |

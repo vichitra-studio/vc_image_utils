@@ -8,6 +8,7 @@
 #include "vc/core/vc_image.h"
 #include "vc/core/vc_types.h"
 #include "vc/math/vc_linalg.h"
+#include "vc/pixelops/vc_edge_policy.h" // vc_edge_policy, fetch -- shared
 
 namespace vc::pixelops {
 
@@ -86,28 +87,10 @@ namespace vc::pixelops {
 // what keeps it reusable if the convention is ever revisited. Note the
 // identity case still lands exactly: (x + 0.5) - 0.5 == x.
 
-// What to do when the inverse-mapped coordinate falls outside the source.
-// There is no correct answer, only a decided one -- so it is a parameter
-// rather than a hidden constant.
-//
-// The policy is applied PER NEIGHBOUR, not as one verdict on the whole sample.
-// That distinction is load-bearing: at the right-hand edge x collapses (there
-// is no x+1 to weigh in) while y may still have both its neighbours present
-// and must still interpolate. A single upfront bounds gate discards the y
-// blend along with the x one, which silently point-samples the entire last row
-// and column.
-enum class vc_edge_policy : std::uint8_t {
-    clamp, // clamp the coordinate to the image, replicating the edge pixel
-    zero,  // an out-of-range NEIGHBOUR contributes 0, so the border fades over
-           // one pixel. The alternative -- any neighbour outside means the
-           // whole sample is 0 -- gives a hard edge but discards real data
-           // wherever the 2x2 window straddles the border.
-};
-
 // How big the output canvas is.
 enum class vc_output_size : std::uint8_t {
     same_as_source, // geometry preserved; anything transformed outside is clipped
-    fit_transform,  // canvas grown so nothing is clipped -- see fitted_destination
+    fit_transform, // canvas grown so nothing is clipped -- see fitted_destination
 };
 
 // The destination geometry for a warp that must clip nothing, together with

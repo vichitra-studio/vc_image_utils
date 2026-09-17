@@ -97,7 +97,9 @@ set(VC_LIB_SOURCES
     src/io/vc_io_fs.cpp
     src/math/vc_linalg.cpp
     src/math/vc_transform.cpp
+    src/pixelops/vc_edge_policy.cpp
     src/pixelops/vc_warp.cpp
+    src/pixelops/vc_convolve.cpp
     src/utils/vc_log.cpp
     src/utils/vc_perf.cpp
     src/debug/vc_image_dumper.cpp
@@ -157,6 +159,7 @@ add_executable(vc_image_utils_tests
     tests/test_vc_edit.cpp
     tests/test_vc_linalg.cpp
     tests/test_vc_transform.cpp
+    tests/test_vc_edge_policy.cpp
     tests/samples/vc_sample_grayscale_stage.cpp
     tests/samples/vc_sample_mean_brightness_stage.cpp
     tests/samples/vc_sample_blur_stage.cpp
@@ -352,6 +355,7 @@ if(VC_BUILD_EXAMPLES)
         02_patch_distance
         03_warp
         04_numderiv
+        05_convolve
     )
 
     foreach(example ${VC_EXAMPLE_TARGETS})
