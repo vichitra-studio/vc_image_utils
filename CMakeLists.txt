@@ -97,6 +97,7 @@ set(VC_LIB_SOURCES
     src/io/vc_io_fs.cpp
     src/math/vc_linalg.cpp
     src/math/vc_transform.cpp
+    src/math/vc_dft.cpp
     src/pixelops/vc_edge_policy.cpp
     src/pixelops/vc_warp.cpp
     src/pixelops/vc_convolve.cpp
@@ -356,6 +357,7 @@ if(VC_BUILD_EXAMPLES)
         03_warp
         04_numderiv
         05_convolve
+        06_dft
     )
 
     foreach(example ${VC_EXAMPLE_TARGETS})

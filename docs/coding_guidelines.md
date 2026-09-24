@@ -98,8 +98,10 @@ vc::edit        — vc_edit_session, vc_edit_document, i_edit_table,
                   vc_memory_image_meta, export_image
 vc::debug       — image dump/visualisation (dump, dump_image_builder)
 vc::math        — vc_vec2/3, vc_mat2/3, apply/compose/invert, dot/norm/project,
-                  and the affine transform builders (translate/scale/rotate/
-                  rotate_about/scale_about, transform_point)
+                  the affine transform builders (translate/scale/rotate/
+                  rotate_about/scale_about, transform_point), and the Fourier
+                  transforms (vc_complex, complex_signal, to_signal, dft1d,
+                  idft1d) — sequences in, sequences out, no vc_image anywhere
 vc::pixelops    — operations ON images.
                   edge policy : vc_edge_policy, fetch
                   domain      : vc_output_size, vc_destination_geometry,
@@ -704,10 +706,28 @@ src/io/vc_io_fs.cpp           — vc::io filesystem helpers implementation
 src/utils/vc_log.cpp          — vc::utils::log implementation
 src/utils/vc_perf.cpp         — vc::utils::perf implementation
 src/debug/vc_image_dumper.cpp — vc::debug implementation
+include/vc/core/vc_scalar.h    — vc: real32 — the library's real-number precision,
+                                 declared ONCE. A LEAF: includes nothing, and must stay
+                                 that way, so vc::math can include it without acquiring
+                                 a dependency on image machinery (see 2.1). buf_f32 is
+                                 defined in terms of it and stays a separate NAME so it
+                                 remains greppable as "pixel data"; vc_dft.h spells the
+                                 same type real32 because a spectrum coefficient is not
+                                 pixel data. Header-only.
 include/vc/math/vc_linalg.h    — vc::math: vc_vec2/3, vc_mat2/3, apply/compose/invert,
-                                 dot/norm/project (header + src/math/vc_linalg.cpp)
+                                 dot/norm/project (header + src/math/vc_linalg.cpp).
+                                 ⚠ still spells its precision as bare `float` in ~14
+                                 places rather than vc::real32 — pre-dates vc_scalar.h,
+                                 not yet retrofitted
 include/vc/math/vc_transform.h — vc::math: affine transform builders in homogeneous
                                  coordinates (src/math/vc_transform.cpp)
+include/vc/math/vc_dft.h       — vc::math: vc_complex/complex_signal + dft1d/idft1d —
+                                 the O(N^2) reference transform, and the header that
+                                 pins the e^(-i...) sign convention as a cross-phase
+                                 contract (src/math/vc_dft.cpp). Lives here and not in
+                                 pixelops by the rule in 2.1: it takes no vc_image.
+                                 Week 6's fft1d joins it; fft2d and spectrum_viz do
+                                 take a vc_image and go to pixelops.
 include/vc/pixelops/vc_edge_policy.h
                                — vc::pixelops: vc_edge_policy + fetch — what it means to read
                                  a pixel the image does not have. Depends on neither warp nor

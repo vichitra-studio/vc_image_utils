@@ -13,6 +13,7 @@
 
 #include "vc/core/vc_error_code.h"
 #include "vc/core/vc_exception.h"
+#include "vc/core/vc_scalar.h"
 #include "vc/core/vc_types.h"
 
 namespace vc {
@@ -21,7 +22,7 @@ namespace vc {
 // than used as bare float/uint8_t/uint16_t — grepping for buf_u8 finds every
 // pixel-data use of the type, not every unrelated uint8_t in the codebase.
 // Names mirror pixel_dtype's enumerators below (f32/u8/u16) by design.
-using buf_f32 = float;
+using buf_f32 = float32; // the precision itself lives in vc_scalar.h
 using buf_u8 = std::uint8_t;
 using buf_u16 = std::uint16_t;
 
