@@ -410,6 +410,76 @@ int main() {
             expect(rel <= 1e-6F, "N=1024 Parseval holds to 1e-6 RELATIVE");
         }
 
+        // ---- 11. the even/odd combine rule, PRINTED then asserted ---------
+        //
+        // This is the one identity fft1d is built out of, and it is stated
+        // here in terms of dft1d -- which is already trusted -- so that it
+        // can be WATCHED rather than taken from a derivation.
+        //
+        // Claim:  split x into even-indexed and odd-indexed samples, take a
+        // HALF-SIZE dft1d of each, and the full spectrum is recoverable:
+        //
+        //     X[k]       =  E[k]  +  W^k . O[k]
+        //     X[k + N/2] =  E[k]  -  W^k . O[k]        same product, one sign
+        //
+        // with W = one step round the N-circle = e^(-j.2.pi/N).
+        //
+        // Nothing here is an FFT -- no recursion, no speed. It only asks
+        // whether the rule is true. When it is, fft1d is that rule applied
+        // all the way down, and S3's job is bookkeeping rather than a new
+        // idea. If a hand-written butterfly later disagrees with dft1d, this
+        // check says the RULE is fine and the INDEXING is wrong.
+        {
+            const complex_signal evens = to_signal(std::vector<float>{1.0F, 3.0F});
+            const complex_signal odds  = to_signal(std::vector<float>{2.0F, 4.0F});
+            const complex_signal e_spec = dft1d(evens);   // half-size, N=2
+            const complex_signal o_spec = dft1d(odds);    // half-size, N=2
+
+            std::cout << "\n  [combine rule] x = [1,2,3,4], N = 4\n";
+            std::cout << "    evens [1,3] -> E = ";
+            for (const vc_complex& z : e_spec) {
+                std::cout << "(" << z.real() << "," << z.imag() << ") ";
+            }
+            std::cout << "\n    odds  [2,4] -> O = ";
+            for (const vc_complex& z : o_spec) {
+                std::cout << "(" << z.real() << "," << z.imag() << ") ";
+            }
+            std::cout << "\n    full  dft1d -> X = ";
+            for (const vc_complex& z : spec) {
+                std::cout << "(" << z.real() << "," << z.imag() << ") ";
+            }
+            std::cout << "\n";
+
+            bool rule_holds = true;
+            for (std::size_t k = 0; k < 2; ++k) {
+                // W^k: k steps clockwise round the 4-circle, 90 degrees each
+                const float angle =
+                    -k_two_pi * static_cast<float>(k) / 4.0F;
+                const vc_complex w_pow{std::cos(angle), std::sin(angle)};
+                const vc_complex rotated = w_pow * o_spec[k];
+
+                const vc_complex lo = e_spec[k] + rotated;
+                const vc_complex hi = e_spec[k] - rotated;
+
+                std::cout << "    k=" << k
+                          << "  W^k=(" << w_pow.real() << "," << w_pow.imag()
+                          << ")  W^k.O=(" << rotated.real() << ","
+                          << rotated.imag() << ")"
+                          << "   E+W^k.O=(" << lo.real() << "," << lo.imag()
+                          << ") vs X[" << k << "]=(" << spec[k].real() << ","
+                          << spec[k].imag() << ")"
+                          << "   E-W^k.O=(" << hi.real() << "," << hi.imag()
+                          << ") vs X[" << k + 2 << "]=(" << spec[k + 2].real()
+                          << "," << spec[k + 2].imag() << ")\n";
+
+                rule_holds = rule_holds && near_c(lo, spec[k], 1e-5F) &&
+                             near_c(hi, spec[k + 2], 1e-5F);
+            }
+            std::cout << "\n";
+            expect(rule_holds,
+                   "even/odd combine rule reproduces dft1d exactly");
+        }
+
     } catch (const std::exception& e) {
         std::cerr << "EXCEPTION: " << e.what() << '\n';
         return 1;
