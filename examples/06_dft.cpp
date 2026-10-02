@@ -67,6 +67,17 @@ using vc::math::vc_complex;
 
 constexpr float k_two_pi = 6.28318530717958647692F;
 
+// Largest |imag(a[i])|. A real signal's spectrum must invert back to a real
+// signal, and this is the number that says so by name rather than by having
+// it absorbed into a round-trip tolerance. See check 8b.
+float max_imag(const complex_signal& a) {
+    float worst = 0.0F;
+    for (const vc_complex& z : a) {
+        worst = std::max(worst, std::abs(z.imag()));
+    }
+    return worst;
+}
+
 // Largest |a[i] - b[i]|. Returns infinity on a length mismatch rather than
 // indexing off the end of the shorter one -- a transform that returns the
 // wrong length is a failure, not undefined behaviour.
@@ -295,6 +306,41 @@ int main() {
             const complex_signal back = idft1d(spec);
             expect(back.size() == 4 && max_abs_diff(back, ramp) <= 1e-5F,
                    "idft1d(dft1d(x)) == x");
+        }
+
+        // ---- 8b. the inverse of a REAL signal's spectrum is REAL ----------
+        //
+        // Named on purpose, because check 8 already covers it by accident.
+        // max_abs_diff takes std::abs of a complex difference -- the modulus
+        // -- so an imaginary leak does make check 8 fail. But it fails as
+        // "round trip" and says nothing about WHICH half went wrong. These
+        // two lines separate the two failure modes.
+        //
+        // Why it holds: bins k and N-k are a twin pair whose imaginary
+        // contributions are exact negatives, so they cancel in the sum.
+        // Measured pairwise at N=8: ~6e-15. Over this round trip: 0.
+        //
+        // The second assertion is what gives the first one teeth. Zero bin 3
+        // and bin 1 is left without its twin; the inverse then comes back
+        // GENUINELY complex -- max|imag| = 0.5 exactly, against 0.0 intact,
+        // and the output 1.5+0.5i, 2.5-0.5i, 2.5-0.5i, 3.5+0.5i is
+        // hand-checkable. 1e-2 below is three orders clear of either side.
+        //
+        // This is the classic frequency-domain filtering bug and the reason
+        // conv_theorem (week 6, graded) must not call .real() on an inverse
+        // without checking this first: taking the real part THROWS AWAY the
+        // evidence that the filter was not twin-symmetric. A real-valued
+        // H[k] with H[k] == H[N-k] is the condition that keeps output real.
+        {
+            const complex_signal back = idft1d(spec);
+            expect(max_imag(back) <= 1e-6F,
+                   "inverse of a real signal's spectrum is real");
+
+            complex_signal broken = spec;
+            broken[3] = vc_complex{0.0F, 0.0F};
+            const complex_signal broken_back = idft1d(broken);
+            expect(max_imag(broken_back) > 1e-2F,
+                   "breaking one twin makes the inverse NOT real");
         }
 
         // ---- 9. Parseval ---------------------------------------------------
