@@ -170,10 +170,11 @@ using complex_signal = std::vector<vc_complex>;
 //     TAKE A VIEW, RETURN STORAGE.
 //
 // A caller should not have to own a std::vector to be transformed. It also
-// matters concretely at week 6: fft2d transforms an image row by row, and
-// with the buffer planar a row IS a contiguous slice -- a view over it costs
-// nothing, where a const-vector& parameter would force a copy per row.
-// (Columns are strided and must be gathered either way.)
+// matters concretely at dft2d below: the row pass transforms an image row by
+// row, and with the buffer planar a row IS a contiguous slice -- a view over
+// it costs nothing, where a const-vector& parameter would force a copy per
+// row. (Columns are strided and must be gathered either way.) That asymmetry
+// is also why dft2d pins ROWS FIRST: the cheap pass goes first.
 //
 // This matches vc_image::with_pixels, which already hands out a
 // std::span<const vc::buf_f32> rather than the underlying vector.
@@ -192,9 +193,13 @@ using real_view = std::span<const vc::float32>;
 // ---- the transforms ---------------------------------------------------------
 
 // Forward DFT, O(N^2). Direct evaluation of the sum above -- no factorisation,
-// no power-of-two requirement. fft1d (week 6) is the fast path and validates
-// against this one; this stays as the reference precisely because it is the
-// literal definition.
+// NO POWER-OF-TWO REQUIREMENT; any length works, including odd and prime.
+//
+// There is no fast path in this library. An earlier version of this comment
+// said "fft1d (week 6) is the fast path and validates against this one" --
+// fft1d was DROPPED from week 6 (see the P2 phase doc), so that promise is
+// withdrawn. FFTW takes the role at P4, behind an own fft() wrapper. This
+// stays the reference because it is the literal definition.
 //
 // Output is the same length as the input. Empty in, empty out.
 [[nodiscard]] complex_signal dft1d(complex_view x);
@@ -203,7 +208,7 @@ using real_view = std::span<const vc::float32>;
 // because image data is real and the two-call form is ceremony at every call
 // site.
 //
-// This is an ADDITION, not a replacement. fft2d's column pass genuinely needs
+// This is an ADDITION, not a replacement. dft2d's column pass genuinely needs
 // the complex overload above: a 2-D transform is a row pass then a column
 // pass, and the row pass already produced complex values for the column pass
 // to consume. dft1d must also stay type-compatible with idft1d, or the round
@@ -212,8 +217,9 @@ using real_view = std::span<const vc::float32>;
 // The cost of routing real data through the complex path is real and
 // accepted: roughly 2x the storage and 2x the arithmetic, since half the
 // imaginary parts are known-zero and get multiplied anyway, plus to_signal's
-// copy. This is the O(N^2) REFERENCE that fft1d is validated against, not the
-// fast path. The optimisation has a standard shape -- exploit Hermitian
+// copy. That cost is accepted because this is the only implementation there
+// is, and correctness is what it is for. The optimisation has a standard
+// shape -- exploit Hermitian
 // symmetry to compute only N/2+1 bins for half the work, which is what Smith's
 // Ch 8 real DFT is and what FFTW calls r2c -- and it belongs at P4, where
 // FFTW replaces this.
@@ -236,15 +242,24 @@ using real_view = std::span<const vc::float32>;
 //
 //     e^(-2.pi.i.(kx.x/M + ky.y/N))  =  e^(-2.pi.i.kx.x/M) . e^(-2.pi.i.ky.y/N)
 //
-// The second factor has no x in it, so the x-sum can be pulled outside:
+// The SECOND factor has no x in it, so it is a constant as far as the inner
+// x-sum is concerned and COMES OUT OF IT -- leaving the x-sum as a bracket:
 //
 //     H(kx,ky) = sum over y of  e^(-2.pi.i.ky.y/N) . [ sum over x of h(x,y) . e^(-2.pi.i.kx.x/M) ]
 //                                                     -------------------------------------------
 //                                                     a 1-D DFT ALONG ROW y, evaluated at kx
 //
-// Do that bracket for every row, then run a 1-D DFT down each column of the
-// result. Two passes. The order is interchangeable -- nothing above forced x
-// inside rather than y -- so columns-then-rows gives the identical answer.
+// (It is the y-FACTOR that moves out, not the x-sum. An earlier draft of this
+// comment said "the x-sum can be pulled outside", which contradicts the line
+// directly beneath it -- the x-sum is the thing that stays innermost.)
+//
+// Do that bracket for every row -- that is PASS 1 -- and you are left with
+// G(kx, y). Then the outer sum over y, at fixed kx, is a 1-D DFT down column
+// kx of G. That is PASS 2. Two passes of the 1-D transform, nothing else.
+//
+// The order is interchangeable: nothing above forced the x-sum inside rather
+// than the y-sum, so pulling the x-factor out instead gives columns-then-rows
+// and the identical answer.
 //
 // This is the separable-Gaussian argument from week 5, one level up. A
 // separable KERNEL factors into (horizontal) x (vertical), so you convolve
@@ -308,12 +323,23 @@ using real_view = std::span<const vc::float32>;
 // Empty in, empty out. Otherwise width and height must both be non-zero and
 // width * height must equal the input's size, or vc_error_code::invalid_argument.
 //
+// ANY DIMENSIONS, not just powers of two -- dft1d has no such restriction and
+// neither does this. Odd, prime and coprime sides all work; 07_dft2d checks a
+// 5-wide-by-3-high case specifically, because every other size in that file
+// has an even side and shares a factor between the two, and an indexing
+// mistake can land in-bounds by luck when one dimension divides the other.
+//
 // Validate WITHOUT multiplying width by height: that product can overflow
 // std::size_t before the comparison happens, and the comparison would then
 // pass on nonsense. Divide instead -- check that width divides the size
-// exactly and that the quotient is the height. Week 5 lost an evening to a
-// size_t underflow computing (N-1)*2; the lesson was to not let an index
-// expression wrap in the first place.
+// exactly and that the quotient is the height.
+//
+// This is not hypothetical and 07_dft2d asserts it: for an 8-element input,
+// width = 2^63 + 4 with height = 2 has width * height == 8 after wrapping on
+// a 64-bit size_t, so a multiplying check ACCEPTS it and then indexes wildly.
+// A dividing check rejects it, because 8 % (2^63 + 4) is 8, not 0. Week 5
+// lost an evening to a size_t underflow computing (N-1)*2; the lesson was to
+// not let an index expression wrap in the first place.
 [[nodiscard]] complex_signal dft2d(complex_view plane, std::size_t width,
                                    std::size_t height);
 

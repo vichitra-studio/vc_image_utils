@@ -215,6 +215,46 @@ int main() {
                     (e.code() == vc::vc_error_code::invalid_argument);
             }
             expect(threw_zero, "dft2d rejects zero width on non-empty input");
+
+            bool threw_zero_h = false;
+            try {
+                (void)dft2d(eight, 8, 0);
+            } catch (const vc::vc_exception& e) {
+                threw_zero_h =
+                    (e.code() == vc::vc_error_code::invalid_argument);
+            }
+            expect(threw_zero_h, "dft2d rejects zero height on non-empty input");
+
+            // ---- the one that actually enforces "divide, don't multiply" --
+            //
+            // 2^63 + 4 times 2 is 2^64 + 8, which WRAPS to exactly 8 on a
+            // 64-bit size_t. So an implementation that validates with
+            //
+            //     if (width * height != plane.size()) throw;
+            //
+            // ACCEPTS these dimensions and then indexes an 8-element buffer
+            // as though it were 2^63 wide. Dividing rejects it: 8 % (2^63+4)
+            // is 8, not 0.
+            //
+            // ⚠ If your implementation multiplies, this check will probably
+            // CRASH rather than fail cleanly -- run it under build/asan
+            // (-DENABLE_SANITIZERS=ON) the first time, where the out-of-
+            // bounds read is reported instead of being undefined.
+            //
+            // The header requires the divide form; this is the assertion
+            // that makes the requirement real rather than advisory.
+            bool threw_overflow = false;
+            try {
+                constexpr std::size_t huge =
+                    (static_cast<std::size_t>(1) << 63U) + 4U;
+                (void)dft2d(eight, huge, 2);
+            } catch (const vc::vc_exception& e) {
+                threw_overflow =
+                    (e.code() == vc::vc_error_code::invalid_argument);
+            }
+            expect(threw_overflow,
+                   "dft2d rejects width*height that OVERFLOWS to the right "
+                   "size (forces divide-not-multiply validation)");
         }
 
         // ---- 3. a single row reduces to dft1d --------------------------
@@ -310,6 +350,57 @@ int main() {
                    "dft2d 2x4 matches the direct definition");
         }
 
+        // ---- 6b. COPRIME AND ODD: 5 wide x 3 high ----------------------
+        //
+        // Every other size in this file has an even side, and in each one
+        // dimension divides the other (4/2, 2/4, 8/4, 64/48 share factors).
+        // That leaves two blind spots:
+        //
+        //   - no odd dimension anywhere, so a loop bound that assumes an
+        //     even extent, or an implementation that quietly wants powers of
+        //     two, passes everything above. This is week 5's "no odd-N test"
+        //     finding again -- the header promises any size works, so some
+        //     check has to hold it to that.
+        //
+        //   - when one side divides the other, a stride or index computed
+        //     from the wrong dimension can still land IN BOUNDS and even on
+        //     the right element by arithmetic luck. 5 and 3 are coprime, so
+        //     a wrong-dimension stride walks off the correct element almost
+        //     immediately.
+        //
+        // The values are dense -- a ramp in both axes plus a modular term --
+        // so every one of the 15 bins is non-zero and nothing can hide on a
+        // zero. Checked against the direct definition, which check 5 already
+        // pinned against hand arithmetic.
+        {
+            constexpr std::size_t w = 5;
+            constexpr std::size_t h = 3;
+            std::vector<float> v(w * h);
+            for (std::size_t y = 0; y < h; ++y) {
+                for (std::size_t x = 0; x < w; ++x) {
+                    v[(y * w) + x] =
+                        1.0F + (2.0F * static_cast<float>(x)) +
+                        (3.0F * static_cast<float>(y)) +
+                        static_cast<float>(((x * 7U) + (y * 5U)) % 4U);
+                }
+            }
+            const complex_signal plane = lift(v);
+            const complex_signal got = dft2d(plane, w, h);
+            const complex_signal want = naive_dft2d(plane, w, h);
+            expect(got.size() == w * h, "dft2d 5x3 keeps length");
+            expect(max_abs_diff(got, want) <= 1e-3F,
+                   "dft2d 5x3 (coprime, both odd) matches the definition");
+
+            // DC is the plain total: 141 for this pattern. Hand-summable.
+            expect(!got.empty() && near(got[0].real(), 141.0F, 1e-2F),
+                   "dft2d 5x3 X[0,0] == 141, the sum of the samples");
+
+            const complex_signal back = idft2d(got, w, h);
+            expect(back.size() == w * h &&
+                       max_abs_diff(back, plane) <= 1e-3F,
+                   "5x3 round trips (odd sides do not break the 1/MN)");
+        }
+
         // ---- 7. DC bin is the sum of every sample ----------------------
         //
         // All the exponentials are 1 at kx=ky=0, so X[0] is a plain total.
@@ -354,16 +445,34 @@ int main() {
         {
             constexpr std::size_t w = 64;
             constexpr std::size_t h = 48;
+            // THE SIGNAL HAS TO BE DENSE IN THE FREQUENCY DOMAIN or this
+            // check is hollow. An earlier version used
+            //     0.5 + 0.3.cos(3x/w) + 0.2.sin(7y/h)
+            // which is a sum of an x-only and a y-only term: its spectrum is
+            // non-zero in FIVE bins out of 3072 (DC, and one twin pair per
+            // term). Parseval over a spectrum that is 99.8% exact zeros tests
+            // almost nothing, and a dropped or misplaced bin would very
+            // likely land on a zero and go unnoticed.
+            //
+            // What is below lights every bin: two genuine 2-D cross terms
+            // (x and y in the SAME exponent, so not a sum of 1-D pieces), a
+            // hard rectangular edge, and a bilinear ramp. Non-separable and
+            // asymmetric in both axes, which is also what makes the round
+            // trip worth running at this size.
             std::vector<float> image(w * h);
             for (std::size_t y = 0; y < h; ++y) {
                 for (std::size_t x = 0; x < w; ++x) {
                     const float fx = static_cast<float>(x);
                     const float fy = static_cast<float>(y);
+                    const float u = fx / static_cast<float>(w);
+                    const float v = fy / static_cast<float>(h);
+                    const float edge =
+                        (x > w / 3 && y > h / 4) ? 0.25F : 0.0F;
                     image[(y * w) + x] =
-                        0.5F + (0.3F * std::cos(k_two_pi * 3.0F * fx /
-                                                static_cast<float>(w))) +
-                        (0.2F * std::sin(k_two_pi * 7.0F * fy /
-                                         static_cast<float>(h)));
+                        0.5F +
+                        (0.3F * std::cos(k_two_pi * ((3.0F * u) + (5.0F * v)))) +
+                        (0.2F * std::sin(k_two_pi * ((11.0F * u) - (2.0F * v)))) +
+                        edge + (0.1F * u * v);
                 }
             }
             const complex_signal plane = lift(image);
@@ -414,9 +523,15 @@ int main() {
             d[(y0 * w) + x0] = 1.0F;
             const complex_signal spec = dft2d(lift(d), w, h);
 
+            // Both loops run to completion rather than bailing on the
+            // first mismatch. An earlier version guarded the outer loop on
+            // ramp_ok while computing flat_ok inside it, so a ramp failure
+            // in row 0 left flat_ok decided by one row out of two -- it
+            // could report PASS having inspected half the data. Two
+            // assertions sharing one loop guard is one assertion.
             bool ramp_ok = spec.size() == w * h;
             bool flat_ok = ramp_ok;
-            for (std::size_t ky = 0; ky < h && ramp_ok; ++ky) {
+            for (std::size_t ky = 0; ky < h && spec.size() == w * h; ++ky) {
                 for (std::size_t kx = 0; kx < w; ++kx) {
                     const float angle =
                         -k_two_pi *
@@ -506,7 +621,10 @@ int main() {
             expect(twins_ok,
                    "a 2-D sinusoid spikes at BOTH twins, magnitude M.N/2");
 
-            bool rest_quiet = twins_ok;
+            // Seeded from the SIZE, not from twins_ok. Seeding it from
+            // twins_ok made a twin failure report as two failures, which
+            // sends you looking for two causes.
+            bool rest_quiet = spec.size() == w * h;
             for (std::size_t i = 0; i < spec.size() && rest_quiet; ++i) {
                 const bool is_twin = (i == (1 * w) + 2) || (i == (7 * w) + 6);
                 if (!is_twin) {
