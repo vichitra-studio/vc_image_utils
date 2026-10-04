@@ -430,10 +430,12 @@ int main() {
         // idea. If a hand-written butterfly later disagrees with dft1d, this
         // check says the RULE is fine and the INDEXING is wrong.
         {
-            const complex_signal evens = to_signal(std::vector<float>{1.0F, 3.0F});
-            const complex_signal odds  = to_signal(std::vector<float>{2.0F, 4.0F});
-            const complex_signal e_spec = dft1d(evens);   // half-size, N=2
-            const complex_signal o_spec = dft1d(odds);    // half-size, N=2
+            const complex_signal evens =
+                to_signal(std::vector<float>{1.0F, 3.0F});
+            const complex_signal odds =
+                to_signal(std::vector<float>{2.0F, 4.0F});
+            const complex_signal e_spec = dft1d(evens); // half-size, N=2
+            const complex_signal o_spec = dft1d(odds);  // half-size, N=2
 
             std::cout << "\n  [combine rule] x = [1,2,3,4], N = 4\n";
             std::cout << "    evens [1,3] -> E = ";
@@ -453,18 +455,16 @@ int main() {
             bool rule_holds = true;
             for (std::size_t k = 0; k < 2; ++k) {
                 // W^k: k steps clockwise round the 4-circle, 90 degrees each
-                const float angle =
-                    -k_two_pi * static_cast<float>(k) / 4.0F;
+                const float angle = -k_two_pi * static_cast<float>(k) / 4.0F;
                 const vc_complex w_pow{std::cos(angle), std::sin(angle)};
                 const vc_complex rotated = w_pow * o_spec[k];
 
                 const vc_complex lo = e_spec[k] + rotated;
                 const vc_complex hi = e_spec[k] - rotated;
 
-                std::cout << "    k=" << k
-                          << "  W^k=(" << w_pow.real() << "," << w_pow.imag()
-                          << ")  W^k.O=(" << rotated.real() << ","
-                          << rotated.imag() << ")"
+                std::cout << "    k=" << k << "  W^k=(" << w_pow.real() << ","
+                          << w_pow.imag() << ")  W^k.O=(" << rotated.real()
+                          << "," << rotated.imag() << ")"
                           << "   E+W^k.O=(" << lo.real() << "," << lo.imag()
                           << ") vs X[" << k << "]=(" << spec[k].real() << ","
                           << spec[k].imag() << ")"

@@ -93,16 +93,16 @@ complex_signal idft1d(complex_view spectrum) {
 //
 // idft2d is the same with idft1d in place of dft1d.
 
-complex_signal dft2d(complex_view plane, std::size_t width,
-                     std::size_t height) {
+complex_signal
+dft2d(complex_view plane, std::size_t width, std::size_t height) {
     (void)plane;
     (void)width;
     (void)height;
     return {}; // STUB
 }
 
-complex_signal idft2d(complex_view spectrum, std::size_t width,
-                      std::size_t height) {
+complex_signal
+idft2d(complex_view spectrum, std::size_t width, std::size_t height) {
     (void)spectrum;
     (void)width;
     (void)height;

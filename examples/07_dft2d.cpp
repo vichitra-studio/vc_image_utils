@@ -71,7 +71,9 @@ void expect(bool condition, const char* what) {
     }
 }
 
-bool near(float a, float b, float tol) { return std::fabs(a - b) <= tol; }
+bool near(float a, float b, float tol) {
+    return std::fabs(a - b) <= tol;
+}
 
 bool near_c(vc_complex a, vc_complex b, float tol) {
     return near(a.real(), b.real(), tol) && near(a.imag(), b.imag(), tol);
@@ -131,8 +133,8 @@ double energy(const complex_signal& a) {
 // the normalisation.
 //
 // Accumulates in double and narrows once at the end, same as dft1d.
-complex_signal naive_dft2d(complex_view plane, std::size_t width,
-                           std::size_t height) {
+complex_signal
+naive_dft2d(complex_view plane, std::size_t width, std::size_t height) {
     complex_signal out(plane.size());
     for (std::size_t ky = 0; ky < height; ++ky) {
         for (std::size_t kx = 0; kx < width; ++kx) {
@@ -140,20 +142,18 @@ complex_signal naive_dft2d(complex_view plane, std::size_t width,
             for (std::size_t y = 0; y < height; ++y) {
                 for (std::size_t x = 0; x < width; ++x) {
                     const double angle =
-                        -k_two_pi_d *
-                        ((static_cast<double>(kx * x) /
-                          static_cast<double>(width)) +
-                         (static_cast<double>(ky * y) /
-                          static_cast<double>(height)));
-                    sum += static_cast<std::complex<double>>(
-                               plane[(y * width) + x]) *
-                           std::complex<double>{std::cos(angle),
-                                                std::sin(angle)};
+                        -k_two_pi_d * ((static_cast<double>(kx * x) /
+                                        static_cast<double>(width)) +
+                                       (static_cast<double>(ky * y) /
+                                        static_cast<double>(height)));
+                    sum +=
+                        static_cast<std::complex<double>>(
+                            plane[(y * width) + x]) *
+                        std::complex<double>{std::cos(angle), std::sin(angle)};
                 }
             }
-            out[(ky * width) + kx] =
-                vc_complex{static_cast<float>(sum.real()),
-                           static_cast<float>(sum.imag())};
+            out[(ky * width) + kx] = vc_complex{static_cast<float>(sum.real()),
+                                                static_cast<float>(sum.imag())};
         }
     }
     return out;
@@ -211,8 +211,7 @@ int main() {
             try {
                 (void)dft2d(eight, 0, 8);
             } catch (const vc::vc_exception& e) {
-                threw_zero =
-                    (e.code() == vc::vc_error_code::invalid_argument);
+                threw_zero = (e.code() == vc::vc_error_code::invalid_argument);
             }
             expect(threw_zero, "dft2d rejects zero width on non-empty input");
 
@@ -223,7 +222,8 @@ int main() {
                 threw_zero_h =
                     (e.code() == vc::vc_error_code::invalid_argument);
             }
-            expect(threw_zero_h, "dft2d rejects zero height on non-empty input");
+            expect(threw_zero_h,
+                   "dft2d rejects zero height on non-empty input");
 
             // ---- the one that actually enforces "divide, don't multiply" --
             //
@@ -243,10 +243,14 @@ int main() {
             //
             // The header requires the divide form; this is the assertion
             // that makes the requirement real rather than advisory.
+            // Derived from SIZE_MAX rather than written as 1 << 63, which
+            // is undefined behaviour where size_t is 32 bits. (SIZE_MAX/2)+1
+            // is the top bit on any width, so huge * 2 wraps to 8 on a
+            // 32-bit size_t exactly as it does on a 64-bit one.
             bool threw_overflow = false;
             try {
                 constexpr std::size_t huge =
-                    (static_cast<std::size_t>(1) << 63U) + 4U;
+                    ((std::numeric_limits<std::size_t>::max)() / 2U) + 1U + 4U;
                 (void)dft2d(eight, huge, 2);
             } catch (const vc::vc_exception& e) {
                 threw_overflow =
@@ -396,8 +400,7 @@ int main() {
                    "dft2d 5x3 X[0,0] == 141, the sum of the samples");
 
             const complex_signal back = idft2d(got, w, h);
-            expect(back.size() == w * h &&
-                       max_abs_diff(back, plane) <= 1e-3F,
+            expect(back.size() == w * h && max_abs_diff(back, plane) <= 1e-3F,
                    "5x3 round trips (odd sides do not break the 1/MN)");
         }
 
@@ -466,12 +469,13 @@ int main() {
                     const float fy = static_cast<float>(y);
                     const float u = fx / static_cast<float>(w);
                     const float v = fy / static_cast<float>(h);
-                    const float edge =
-                        (x > w / 3 && y > h / 4) ? 0.25F : 0.0F;
+                    const float edge = (x > w / 3 && y > h / 4) ? 0.25F : 0.0F;
                     image[(y * w) + x] =
                         0.5F +
-                        (0.3F * std::cos(k_two_pi * ((3.0F * u) + (5.0F * v)))) +
-                        (0.2F * std::sin(k_two_pi * ((11.0F * u) - (2.0F * v)))) +
+                        (0.3F *
+                         std::cos(k_two_pi * ((3.0F * u) + (5.0F * v)))) +
+                        (0.2F *
+                         std::sin(k_two_pi * ((11.0F * u) - (2.0F * v)))) +
                         edge + (0.1F * u * v);
                 }
             }
@@ -488,10 +492,9 @@ int main() {
             // identity, so it holds under either sign convention and cannot
             // be the only check -- but it does catch a dropped bin.
             const double t_energy = energy(plane);
-            const double f_energy =
-                energy(spec) / static_cast<double>(w * h);
-            const double rel = std::fabs(t_energy - f_energy) /
-                               std::max(t_energy, 1e-12);
+            const double f_energy = energy(spec) / static_cast<double>(w * h);
+            const double rel =
+                std::fabs(t_energy - f_energy) / std::max(t_energy, 1e-12);
             expect(rel <= 1e-5, "64x48 Parseval holds to 1e-5 relative");
         }
 
@@ -535,10 +538,8 @@ int main() {
                 for (std::size_t kx = 0; kx < w; ++kx) {
                     const float angle =
                         -k_two_pi *
-                        ((static_cast<float>(kx * x0) /
-                          static_cast<float>(w)) +
-                         (static_cast<float>(ky * y0) /
-                          static_cast<float>(h)));
+                        ((static_cast<float>(kx * x0) / static_cast<float>(w)) +
+                         (static_cast<float>(ky * y0) / static_cast<float>(h)));
                     const vc_complex want{std::cos(angle), std::sin(angle)};
                     const vc_complex got = spec[(ky * w) + kx];
                     ramp_ok = ramp_ok && near_c(got, want, 1e-5F);
@@ -570,8 +571,8 @@ int main() {
             constexpr std::size_t h = 2;
             std::vector<float> a(w * h, 0.0F);
             std::vector<float> b(w * h, 0.0F);
-            a[1] = 1.0F;                 // (x=1, y=0)
-            b[(1 * w) + 3] = 1.0F;       // (x=3, y=1)
+            a[1] = 1.0F;           // (x=1, y=0)
+            b[(1 * w) + 3] = 1.0F; // (x=3, y=1)
             const complex_signal sa = dft2d(lift(a), w, h);
             const complex_signal sb = dft2d(lift(b), w, h);
 
@@ -667,8 +668,8 @@ int main() {
                     const vc_complex a = spec[(ky * w) + kx];
                     const vc_complex b =
                         spec[(((h - ky) % h) * w) + ((w - kx) % w)];
-                    herm = herm &&
-                           (std::abs(a - std::conj(b)) / scale <= 1e-5F);
+                    herm =
+                        herm && (std::abs(a - std::conj(b)) / scale <= 1e-5F);
                 }
             }
             expect(herm,
@@ -692,8 +693,7 @@ int main() {
         return 1;
     }
 
-    std::cout << "07_dft2d: " << passed << " / " << total
-              << " checks passed\n";
+    std::cout << "07_dft2d: " << passed << " / " << total << " checks passed\n";
     if (passed != total) {
         std::cout << "07_dft2d: FAIL\n";
         return 1;

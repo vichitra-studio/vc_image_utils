@@ -340,8 +340,8 @@ using real_view = std::span<const vc::float32>;
 // A dividing check rejects it, because 8 % (2^63 + 4) is 8, not 0. Week 5
 // lost an evening to a size_t underflow computing (N-1)*2; the lesson was to
 // not let an index expression wrap in the first place.
-[[nodiscard]] complex_signal dft2d(complex_view plane, std::size_t width,
-                                   std::size_t height);
+[[nodiscard]] complex_signal
+dft2d(complex_view plane, std::size_t width, std::size_t height);
 
 // Inverse 2-D DFT. Two idft1d passes, so the 1/(width*height) arrives for
 // free -- see the scaling note above.
@@ -352,7 +352,7 @@ using real_view = std::span<const vc::float32>;
 // away the only signal that says a frequency-domain filter was not
 // twin-symmetric -- which is what 06_dft check 8b exists to assert, and what
 // conv_theorem will need in week 6.
-[[nodiscard]] complex_signal idft2d(complex_view spectrum, std::size_t width,
-                                    std::size_t height);
+[[nodiscard]] complex_signal
+idft2d(complex_view spectrum, std::size_t width, std::size_t height);
 
 } // namespace vc::math
