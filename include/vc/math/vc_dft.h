@@ -4,6 +4,7 @@
 #pragma once
 
 #include <complex>
+#include <cstddef>
 #include <span>
 #include <vector>
 
@@ -26,8 +27,20 @@ namespace vc::math {
 // (range / domain / neighbourhood / reduction), all of which are statements
 // about how an operation touches pixels.
 //
-// The week-6 files split on the same line: fft1d joins this one here, while
-// fft2d and spectrum_viz go to pixelops because they do take a vc_image.
+// The week-6 files split on the same line -- but NOT where this comment first
+// guessed. It used to read "fft2d and spectrum_viz go to pixelops because they
+// do take a vc_image". Corrected 2026-10-04, once the signature existed:
+// dft2d takes a complex 2-D buffer and RETURNS a complex one, so no vc_image
+// appears anywhere in it and the 2.1 rule keeps it here. spectrum_viz does go
+// to pixelops -- it takes a vc_image and writes a PNG.
+//
+// That split is load-bearing rather than tidy. A 2-D spectrum is complex and
+// a vc_image is real, so a dft2d phrased in terms of vc_image would have to
+// throw the imaginary part away somewhere. Keeping the transform in vc::math
+// pushes that discard out to the pixelops boundary, where it is one visible
+// line instead of a hidden one -- and 06_dft check 8b is the reason to care:
+// a non-zero imaginary part is the alarm that says a filter was not
+// twin-symmetric, and calling .real() destroys the evidence.
 //
 // ---- WHY SINUSOIDS, AND WHY THIS IS NOT ARBITRARY ----
 //
@@ -210,5 +223,110 @@ using real_view = std::span<const vc::float32>;
 //
 // Empty in, empty out -- which is also why the 1/N cannot divide by zero.
 [[nodiscard]] complex_signal idft1d(complex_view spectrum);
+
+// ---- the 2-D transforms -----------------------------------------------------
+//
+// An image is 2-D, and the 2-D transform is TWO PASSES OF THE 1-D ONE. That is
+// not an optimisation bolted on afterwards; it falls out of the definition in
+// one step. Szeliski's Eq 3.60 is
+//
+//     H(kx,ky) = sum over x, sum over y of  h(x,y) . e^(-2.pi.i.(kx.x/M + ky.y/N))
+//
+// and the exponent is a SUM, so the exponential FACTORS:
+//
+//     e^(-2.pi.i.(kx.x/M + ky.y/N))  =  e^(-2.pi.i.kx.x/M) . e^(-2.pi.i.ky.y/N)
+//
+// The second factor has no x in it, so the x-sum can be pulled outside:
+//
+//     H(kx,ky) = sum over y of  e^(-2.pi.i.ky.y/N) . [ sum over x of h(x,y) . e^(-2.pi.i.kx.x/M) ]
+//                                                     -------------------------------------------
+//                                                     a 1-D DFT ALONG ROW y, evaluated at kx
+//
+// Do that bracket for every row, then run a 1-D DFT down each column of the
+// result. Two passes. The order is interchangeable -- nothing above forced x
+// inside rather than y -- so columns-then-rows gives the identical answer.
+//
+// This is the separable-Gaussian argument from week 5, one level up. A
+// separable KERNEL factors into (horizontal) x (vertical), so you convolve
+// rows then columns. A 2-D BASIS FUNCTION factors the same way, so you
+// transform rows then columns. Same structural fact, different object.
+//
+// ---- WHAT SEPARABILITY IS WORTH, WITH NO FFT INVOLVED ----
+//
+//     direct      (M.N)^2         every output bin touches every input sample
+//     separated   M.N.(M + N)     M row transforms + N column transforms
+//
+//     ratio = M.N / (M + N)   ->   at 256 x 256:  65536/512 = 128x
+//
+// That 128x is why this is usable on real images at all without fft1d, which
+// was dropped from week 6 (see the P2 phase doc). Dropping it gave up a log
+// factor; it never touched this one.
+//
+// ---- LAYOUT ----
+//
+// Row-major, as the pixel buffers are:  index(x, y) = y * width + x.
+// Output indexes the same way:          index(kx, ky) = ky * width + kx.
+//
+// Dimensions travel as parameters rather than in a wrapper type, because the
+// only thing either function needs to know about shape is where a row ends.
+//
+// PASS ORDER IS DOCUMENTED, NOT JUST CHOSEN: rows first, then columns. The
+// answer is the same either way, but spectrum_viz's reader should not have to
+// guess, and an intermediate dump is unreadable without knowing.
+//
+// ---- SCALING: ADD NOTHING. THERE ARE NOW THREE CONVENTIONS IN PLAY ----
+//
+//     vc_dft.h (here)   forward: nothing     inverse: 1/N per call
+//     FFTW              forward: nothing     inverse: nothing (caller divides)
+//     Szeliski Eq 3.60  forward: 1/(M.N)     inverse: unstated
+//
+// dft2d is two unscaled dft1d passes, so it applies NOTHING. idft2d is two
+// idft1d passes, and each contributes its own 1/N -- 1/width on the row pass
+// and 1/height on the column pass -- so the round trip recovers 1/(M.N)
+// automatically and exactly.
+//
+// DO NOT COPY EQ 3.60'S 1/(M.N) INTO THE FORWARD PASS. If you do, and then
+// invert with idft2d, you divide twice: the round trip comes back M.N times
+// too small. At 256x256 that is 65536x, which reads as a black image rather
+// than as a subtle error -- so it is at least a loud bug. The quiet version is
+// worse: a forward-only comparison against someone else's spectrum silently
+// disagrees by a constant factor, and magnitudes-only checks cannot see a
+// uniform scale at all. Parseval cannot either; it scales right along with it.
+//
+// ---- NON-SQUARE INPUT IS NOT AN EDGE CASE, IT IS THE TEST ----
+//
+// On a square image a transposed pass, a swapped width/height, and a stride
+// computed from the wrong dimension are ALL INVISIBLE -- the output is the
+// transpose of the right answer, which for many test inputs is the right
+// answer. The same shape of blindness as week 5's symmetric kernel hiding the
+// convolution-vs-correlation flip, and week 5's [1,1,1,1] hiding the sign
+// convention. 07_dft2d therefore checks 4-wide-by-2-high AND 2-wide-by-4-high
+// against an independent direct implementation of the definition above.
+//
+// ---- CONTRACT ----
+//
+// Empty in, empty out. Otherwise width and height must both be non-zero and
+// width * height must equal the input's size, or vc_error_code::invalid_argument.
+//
+// Validate WITHOUT multiplying width by height: that product can overflow
+// std::size_t before the comparison happens, and the comparison would then
+// pass on nonsense. Divide instead -- check that width divides the size
+// exactly and that the quotient is the height. Week 5 lost an evening to a
+// size_t underflow computing (N-1)*2; the lesson was to not let an index
+// expression wrap in the first place.
+[[nodiscard]] complex_signal dft2d(complex_view plane, std::size_t width,
+                                   std::size_t height);
+
+// Inverse 2-D DFT. Two idft1d passes, so the 1/(width*height) arrives for
+// free -- see the scaling note above.
+//
+// Returns complex, NOT real, and deliberately. For a spectrum that came from
+// real samples the imaginary part is zero to rounding, and for one that did
+// not, a complex result is the correct answer. Discarding it here would throw
+// away the only signal that says a frequency-domain filter was not
+// twin-symmetric -- which is what 06_dft check 8b exists to assert, and what
+// conv_theorem will need in week 6.
+[[nodiscard]] complex_signal idft2d(complex_view spectrum, std::size_t width,
+                                    std::size_t height);
 
 } // namespace vc::math

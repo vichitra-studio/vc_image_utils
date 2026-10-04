@@ -70,4 +70,43 @@ complex_signal idft1d(complex_view spectrum) {
     return out;
 }
 
+// ---- 2-D: YOURS TO WRITE ----------------------------------------------------
+//
+// Both bodies below are STUBS. They return {} so the project links and
+// 07_dft2d runs RED -- every 2-D check will fail, loudly, which is the
+// starting state, not a problem to debug.
+//
+// The header above vc_dft.h's dft2d declaration carries the contract, the
+// derivation, the pass order, the scaling rule and the validation note. The
+// shape of each body is:
+//
+//   1. empty in -> return {}
+//   2. validate: width and height non-zero, and width divides the size
+//      exactly with quotient height. WITHOUT multiplying -- see the header.
+//      Throw vc::vc_exception(vc::vc_error_code::invalid_argument, "...").
+//   3. pass 1, rows: for each y, transform the width-long contiguous slice
+//      starting at y*width. That slice is already a complex_view -- no copy.
+//   4. pass 2, columns: for each kx, GATHER the height values at stride
+//      width into a temporary, transform it, and scatter the result back.
+//      Columns are strided, so this one does copy; that is unavoidable.
+//   5. apply no scaling of your own. dft1d and idft1d already carry it.
+//
+// idft2d is the same with idft1d in place of dft1d.
+
+complex_signal dft2d(complex_view plane, std::size_t width,
+                     std::size_t height) {
+    (void)plane;
+    (void)width;
+    (void)height;
+    return {}; // STUB
+}
+
+complex_signal idft2d(complex_view spectrum, std::size_t width,
+                      std::size_t height) {
+    (void)spectrum;
+    (void)width;
+    (void)height;
+    return {}; // STUB
+}
+
 } // namespace vc::math

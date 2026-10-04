@@ -358,6 +358,7 @@ if(VC_BUILD_EXAMPLES)
         04_numderiv
         05_convolve
         06_dft
+        07_dft2d
     )
 
     foreach(example ${VC_EXAMPLE_TARGETS})
