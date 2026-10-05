@@ -98,6 +98,7 @@ set(VC_LIB_SOURCES
     src/math/vc_linalg.cpp
     src/math/vc_transform.cpp
     src/math/vc_dft.cpp
+    src/math/vc_grid2d.cpp
     src/pixelops/vc_edge_policy.cpp
     src/pixelops/vc_warp.cpp
     src/pixelops/vc_convolve.cpp
@@ -159,6 +160,7 @@ add_executable(vc_image_utils_tests
     tests/test_vc_pipe.cpp
     tests/test_vc_edit.cpp
     tests/test_vc_linalg.cpp
+    tests/test_vc_grid2d.cpp
     tests/test_vc_transform.cpp
     tests/test_vc_edge_policy.cpp
     tests/samples/vc_sample_grayscale_stage.cpp

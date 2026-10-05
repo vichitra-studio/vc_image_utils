@@ -70,43 +70,103 @@ complex_signal idft1d(complex_view spectrum) {
     return out;
 }
 
-// ---- 2-D: YOURS TO WRITE ----------------------------------------------------
+// ---- 2-D -----------------------------------------------------------------
 //
-// Both bodies below are STUBS. They return {} so the project links and
-// 07_dft2d runs RED -- every 2-D check will fail, loudly, which is the
-// starting state, not a problem to debug.
+// Two passes of the 1-D transform: every row, then every column of that
+// result. The derivation, the pass order, the scaling rule and the cost of
+// separability are all in vc_dft.h above the declarations.
 //
-// The header above vc_dft.h's dft2d declaration carries the contract, the
-// derivation, the pass order, the scaling rule and the validation note. The
-// shape of each body is:
+// NO ARGUMENT VALIDATION HERE, and that is not an omission. grid2d cannot be
+// constructed from dimensions that disagree with the buffer, so by the time
+// `extent` exists the only two things these functions could have checked are
+// already true. The checks live in grid2d::checked() -- one place, tested
+// once, shared with the Poisson solvers when they arrive.
 //
-//   1. empty in -> return {}
-//   2. validate: width and height non-zero, and width divides the size
-//      exactly with quotient height. WITHOUT multiplying -- see the header.
-//      Throw vc::vc_exception(vc::vc_error_code::invalid_argument, "...").
-//   3. pass 1, rows: for each y, transform the width-long contiguous slice
-//      starting at y*width. That slice is already a complex_view -- no copy.
-//   4. pass 2, columns: for each kx, GATHER the height values at stride
-//      width into a temporary, transform it, and scatter the result back.
-//      Columns are strided, so this one does copy; that is unavoidable.
-//   5. apply no scaling of your own. dft1d and idft1d already carry it.
-//
-// idft2d is the same with idft1d in place of dft1d.
+// The column pass gathers into a contiguous temporary and scatters back.
+// Columns are strided, which looks like it should hurt: the stride is `width`
+// elements, so at 8 bytes per complex sample every column element touches a
+// fresh 64-byte cache line and 8 of every 64 bytes get used. Measured, that
+// costs 0.08-0.18% of the pass, because a column is gathered ONCE and then
+// has N operations done on it -- the strided read is amortised over the
+// arithmetic. A blocked transpose is about 3.7x faster at the memory step
+// (0.05 ms against 0.19 ms at 256x256) and remains the lever if this ever
+// matters; it does not matter at O(N^2).
 
-complex_signal
-dft2d(complex_view plane, std::size_t width, std::size_t height) {
-    (void)plane;
-    (void)width;
-    (void)height;
-    return {}; // STUB
+namespace {
+
+// The 1-D transform a separable pass applies. dft1d and idft1d both match it,
+// and that single difference is the ONLY thing that distinguished the two 2-D
+// bodies before this helper existed -- forty lines duplicated to vary one
+// function call.
+//
+// A PLAIN FUNCTION POINTER, not a template parameter. The helper calls `pass`
+// width + height times in total, and each of those calls does O(N^2) work
+// inside, so the indirect call is unmeasurable; a template would buy inlining
+// that nothing needs and cost a template to read. If this ever became the hot
+// path -- it will not; FFTW takes over at P4 -- the measurement in
+// vc_dft.h's cost note is where to start.
+//
+// And NOT std::forward. Perfect forwarding preserves the value category of
+// something you pass along: it earns its keep when the callable owns state, is
+// expensive to copy, or must be moved from. These two are stateless free
+// functions. std::forward<T>(pass) would compile here and do precisely
+// nothing, which is worse than not writing it -- a reader would look for the
+// ownership question it implies and find none.
+using pass1d = complex_signal (*)(complex_view);
+
+// Row pass, then column pass. The whole 2-D transform.
+//
+// The derivation, the pass order and the scaling rule are in vc_dft.h above
+// the declarations. Nothing is validated here: grid2d cannot hold dimensions
+// that disagree with the buffer, so by the time `extent` exists there is
+// nothing left to check.
+complex_signal separable_passes(complex_view in, grid2d extent, pass1d pass) {
+    const std::size_t width = extent.width();
+    const std::size_t height = extent.height();
+
+    complex_signal out;
+    out.reserve(in.size()); // one allocation, not one per row
+
+    // PASS 1 -- rows. A row is a contiguous slice, so the view over it costs
+    // nothing; this is the cheap pass and it goes first for that reason.
+    for (std::size_t y = 0; y < height; ++y) {
+        const std::size_t row_start = y * width;
+        const complex_view row_view(in.data() + row_start, width);
+        const complex_signal transformed_row = pass(row_view);
+        out.insert(out.end(), transformed_row.begin(), transformed_row.end());
+    }
+
+    // PASS 2 -- columns, over pass 1's RESULT rather than the input. Columns
+    // are strided, so they must be gathered into a contiguous temporary and
+    // scattered back. Measured, that stride costs 0.08-0.18% of the pass: a
+    // column is gathered once and then has N operations done on it, so the
+    // cost is amortised over the arithmetic. See vc_dft.h.
+    for (std::size_t kx = 0; kx < width; ++kx) {
+        complex_signal column(height);
+        for (std::size_t ky = 0; ky < height; ++ky) {
+            column[ky] = out[(ky * width) + kx];
+        }
+        const complex_signal transformed_column = pass(column);
+        for (std::size_t ky = 0; ky < height; ++ky) {
+            out[(ky * width) + kx] = transformed_column[ky];
+        }
+    }
+
+    return out;
 }
 
-complex_signal
-idft2d(complex_view spectrum, std::size_t width, std::size_t height) {
-    (void)spectrum;
-    (void)width;
-    (void)height;
-    return {}; // STUB
+} // namespace
+
+// Both entry points are now the same two passes with a different 1-D
+// transform. Passing `dft1d` bare is unambiguous despite the real_view
+// overload: the parameter's type is pass1d, and overload resolution against a
+// specific function-pointer target picks the matching one.
+complex_signal dft2d(complex_view plane, grid2d extent) {
+    return separable_passes(plane, extent, dft1d);
+}
+
+complex_signal idft2d(complex_view spectrum, grid2d extent) {
+    return separable_passes(spectrum, extent, idft1d);
 }
 
 } // namespace vc::math

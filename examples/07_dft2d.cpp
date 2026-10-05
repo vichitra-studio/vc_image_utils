@@ -41,23 +41,28 @@
 #include <cmath>
 #include <complex>
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <iostream>
 #include <limits>
+#include <numbers>
+#include <string>
 #include <vector>
 
 #include "vc/core/vc_error_code.h"
 #include "vc/core/vc_exception.h"
 #include "vc/math/vc_dft.h"
+#include "vc/math/vc_grid2d.h"
 
 namespace {
 
 using vc::math::complex_signal;
 using vc::math::complex_view;
+using vc::math::grid2d;
 using vc::math::vc_complex;
 
-constexpr float k_two_pi = 6.28318530717958647692F;
-constexpr double k_two_pi_d = 6.28318530717958647692;
+constexpr float k_two_pi = std::numbers::pi_v<float> * 2.0F;
+constexpr double k_two_pi_d = std::numbers::pi_v<double> * 2.0;
 
 int passed = 0;
 int total = 0;
@@ -159,6 +164,13 @@ naive_dft2d(complex_view plane, std::size_t width, std::size_t height) {
     return out;
 }
 
+// Build the extent for a buffer. The span overload reads the length from the
+// buffer itself, so the count cannot be passed wrongly.
+grid2d
+at(const complex_signal& buf, vc::math::grid_dim w, vc::math::grid_dim h) {
+    return grid2d::checked(complex_view{buf}, w, h, "07_dft2d");
+}
+
 complex_signal lift(const std::vector<float>& real_samples) {
     complex_signal out;
     out.reserve(real_samples.size());
@@ -176,89 +188,79 @@ int main() {
     using vc::math::idft2d;
 
     try {
-        // ---- 1. degenerate sizes ---------------------------------------
+        // ---- 1. grid2d OWNS the validation now ---------------------------
         //
-        // Empty in, empty out -- the header's contract, and the reason the
-        // division inside idft2d can never be by zero.
-        {
-            const complex_signal none;
-            expect(dft2d(none, 0, 0).empty(), "dft2d of empty is empty");
-            expect(idft2d(none, 0, 0).empty(), "idft2d of empty is empty");
-        }
-
-        // ---- 2. dimension validation -----------------------------------
+        // dft2d and idft2d take a grid2d, which cannot be constructed from
+        // dimensions that disagree with the buffer. So these are not checks
+        // on the transforms at all -- they are checks on the one constructor
+        // that four functions will share, which is the entire point of
+        // extracting it as a type rather than as a helper the caller has to
+        // remember to call.
         //
-        // 8 samples cannot be 3 wide. The project throws vc_exception with
-        // vc_error_code, never a bare std:: exception -- the only
-        // throw std:: in this repo was a mistake and was removed.
-        //
-        // The header also requires this check to AVOID multiplying width by
-        // height, since that product can overflow size_t and then compare
-        // equal to nonsense. These cases do not exercise the overflow; they
-        // exercise that a mismatch is rejected at all.
+        // What used to be here: four assertions that dft2d itself rejected
+        // bad dimensions. The implementation written against that contract
+        // had no validation, every one of them failed, and the 2^63+4 case
+        // threw std::length_error out of a vector constructor and aborted the
+        // run before 30 later checks could execute. ASan reported the real
+        // fault as a heap-buffer-overflow inside dft1d. None of that is
+        // reachable now: the bad call does not compile or does not construct.
         {
             const complex_signal eight(8, vc_complex{1.0F, 0.0F});
+            const complex_view v{eight};
+
             bool threw_mismatch = false;
             try {
-                (void)dft2d(eight, 3, 3);
+                (void)grid2d::checked(v, 3, 3, "test");
             } catch (const vc::vc_exception& e) {
                 threw_mismatch =
                     (e.code() == vc::vc_error_code::invalid_argument);
             }
-            expect(threw_mismatch, "dft2d rejects width*height != size");
+            expect(threw_mismatch,
+                   "grid2d rejects width*height != buffer size");
 
-            bool threw_zero = false;
+            bool threw_zero_w = false;
             try {
-                (void)dft2d(eight, 0, 8);
+                (void)grid2d::checked(v, 0, 8, "test");
             } catch (const vc::vc_exception& e) {
-                threw_zero = (e.code() == vc::vc_error_code::invalid_argument);
+                threw_zero_w =
+                    (e.code() == vc::vc_error_code::invalid_argument);
             }
-            expect(threw_zero, "dft2d rejects zero width on non-empty input");
+            expect(threw_zero_w, "grid2d rejects zero width");
 
             bool threw_zero_h = false;
             try {
-                (void)dft2d(eight, 8, 0);
+                (void)grid2d::checked(v, 8, 0, "test");
             } catch (const vc::vc_exception& e) {
                 threw_zero_h =
                     (e.code() == vc::vc_error_code::invalid_argument);
             }
-            expect(threw_zero_h,
-                   "dft2d rejects zero height on non-empty input");
+            expect(threw_zero_h, "grid2d rejects zero height");
 
-            // ---- the one that actually enforces "divide, don't multiply" --
+            // The overflow case is GONE, not guarded. width is uint32_t, so
+            // 2^63 + 4 cannot be passed at all -- and size_t(w)*size_t(h) is
+            // exact for every representable pair, because (2^32-1)^2 is
+            // 18,446,744,065,119,617,025 against a SIZE_MAX of
+            // 18,446,744,073,709,551,615. The widest legal product fits with
+            // 8.6 billion to spare, so there is no wrapping arithmetic left
+            // to write a test against. This comment is the test.
             //
-            // 2^63 + 4 times 2 is 2^64 + 8, which WRAPS to exactly 8 on a
-            // 64-bit size_t. So an implementation that validates with
-            //
-            //     if (width * height != plane.size()) throw;
-            //
-            // ACCEPTS these dimensions and then indexes an 8-element buffer
-            // as though it were 2^63 wide. Dividing rejects it: 8 % (2^63+4)
-            // is 8, not 0.
-            //
-            // ⚠ If your implementation multiplies, this check will probably
-            // CRASH rather than fail cleanly -- run it under build/asan
-            // (-DENABLE_SANITIZERS=ON) the first time, where the out-of-
-            // bounds read is reported instead of being undefined.
-            //
-            // The header requires the divide form; this is the assertion
-            // that makes the requirement real rather than advisory.
-            // Derived from SIZE_MAX rather than written as 1 << 63, which
-            // is undefined behaviour where size_t is 32 bits. (SIZE_MAX/2)+1
-            // is the top bit on any width, so huge * 2 wraps to 8 on a
-            // 32-bit size_t exactly as it does on a 64-bit one.
-            bool threw_overflow = false;
+            // What CAN still go wrong: a grid2d built against a different
+            // buffer of the same length. Two arguments cannot rule that out;
+            // only bundling the span and the extent into one type could.
+            const grid2d ok = grid2d::checked(v, 4, 2, "test");
+            expect(ok.width() == 4 && ok.height() == 2 && ok.count() == 8,
+                   "a valid grid2d reports its own dimensions and count");
+
+            // And the message names the caller, matching vc_io_fs.h's idiom,
+            // so a failure says who passed the bad dimensions.
+            bool named_caller = false;
             try {
-                constexpr std::size_t huge =
-                    ((std::numeric_limits<std::size_t>::max)() / 2U) + 1U + 4U;
-                (void)dft2d(eight, huge, 2);
+                (void)grid2d::checked(v, 3, 3, "my_caller");
             } catch (const vc::vc_exception& e) {
-                threw_overflow =
-                    (e.code() == vc::vc_error_code::invalid_argument);
+                named_caller = std::string(e.what()).find("my_caller") !=
+                               std::string::npos;
             }
-            expect(threw_overflow,
-                   "dft2d rejects width*height that OVERFLOWS to the right "
-                   "size (forces divide-not-multiply validation)");
+            expect(named_caller, "the grid2d message names the caller");
         }
 
         // ---- 3. a single row reduces to dft1d --------------------------
@@ -270,7 +272,7 @@ int main() {
         {
             const complex_signal row = lift({1.0F, 2.0F, 3.0F, 4.0F});
             const complex_signal one_d = dft1d(row);
-            const complex_signal two_d = dft2d(row, 4, 1);
+            const complex_signal two_d = dft2d(row, at(row, 4, 1));
             expect(two_d.size() == 4, "dft2d 4x1 keeps length");
             expect(max_abs_diff(two_d, one_d) <= 1e-5F,
                    "dft2d of a single ROW equals dft1d");
@@ -288,7 +290,7 @@ int main() {
         {
             const complex_signal col = lift({1.0F, 2.0F, 3.0F, 4.0F});
             const complex_signal one_d = dft1d(col);
-            const complex_signal two_d = dft2d(col, 1, 4);
+            const complex_signal two_d = dft2d(col, at(col, 1, 4));
             expect(max_abs_diff(two_d, one_d) <= 1e-5F,
                    "dft2d of a single COLUMN equals dft1d");
         }
@@ -315,7 +317,7 @@ int main() {
         {
             const complex_signal plane =
                 lift({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F});
-            const complex_signal got = dft2d(plane, 4, 2);
+            const complex_signal got = dft2d(plane, at(plane, 4, 2));
             const complex_signal want = naive_dft2d(plane, 4, 2);
             expect(got.size() == 8, "dft2d 4x2 keeps length");
             expect(max_abs_diff(got, want) <= 1e-4F,
@@ -347,7 +349,7 @@ int main() {
         {
             const complex_signal plane =
                 lift({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F});
-            const complex_signal got = dft2d(plane, 2, 4);
+            const complex_signal got = dft2d(plane, at(plane, 2, 4));
             const complex_signal want = naive_dft2d(plane, 2, 4);
             expect(got.size() == 8, "dft2d 2x4 keeps length");
             expect(max_abs_diff(got, want) <= 1e-4F,
@@ -377,8 +379,8 @@ int main() {
         // zero. Checked against the direct definition, which check 5 already
         // pinned against hand arithmetic.
         {
-            constexpr std::size_t w = 5;
-            constexpr std::size_t h = 3;
+            constexpr vc::math::grid_dim w = 5;
+            constexpr vc::math::grid_dim h = 3;
             std::vector<float> v(w * h);
             for (std::size_t y = 0; y < h; ++y) {
                 for (std::size_t x = 0; x < w; ++x) {
@@ -389,7 +391,7 @@ int main() {
                 }
             }
             const complex_signal plane = lift(v);
-            const complex_signal got = dft2d(plane, w, h);
+            const complex_signal got = dft2d(plane, at(plane, w, h));
             const complex_signal want = naive_dft2d(plane, w, h);
             expect(got.size() == w * h, "dft2d 5x3 keeps length");
             expect(max_abs_diff(got, want) <= 1e-3F,
@@ -399,7 +401,7 @@ int main() {
             expect(!got.empty() && near(got[0].real(), 141.0F, 1e-2F),
                    "dft2d 5x3 X[0,0] == 141, the sum of the samples");
 
-            const complex_signal back = idft2d(got, w, h);
+            const complex_signal back = idft2d(got, at(got, w, h));
             expect(back.size() == w * h && max_abs_diff(back, plane) <= 1e-3F,
                    "5x3 round trips (odd sides do not break the 1/MN)");
         }
@@ -411,7 +413,7 @@ int main() {
         {
             const complex_signal plane =
                 lift({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F});
-            const complex_signal spec = dft2d(plane, 4, 2);
+            const complex_signal spec = dft2d(plane, at(plane, 4, 2));
             expect(!spec.empty() && near(spec[0].real(), 36.0F, 1e-4F) &&
                        near(spec[0].imag(), 0.0F, 1e-4F),
                    "dft2d X[0,0] == sum of all samples");
@@ -430,7 +432,8 @@ int main() {
         {
             const complex_signal plane =
                 lift({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F});
-            const complex_signal back = idft2d(dft2d(plane, 4, 2), 4, 2);
+            const complex_signal back =
+                idft2d(dft2d(plane, at(plane, 4, 2)), at(plane, 4, 2));
             expect(back.size() == 8, "round trip keeps length");
             expect(max_abs_diff(back, plane) <= 1e-4F,
                    "idft2d(dft2d(x)) == x on 4x2 (pins the 1/MN exactly once)");
@@ -446,8 +449,8 @@ int main() {
         // passes at 4x2 fails here for entirely correct code, because the
         // discrepancy scales with the signal.
         {
-            constexpr std::size_t w = 64;
-            constexpr std::size_t h = 48;
+            constexpr vc::math::grid_dim w = 64;
+            constexpr vc::math::grid_dim h = 48;
             // THE SIGNAL HAS TO BE DENSE IN THE FREQUENCY DOMAIN or this
             // check is hollow. An earlier version used
             //     0.5 + 0.3.cos(3x/w) + 0.2.sin(7y/h)
@@ -480,8 +483,8 @@ int main() {
                 }
             }
             const complex_signal plane = lift(image);
-            const complex_signal spec = dft2d(plane, w, h);
-            const complex_signal back = idft2d(spec, w, h);
+            const complex_signal spec = dft2d(plane, at(plane, w, h));
+            const complex_signal back = idft2d(spec, at(spec, w, h));
             expect(spec.size() == w * h, "64x48: length preserved");
 
             const float scale = std::max(rms(plane), 1e-12F);
@@ -518,13 +521,14 @@ int main() {
         // Hand-checkable: impulse at (1,1) in 4 wide x 2 high gives
         //     1, -i, -1, +i,  -1, +i, 1, -i
         {
-            constexpr std::size_t w = 4;
-            constexpr std::size_t h = 2;
+            constexpr vc::math::grid_dim w = 4;
+            constexpr vc::math::grid_dim h = 2;
             constexpr std::size_t x0 = 1;
             constexpr std::size_t y0 = 1;
             std::vector<float> d(w * h, 0.0F);
             d[(y0 * w) + x0] = 1.0F;
-            const complex_signal spec = dft2d(lift(d), w, h);
+            const complex_signal plane = lift(d);
+            const complex_signal spec = dft2d(plane, at(plane, w, h));
 
             // Both loops run to completion rather than bailing on the
             // first mismatch. An earlier version guarded the outer loop on
@@ -567,14 +571,16 @@ int main() {
         // about placement -- which is exactly the shift-blindness P2 doc
         // F.1(b) flags, written down as an assertion rather than a warning.
         {
-            constexpr std::size_t w = 4;
-            constexpr std::size_t h = 2;
+            constexpr vc::math::grid_dim w = 4;
+            constexpr vc::math::grid_dim h = 2;
             std::vector<float> a(w * h, 0.0F);
             std::vector<float> b(w * h, 0.0F);
             a[1] = 1.0F;           // (x=1, y=0)
             b[(1 * w) + 3] = 1.0F; // (x=3, y=1)
-            const complex_signal sa = dft2d(lift(a), w, h);
-            const complex_signal sb = dft2d(lift(b), w, h);
+            const complex_signal pa = lift(a);
+            const complex_signal pb = lift(b);
+            const complex_signal sa = dft2d(pa, at(pa, w, h));
+            const complex_signal sb = dft2d(pb, at(pb, w, h));
 
             bool mags_identical = sa.size() == sb.size() && !sa.empty();
             for (std::size_t i = 0; i < sa.size() && mags_identical; ++i) {
@@ -598,8 +604,8 @@ int main() {
         // at (8-2, 8-1) = (6,7), each with magnitude M.N/2 = 32. Everything
         // else is zero.
         {
-            constexpr std::size_t w = 8;
-            constexpr std::size_t h = 8;
+            constexpr vc::math::grid_dim w = 8;
+            constexpr vc::math::grid_dim h = 8;
             std::vector<float> s(w * h);
             for (std::size_t y = 0; y < h; ++y) {
                 for (std::size_t x = 0; x < w; ++x) {
@@ -611,7 +617,8 @@ int main() {
                     s[(y * w) + x] = std::cos(phase);
                 }
             }
-            const complex_signal spec = dft2d(lift(s), w, h);
+            const complex_signal plane = lift(s);
+            const complex_signal spec = dft2d(plane, at(plane, w, h));
             const float peak = 0.5F * static_cast<float>(w * h); // 32
 
             bool twins_ok = spec.size() == w * h;
@@ -650,8 +657,8 @@ int main() {
         // a filter that breaks the symmetry makes the inverse genuinely
         // complex, and calling .real() throws away that evidence.
         {
-            constexpr std::size_t w = 8;
-            constexpr std::size_t h = 4;
+            constexpr vc::math::grid_dim w = 8;
+            constexpr vc::math::grid_dim h = 4;
             std::vector<float> im(w * h);
             for (std::size_t i = 0; i < im.size(); ++i) {
                 // deterministic, asymmetric, nothing special about it
@@ -659,7 +666,7 @@ int main() {
                         (0.4F * static_cast<float>(i % 5));
             }
             const complex_signal plane = lift(im);
-            const complex_signal spec = dft2d(plane, w, h);
+            const complex_signal spec = dft2d(plane, at(plane, w, h));
 
             bool herm = spec.size() == w * h;
             const float scale = std::max(rms(spec), 1e-12F);
@@ -679,7 +686,7 @@ int main() {
             // it this check PASSES on a stub that returns nothing -- a test
             // that is satisfied by the absence of an implementation is worse
             // than no test, because it reports green.
-            const complex_signal back = idft2d(spec, w, h);
+            const complex_signal back = idft2d(spec, at(spec, w, h));
             expect(back.size() == w * h &&
                        max_imag(back) / std::max(rms(plane), 1e-12F) <= 1e-5F,
                    "inverse of a real image's spectrum is real");

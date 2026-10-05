@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "vc/core/vc_scalar.h" // vc::real32 -- a LEAF header, no image machinery
+#include "vc/math/vc_grid2d.h" // grid2d -- dimensions that cannot be wrong
 
 namespace vc::math {
 
@@ -326,30 +327,36 @@ using real_view = std::span<const vc::float32>;
 // convention. 07_dft2d therefore checks 4-wide-by-2-high AND 2-wide-by-4-high
 // against an independent direct implementation of the definition above.
 //
-// ---- CONTRACT ----
+// ---- CONTRACT: THERE IS NOTHING TO VALIDATE HERE ----
 //
-// Empty in, empty out. Otherwise width and height must both be non-zero and
-// width * height must equal the input's size, or vc_error_code::invalid_argument.
+// The dimensions arrive as a vc::math::grid2d, which cannot exist unless they
+// are both non-zero and their product equals the buffer's length. So these two
+// functions perform no checks of their own and have no argument-validation
+// failure mode to document. See vc_grid2d.h for why that is a TYPE rather than
+// a helper, and for why uint32 dimensions make the overflow hazard
+// unrepresentable instead of merely guarded.
+//
+// An earlier version of this comment specified those checks in detail,
+// including the overflow-safe divide-not-multiply form and a worked
+// counterexample (width = 2^63 + 4 with height = 2 multiplies to exactly 8).
+// The implementation written against it had NO VALIDATION AT ALL, and ASan
+// caught a heap-buffer-overflow on the first malformed input. The
+// documentation was correct and did not transmit. That is the argument for
+// grid2d in one sentence, and it is why the checks moved into a constructor
+// instead of into a longer comment.
 //
 // ANY DIMENSIONS, not just powers of two -- dft1d has no such restriction and
-// neither does this. Odd, prime and coprime sides all work; 07_dft2d checks a
-// 5-wide-by-3-high case specifically, because every other size in that file
-// has an even side and shares a factor between the two, and an indexing
-// mistake can land in-bounds by luck when one dimension divides the other.
+// neither does this. Odd, prime and coprime sides all work.
 //
-// Validate WITHOUT multiplying width by height: that product can overflow
-// std::size_t before the comparison happens, and the comparison would then
-// pass on nonsense. Divide instead -- check that width divides the size
-// exactly and that the quotient is the height.
-//
-// This is not hypothetical and 07_dft2d asserts it: for an 8-element input,
-// width = 2^63 + 4 with height = 2 has width * height == 8 after wrapping on
-// a 64-bit size_t, so a multiplying check ACCEPTS it and then indexes wildly.
-// A dividing check rejects it, because 8 % (2^63 + 4) is 8, not 0. Week 5
-// lost an evening to a size_t underflow computing (N-1)*2; the lesson was to
-// not let an index expression wrap in the first place.
-[[nodiscard]] complex_signal
-dft2d(complex_view plane, std::size_t width, std::size_t height);
+// Note the asymmetry with dft1d, which keeps "empty in, empty out": grid2d
+// refuses a zero width or height, so there is no empty 2-D case to reach. A
+// 1-D transform takes no dimension argument, so an empty input is unambiguous
+// -- a zero-length signal has a zero-length spectrum. A 2-D transform does
+// take dimensions, and a zero in either is ill-formed rather than empty; there
+// is no sensible answer to "the DFT of a 0-by-7 image". vc_grid2d.h argues
+// this at length, and vc_image_writer::validated() has refused zero-sized
+// images since P1, so this is the library's existing position, not a new one.
+[[nodiscard]] complex_signal dft2d(complex_view plane, grid2d extent);
 
 // Inverse 2-D DFT. Two idft1d passes, so the 1/(width*height) arrives for
 // free -- see the scaling note above.
@@ -360,7 +367,6 @@ dft2d(complex_view plane, std::size_t width, std::size_t height);
 // away the only signal that says a frequency-domain filter was not
 // twin-symmetric -- which is what 06_dft check 8b exists to assert, and what
 // conv_theorem will need in week 6.
-[[nodiscard]] complex_signal
-idft2d(complex_view spectrum, std::size_t width, std::size_t height);
+[[nodiscard]] complex_signal idft2d(complex_view spectrum, grid2d extent);
 
 } // namespace vc::math
