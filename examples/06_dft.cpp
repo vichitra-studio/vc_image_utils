@@ -368,12 +368,22 @@ int main() {
         // The tolerance is measured, not guessed. Against this exact signal,
         // with float32 storage in both cases:
         //
-        //     complex<double> accumulator   round-trip max|err|  4.7e-10
+        //     complex<double> accumulator   round-trip max|err|  7.45e-09
         //     complex<float>  accumulator   round-trip max|err|  1.8e-06
         //
-        // so 1e-7 below passes with ~200x margin on double and fails by ~18x
-        // on float. An earlier draft used 1e-6, which float missed by under
-        // 2x -- too tight a margin to survive a different summation order.
+        // so 1e-7 below clears double by ~13x and is missed by float by ~18x.
+        // The threshold sits almost exactly between the two, which is what
+        // makes it discriminating: an earlier draft used 1e-6, which float
+        // missed by under 2x -- too tight to survive a different summation
+        // order.
+        //
+        // CORRECTED 2026-10-05. The double figure read 4.7e-10 and the margin
+        // "~200x". Re-measured on this exact signal it is 7.45e-09, so the
+        // margin is 13x, not 200x -- the comment overstated the test's
+        // safety by a factor of fifteen. 7.45e-09 is what
+        // notes/buildlog_p2_week5.txt recorded at the time; the header, this
+        // file and the phase doc all carried the wrong one. The THRESHOLD is
+        // unchanged and still correct; only the justification was false.
         {
             constexpr std::size_t n_big = 1024;
             std::vector<float> big_real(n_big);
@@ -425,10 +435,24 @@ int main() {
         // with W = one step round the N-circle = e^(-j.2.pi/N).
         //
         // Nothing here is an FFT -- no recursion, no speed. It only asks
-        // whether the rule is true. When it is, fft1d is that rule applied
-        // all the way down, and S3's job is bookkeeping rather than a new
-        // idea. If a hand-written butterfly later disagrees with dft1d, this
-        // check says the RULE is fine and the INDEXING is wrong.
+        // whether the rule is true.
+        //
+        // ITS ORIGINAL PURPOSE IS RETRACTED. This was added so that writing
+        // fft1d would be bookkeeping rather than a leap: if a hand-written
+        // butterfly disagreed with dft1d, this check would say the RULE is
+        // fine and the INDEXING is wrong. fft1d was then DROPPED from week 6
+        // (see the P2 phase doc, "X1 + S3 -- DROPPED"), so there is no
+        // butterfly coming and that diagnostic will never be used.
+        //
+        // Kept anyway, for two honest reasons and not for the original one:
+        // it is a true property of the DFT that nothing else here asserts,
+        // and it is the identity to check FFTW against at P4 if its
+        // correctness is ever in question -- a library that gets this wrong
+        // is not an FFT. It costs one half-size transform pair.
+        //
+        // What it is NOT: a check that any code in this library depends on.
+        // If it ever fails, nothing is broken; dft1d's own 27 checks are the
+        // ones that matter.
         {
             const complex_signal evens =
                 to_signal(std::vector<float>{1.0F, 3.0F});

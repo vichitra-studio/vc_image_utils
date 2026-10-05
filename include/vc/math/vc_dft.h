@@ -138,8 +138,16 @@ namespace vc::math {
 //
 // MEASURED at N=1024 (06_dft's signal, float32 storage in both cases):
 //
-//     complex<double> accumulator   round-trip max|err|   4.7e-10
+//     complex<double> accumulator   round-trip max|err|   7.45e-09
 //     complex<float>  accumulator   round-trip max|err|   1.8e-06
+//
+// CORRECTED 2026-10-05: these lines read 4.7e-10 for the double accumulator,
+// here and in 06_dft.cpp and in the P2 phase doc. Re-measured against the
+// current build on 06_dft's own N=1024 signal it is 7.45e-09 -- SIXTEEN TIMES
+// larger, and 7.45e-09 is the figure notes/buildlog_p2_week5.txt recorded at
+// the time, so three of the four places that quoted it were wrong and the
+// build log was right. Where 4.7e-10 came from is unknown; it was not
+// reproduced. The consequence is in the margin, below.
 //
 // A factor of ~3800. Note this is smaller than the worst-case bound N*eps
 // would suggest (~1.2e-4) because the per-term errors partially cancel --

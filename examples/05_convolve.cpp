@@ -482,7 +482,7 @@ int main() {
         //
         // An absolute 1e-5 passes the first and fails the second by 37x, on
         // identical, correct code. The relative figure is stable across both. This
-        // is the same trap the fft2d round-trip criterion carries in the phase
+        // is the same trap the dft2d round-trip criterion carries in the phase
         // plan, met early and in miniature.
         //
         // The image is 24x24, not the 5x5 used above, because sigma_x = 2 makes a
