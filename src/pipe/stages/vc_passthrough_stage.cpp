@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "vc/core/vc_image.h"
+#include "vc/core/vc_scalar.h"
 #include "vc/pipe/vc_pipe_context.h"
 #include "vc/pipe/vc_pipe_contract.h"
 #include "vc/pipe/vc_pipe_packet.h"
@@ -22,7 +23,7 @@ const char* vc_passthrough_stage::kind() const {
     return "passthrough";
 }
 
-std::size_t vc_passthrough_stage::params_hash() const {
+vc::element_count vc_passthrough_stage::params_hash() const {
     return 0; // paramless — nothing to vary
 }
 

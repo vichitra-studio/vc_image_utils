@@ -53,7 +53,7 @@ class vc_pixel_buffer {
     // dtype is inferred from fill's type — no separate enum parameter that
     // could disagree with it.
     template <vc_pixel_element_req T>
-    vc_pixel_buffer(std::size_t count, T fill)
+    vc_pixel_buffer(vc::element_count count, T fill)
         : data_(std::vector<T>(count, fill)) {
     }
 
@@ -62,7 +62,7 @@ class vc_pixel_buffer {
     }
 
     // Element count, independent of dtype.
-    std::size_t size() const noexcept {
+    vc::element_count size() const noexcept {
         return std::visit([](const auto& v) { return v.size(); }, data_);
     }
 

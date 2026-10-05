@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "vc/core/vc_scalar.h" // vc::float32 -- leaf header
 #include "vc/math/vc_linalg.h"
 
 namespace vc::math {
@@ -62,16 +63,16 @@ namespace vc::math {
 // touches a pixel).
 
 // The translation that moves every point by (tx, ty).
-[[nodiscard]] vc_mat3 translate(float tx, float ty);
+[[nodiscard]] vc_mat3 translate(vc::float32 tx, vc::float32 ty);
 
 // Scaling about the ORIGIN — for an image, its top-left corner, which is
 // rarely what a caller means. See scale_about().
-[[nodiscard]] vc_mat3 scale(float sx, float sy);
+[[nodiscard]] vc_mat3 scale(vc::float32 sx, vc::float32 sy);
 
 // Rotation about the ORIGIN by `radians` (see the direction note above). For
 // an image this swings almost all content out of frame, which looks like a bug
 // and is not — see rotate_about().
-[[nodiscard]] vc_mat3 rotate(float radians);
+[[nodiscard]] vc_mat3 rotate(vc::float32 radians);
 
 // Rotation about the point (cx, cy): translate that point to the origin,
 // rotate, translate it back.
@@ -81,11 +82,13 @@ namespace vc::math {
 // The defining property, and the test worth writing: (cx, cy) is a FIXED
 // POINT — it maps to itself. Getting the composition order backwards still
 // produces a plausible-looking matrix, and that check is what catches it.
-[[nodiscard]] vc_mat3 rotate_about(float cx, float cy, float radians);
+[[nodiscard]] vc_mat3
+rotate_about(vc::float32 cx, vc::float32 cy, vc::float32 radians);
 
 // Scaling about (cx, cy), by the same sandwich, with the same fixed-point
 // property.
-[[nodiscard]] vc_mat3 scale_about(float cx, float cy, float sx, float sy);
+[[nodiscard]] vc_mat3
+scale_about(vc::float32 cx, vc::float32 cy, vc::float32 sx, vc::float32 sy);
 
 // Apply an affine transform to a 2-D point: embed as (x, y, 1), multiply, and
 // drop the third component.

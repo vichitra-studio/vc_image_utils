@@ -12,6 +12,7 @@
 #include "vc/core/vc_exception.h"
 #include "vc/core/vc_image_info.h"
 #include "vc/core/vc_pixel_buffer.h"
+#include "vc/core/vc_scalar.h"
 #include "vc/core/vc_types.h"
 
 namespace vc {
@@ -80,7 +81,7 @@ class vc_image_writer {
     channel_count channels() const noexcept {
         return meta_.channels();
     }
-    std::size_t pixel_count() const noexcept {
+    vc::element_count pixel_count() const noexcept {
         return meta_.element_count();
     }
 

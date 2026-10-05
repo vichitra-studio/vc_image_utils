@@ -28,10 +28,10 @@ struct vc_render_request {
     // coordinate-space decision can reshape — do not treat its shape as
     // settled.
     struct roi {
-        std::uint32_t x = 0;
-        std::uint32_t y = 0;
-        std::uint32_t width = 0;
-        std::uint32_t height = 0;
+        vc::image_dim x = 0;
+        vc::image_dim y = 0;
+        vc::image_dim width = 0;
+        vc::image_dim height = 0;
     } region;
 };
 

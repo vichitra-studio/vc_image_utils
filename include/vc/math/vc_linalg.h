@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "vc/core/vc_scalar.h" // vc::float32 -- leaf header
 #include <array>
 
 namespace vc::math {
@@ -52,22 +53,22 @@ namespace vc::math {
 // analogous happens here.
 
 struct vc_vec2 {
-    float x;
-    float y;
+    vc::float32 x;
+    vc::float32 y;
 };
 
 struct vc_vec3 {
-    float x;
-    float y;
-    float z;
+    vc::float32 x;
+    vc::float32 y;
+    vc::float32 z;
 };
 
 // std::array rather than a C array (modernize-avoid-c-arrays): it is a proper
 // value type — copyable, comparable, with size() and bounds-checked at() —
 // where a raw float[2][2] decays to a pointer at the first opportunity.
 // Indexing reads identically: a.m[1][0] is row 1, column 0.
-using mat2_rows = std::array<std::array<float, 2>, 2>;
-using mat3_rows = std::array<std::array<float, 3>, 3>;
+using mat2_rows = std::array<std::array<vc::float32, 2>, 2>;
+using mat3_rows = std::array<std::array<vc::float32, 3>, 3>;
 
 struct vc_mat2 {
     mat2_rows m; // m[row][col]
@@ -106,7 +107,7 @@ struct vc_mat3 {
 // right to left, matching how they are applied to a vector on the right.
 [[nodiscard]] vc_mat2 operator*(const vc_mat2& a, const vc_mat2& b);
 
-[[nodiscard]] float determinant(const vc_mat2& a);
+[[nodiscard]] vc::float32 determinant(const vc_mat2& a);
 
 // Throws vc_exception(invalid_argument) when `a` is singular — a matrix that
 // collapses the plane onto a line has no inverse, and returning a matrix full
@@ -127,7 +128,7 @@ struct vc_mat3 {
 
 [[nodiscard]] vc_mat3 operator*(const vc_mat3& a, const vc_mat3& b);
 
-[[nodiscard]] float determinant(const vc_mat3& a);
+[[nodiscard]] vc::float32 determinant(const vc_mat3& a);
 
 [[nodiscard]] vc_mat3 inverse(const vc_mat3& a);
 
@@ -141,7 +142,7 @@ struct vc_mat3 {
 // translations) an absolute cutoff separates "genuinely degenerate" from
 // "fine" without ceremony. Revisit if a caller ever needs transforms whose
 // entries span many orders of magnitude.
-inline constexpr float singular_tolerance = 1e-8f;
+inline constexpr vc::float32 singular_tolerance = 1e-8f;
 
 // ---- analytic geometry ----
 //
@@ -157,16 +158,16 @@ inline constexpr float singular_tolerance = 1e-8f;
 // is purely about the codebase having one spelling instead of two.
 
 [[nodiscard]] vc_vec2 operator-(const vc_vec2& a, const vc_vec2& b);
-[[nodiscard]] vc_vec2 operator*(const vc_vec2& v, float s);
+[[nodiscard]] vc_vec2 operator*(const vc_vec2& v, vc::float32 s);
 
 [[nodiscard]] vc_vec3 operator-(const vc_vec3& a, const vc_vec3& b);
-[[nodiscard]] vc_vec3 operator*(const vc_vec3& v, float s);
+[[nodiscard]] vc_vec3 operator*(const vc_vec3& v, vc::float32 s);
 
 // The inner product: componentwise products, summed. Two things ride on it —
 // it measures how much of one vector lies along another, and it is zero
 // exactly when the two are orthogonal.
-[[nodiscard]] float dot(const vc_vec2& a, const vc_vec2& b);
-[[nodiscard]] float dot(const vc_vec3& a, const vc_vec3& b);
+[[nodiscard]] vc::float32 dot(const vc_vec2& a, const vc_vec2& b);
+[[nodiscard]] vc::float32 dot(const vc_vec3& a, const vc_vec3& b);
 
 // Squared length — dot(v, v). Exposed next to norm() rather than hidden inside
 // it because the square root is usually waste: sqrt is monotonic, so ordering
@@ -181,15 +182,15 @@ inline constexpr float singular_tolerance = 1e-8f;
 // transform does comes within fifteen orders of magnitude of that, so it is
 // left unguarded — but stated, for the same reason singular_tolerance's own
 // assumption is stated rather than assumed.
-[[nodiscard]] float norm_squared(const vc_vec2& v);
-[[nodiscard]] float norm_squared(const vc_vec3& v);
+[[nodiscard]] vc::float32 norm_squared(const vc_vec2& v);
+[[nodiscard]] vc::float32 norm_squared(const vc_vec3& v);
 
 // Euclidean (L2) length. The L1 norm is deliberately absent: its use in this
 // codebase is per-pixel patch distance, which belongs with the patch code, not
 // in a geometry header. No distance(a, b) either — it is norm(a - b) at the
 // call site, and one spelling of a one-line composition is enough.
-[[nodiscard]] float norm(const vc_vec2& v);
-[[nodiscard]] float norm(const vc_vec3& v);
+[[nodiscard]] vc::float32 norm(const vc_vec2& v);
+[[nodiscard]] vc::float32 norm(const vc_vec3& v);
 
 // The component of `v` lying along `onto` — equivalently, the point on the
 // line through `onto` closest to `v`. Returns a VECTOR (some multiple of
@@ -220,6 +221,6 @@ inline constexpr float singular_tolerance = 1e-8f;
 // singular_tolerance is: a scale-aware test is the numerical work this header
 // exists not to attempt. Revisit alongside singular_tolerance if a caller ever
 // works at a scale where a 1e-6 vector is meaningful.
-inline constexpr float degenerate_norm_squared_tolerance = 1e-12f;
+inline constexpr vc::float32 degenerate_norm_squared_tolerance = 1e-12f;
 
 } // namespace vc::math

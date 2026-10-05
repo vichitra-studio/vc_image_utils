@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 #pragma once
+#include "vc/core/vc_scalar.h"
 
 #include <cstddef>
 #include <memory>
@@ -62,7 +63,7 @@ class i_pipe {
     // than inheriting one. No consumer yet — kept as the seam a future
     // content-hash cache will need, mirroring kind()'s own "no consumer yet"
     // framing above.
-    virtual std::size_t params_hash() const = 0;
+    virtual vc::element_count params_hash() const = 0;
 
     virtual void declare(vc_pipe_contract& contract) const = 0;
 

@@ -206,7 +206,7 @@ vc_pipe_context::slot_packet_map vc_pipeline::resolve_stage_inputs(
     const vc_pipe_contract& stage_contract,
     render_io_map& inputs,
     render_io_map& outputs,
-    std::unordered_map<stage_port, std::size_t>& remaining_reads) const {
+    std::unordered_map<stage_port, vc::element_count>& remaining_reads) const {
     vc::pipe::vc_pipe_context::slot_packet_map stage_inputs;
 
     for (const auto& input_slot : stage_contract.input_slot_names()) {

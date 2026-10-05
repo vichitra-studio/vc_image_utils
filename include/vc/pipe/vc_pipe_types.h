@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 #pragma once
+#include "vc/core/vc_scalar.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -13,6 +14,7 @@
 #include <vector>
 
 #include "vc/pipe/vc_pipe_packet.h"
+#include "vc/utils/vc_strings.h"
 
 namespace vc::pipe {
 
@@ -64,7 +66,7 @@ enum class slot_direction : std::uint8_t {
 // ctx.get_input, a stage_port ctor) it is LOWERED — the name kept as a string,
 // the type erased to std::type_index. It never propagates or is stored.
 template <typename T> struct slot {
-    std::string_view name;
+    vc::utils::string_view name;
 };
 
 // A graph coordinate: which slot on which stage. THE single wiring currency —
@@ -102,9 +104,9 @@ struct stage_port {
     // key (std::hash<stage_port> below just forwards here — a std::hash
     // specialization is required for unordered_map and cannot be a member, but
     // the logic lives on the type it belongs to).
-    std::size_t hash() const noexcept {
-        const std::size_t h1 = std::hash<stage_name>{}(stage);
-        const std::size_t h2 = std::hash<slot_name>{}(slot);
+    vc::element_count hash() const noexcept {
+        const vc::element_count h1 = std::hash<stage_name>{}(stage);
+        const vc::element_count h2 = std::hash<slot_name>{}(slot);
         // Boost-style combine — good enough for a small wiring map.
         return h1 ^ (h2 + 0x9e3779b9U + (h1 << 6U) + (h1 >> 2U));
     }
@@ -114,6 +116,12 @@ struct stage_port {
 
 // Lets a stage_port be an unordered_map key (run()'s input/output maps).
 template <> struct std::hash<vc::pipe::stage_port> {
+    // RAW std::size_t here, deliberately, and it is the one exception in this
+    // file. coding_guidelines.md Sec 3 governs OUR public API; this signature
+    // is dictated by std::hash's own requirements, so it is written in the
+    // standard's spelling rather than ours. vc::element_count is the same type
+    // and would compile, but it would read as though we had a choice. The
+    // member hash() above, which IS ours, uses the alias.
     std::size_t operator()(const vc::pipe::stage_port& p) const noexcept {
         return p.hash();
     }

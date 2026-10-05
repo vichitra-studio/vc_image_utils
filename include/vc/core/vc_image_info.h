@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 #pragma once
+#include "vc/utils/vc_strings.h"
 
 #include <cstddef>
 #include <memory>
 #include <string_view>
 
+#include "vc/core/vc_scalar.h"
 #include "vc/core/vc_types.h"
 
 namespace vc {
@@ -64,7 +66,7 @@ class vc_image_info {
 
     // Total element count for this geometry — the count a vc_pixel_buffer must
     // hold, and what vc_image::pixel_count() reports.
-    std::size_t element_count() const noexcept {
+    vc::element_count element_count() const noexcept {
         return static_cast<std::size_t>(width_) * height_ * channels_;
     }
 
@@ -98,7 +100,7 @@ class vc_image_info {
     // is out of range for it — index(0, 0, 0) throws rather than returning 0
     // as it did before the check existed. That is the intended reading (an
     // empty descriptor has no elements to address), not an oversight.
-    std::size_t index(image_dim x, image_dim y, channel_count ch) const {
+    vc::element_count index(image_dim x, image_dim y, channel_count ch) const {
         if (x >= width_) {
             throw_out_of_range("x", x, "width", width_);
         }
@@ -157,10 +159,11 @@ class vc_image_info {
     // either alias here would be wrong for the other caller, and spelling the
     // underlying std::uint32_t would hardcode what vc_types.h exists to keep
     // changeable. size_t holds any widening of either alias.
-    [[noreturn]] static void throw_out_of_range(std::string_view coord,
-                                                std::size_t value,
-                                                std::string_view bound_name,
-                                                std::size_t bound);
+    [[noreturn]] static void
+    throw_out_of_range(vc::utils::string_view coord,
+                       vc::element_count value,
+                       vc::utils::string_view bound_name,
+                       vc::element_count bound);
 
     image_dim width_ = 0;
     image_dim height_ = 0;

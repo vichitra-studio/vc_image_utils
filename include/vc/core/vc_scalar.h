@@ -3,8 +3,22 @@
 
 #pragma once
 
+#include <cstddef> // std::size_t -- the only include this leaf may ever need
+
 namespace vc {
 
+// The library's LEAF PRIMITIVE ALIASES, declared ONCE each.
+//
+// Originally this header held only the real-number precision. `element_count`
+// joined it on 2026-10-05 because coding_guidelines.md Sec 3 forbids raw
+// primitives in public API signatures and names `std::size_t` explicitly, and
+// there was no alias for it anywhere in the library -- 66 raw uses. It belongs
+// HERE rather than in vc_types.h because vc::math must be able to name a
+// buffer length without including image vocabulary; see the leaf invariant
+// below, which is the whole reason this file exists.
+//
+// ---- the precision ----
+//
 // The library's real-number precision, declared ONCE.
 //
 // Everything that stores a real quantity -- pixel samples, geometry, spectrum
@@ -36,5 +50,21 @@ namespace vc {
 // type, different role, and the two names keep the roles separable while this
 // header keeps the type single.
 using float32 = float;
+
+// ---- counts ----
+//
+// How many elements a buffer, span or container holds, and the type an index
+// into one is compared against. This is std::size_t and can never be anything
+// else -- it is what .size() returns and what sizeof yields -- so unlike
+// float32 the alias is not here to make the type CHANGEABLE. It is here to
+// satisfy Sec 3's "every primitive has a named alias that encodes its semantic
+// role", and to give the eventual retrofit of the other raw uses one target
+// instead of several.
+//
+// NOT for dimensions. A width or a height is vc::image_dim (vc_types.h) or
+// vc::math::grid_dim (vc_grid2d.h), both uint32_t, deliberately narrower so
+// their PRODUCT cannot overflow a size_t. Using element_count for an extent
+// would hand that hazard back -- see the overflow arithmetic in vc_grid2d.h.
+using element_count = std::size_t;
 
 } // namespace vc

@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "vc/core/vc_scalar.h"
 #include "vc/pipe/i_pipe.h"
 #include "vc/pipe/vc_pipe_context.h"
 #include "vc/pipe/vc_pipe_contract.h"
@@ -161,12 +162,13 @@ class vc_pipeline {
     // published its output. Extracted from run()'s per-stage loop body so
     // that loop reads at one level: resolve inputs -> process -> harvest
     // outputs.
-    [[nodiscard]] vc_pipe_context::slot_packet_map resolve_stage_inputs(
-        const stage_name& stage,
-        const vc_pipe_contract& stage_contract,
-        render_io_map& inputs,
-        render_io_map& outputs,
-        std::unordered_map<stage_port, std::size_t>& remaining_reads) const;
+    [[nodiscard]] vc_pipe_context::slot_packet_map
+    resolve_stage_inputs(const stage_name& stage,
+                         const vc_pipe_contract& stage_contract,
+                         render_io_map& inputs,
+                         render_io_map& outputs,
+                         std::unordered_map<stage_port, vc::element_count>&
+                             remaining_reads) const;
 
     // Filters `outputs` down to exactly `open_output_ports`, in place:
     // throws vc::pipe::throw_pipe_run_error if a declared open output was

@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "vc/io/vc_io_types.h"
+#include "vc/utils/vc_strings.h"
 
 namespace vc::io {
 
@@ -41,7 +42,7 @@ namespace vc::io {
 // corrupt-but-present file would produce. `caller` is folded into the
 // message (matching every other throw site in this file) so a failure still
 // names which reader tripped it.
-void require_file_exists(const path& p, std::string_view caller);
+void require_file_exists(const path& p, vc::utils::string_view caller);
 
 // Does `p` name an existing directory? A plain existence check — not
 // currently called anywhere in this codebase (write() calls
@@ -74,7 +75,7 @@ void ensure_parent_directory(const path& p);
 // no caller there today; save_edit_document is the first of what is meant to
 // be several text/binary writers built directly on std::ofstream).
 [[nodiscard]] std::ofstream open_for_write(const path& p,
-                                           std::string_view caller);
+                                           vc::utils::string_view caller);
 
 // Open `p` for reading, throwing vc::vc_exception(file_not_found) if the
 // stream fails to open. A companion to require_file_exists(): that call
@@ -84,7 +85,7 @@ void ensure_parent_directory(const path& p);
 // distinct failure, same error code (file_not_found's own comment already
 // covers "process lacks read permission").
 [[nodiscard]] std::ifstream open_for_read(const path& p,
-                                          std::string_view caller);
+                                          vc::utils::string_view caller);
 
 // Write `content` to `p` corruption-safely: write to a uniquely-named temp
 // file beside `p` (same directory, so the final rename stays on one
@@ -100,7 +101,7 @@ void ensure_parent_directory(const path& p);
 // on failure. Caller is still responsible for ensure_parent_directory(p)
 // first, matching every other writer in this file.
 void write_file_atomically(const path& p,
-                           std::string_view content,
-                           std::string_view caller);
+                           vc::utils::string_view content,
+                           vc::utils::string_view caller);
 
 } // namespace vc::io

@@ -9,6 +9,7 @@
 
 #include "vc/core/vc_error_code.h"
 #include "vc/core/vc_exception.h"
+#include "vc/utils/vc_strings.h"
 
 namespace vc::io {
 
@@ -41,7 +42,7 @@ bool file_exists(const path& p) noexcept {
     return std::filesystem::is_regular_file(p, ec);
 }
 
-void require_file_exists(const path& p, std::string_view caller) {
+void require_file_exists(const path& p, vc::utils::string_view caller) {
     if (!file_exists(p)) {
         throw vc::vc_exception(vc::vc_error_code::file_not_found,
                                std::string(caller) + ": " + p.string() +
@@ -71,7 +72,7 @@ void ensure_parent_directory(const path& p) {
     }
 }
 
-std::ofstream open_for_write(const path& p, std::string_view caller) {
+std::ofstream open_for_write(const path& p, vc::utils::string_view caller) {
     std::ofstream out(p);
     if (!out) {
         throw vc::vc_exception(vc::vc_error_code::encode_error,
@@ -81,7 +82,7 @@ std::ofstream open_for_write(const path& p, std::string_view caller) {
     return out;
 }
 
-std::ifstream open_for_read(const path& p, std::string_view caller) {
+std::ifstream open_for_read(const path& p, vc::utils::string_view caller) {
     std::ifstream in(p);
     if (!in) {
         throw vc::vc_exception(vc::vc_error_code::file_not_found,
@@ -92,8 +93,8 @@ std::ifstream open_for_read(const path& p, std::string_view caller) {
 }
 
 void write_file_atomically(const path& p,
-                           std::string_view content,
-                           std::string_view caller) {
+                           vc::utils::string_view content,
+                           vc::utils::string_view caller) {
     const path temp = make_unique_temp_path(p);
 
     try {

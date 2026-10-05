@@ -8,6 +8,7 @@
 
 #include "vc/core/vc_image_info.h"
 #include "vc/core/vc_image_writer.h"
+#include "vc/core/vc_scalar.h"
 #include "vc/core/vc_types.h"
 
 // vc_image and vc_image_writer are mutually dependent BY DESIGN, not an
@@ -102,7 +103,7 @@ class vc_image {
     }
 
     // Total element count in the buffer, independent of dtype.
-    std::size_t pixel_count() const noexcept {
+    vc::element_count pixel_count() const noexcept {
         return meta_.element_count();
     }
 

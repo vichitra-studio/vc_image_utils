@@ -14,6 +14,7 @@
 
 #include "vc/core/vc_error_code.h"
 #include "vc/core/vc_exception.h"
+#include "vc/utils/vc_strings.h"
 
 // Lives at vc/ (core), NOT vc/utils/: this box throws vc::vc_exception, and
 // vc_error_code.h/vc_exception.h both include vc/utils/vc_strings.h, so
@@ -74,7 +75,7 @@ concept vc_any_tag_req = std::same_as<TagT, vc_any_tag>;
 //
 // No `default:` label on purpose — -Wswitch then flags a newly added
 // enumerator here, which is what keeps this function total as the enum grows.
-constexpr std::string_view vc_any_tag_name(vc_any_tag tag) {
+constexpr vc::utils::string_view vc_any_tag_name(vc_any_tag tag) {
     switch (tag) {
     case vc_any_tag::meta_value:
         return "vc_metadata_value";
@@ -188,7 +189,7 @@ class vc_any {
     // Resolved once, so get<T>()'s message costs no switch at run time. The
     // static_assert at the top of the class, not this, is what makes an
     // unnamed tag a compile error.
-    static constexpr std::string_view kTagName = vc_any_tag_name(Tag);
+    static constexpr vc::utils::string_view kTagName = vc_any_tag_name(Tag);
 
     std::any value_;
 };

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 #include "vc/math/vc_linalg.h"
+#include "vc/core/vc_scalar.h" // vc::float32 -- leaf header
 
 #include <cmath>
 #include <cstddef>
@@ -28,12 +29,12 @@ vc_mat2 operator*(const vc_mat2& a, const vc_mat2& b) {
     return result;
 }
 
-float determinant(const vc_mat2& a) {
+vc::float32 determinant(const vc_mat2& a) {
     return a.m[0][0] * a.m[1][1] - a.m[0][1] * a.m[1][0];
 }
 
 vc_mat2 inverse(const vc_mat2& a) {
-    const float det = determinant(a);
+    const vc::float32 det = determinant(a);
     // A tolerance, deliberately NOT `det == 0.0f`. A mathematically singular
     // matrix usually computes a determinant NEAR zero rather than at it: rows
     // (0.1, 0.2) and (0.3, 0.6) collapse the plane onto a line, yet the
@@ -46,7 +47,7 @@ vc_mat2 inverse(const vc_mat2& a) {
             vc::vc_error_code::invalid_argument,
             "vc::math::inverse(vc_mat2): matrix is singular");
     }
-    const float inv_det = 1.0f / det;
+    const vc::float32 inv_det = 1.0f / det;
     vc_mat2 result{};
     result.m[0][0] = a.m[1][1] * inv_det;
     result.m[0][1] = -a.m[0][1] * inv_det;
@@ -75,14 +76,14 @@ vc_mat3 operator*(const vc_mat3& a, const vc_mat3& b) {
     return result;
 }
 
-float determinant(const vc_mat3& a) {
+vc::float32 determinant(const vc_mat3& a) {
     return a.m[0][0] * (a.m[1][1] * a.m[2][2] - a.m[1][2] * a.m[2][1]) -
            a.m[0][1] * (a.m[1][0] * a.m[2][2] - a.m[1][2] * a.m[2][0]) +
            a.m[0][2] * (a.m[1][0] * a.m[2][1] - a.m[1][1] * a.m[2][0]);
 }
 
 vc_mat3 inverse(const vc_mat3& a) {
-    const float det = determinant(a);
+    const vc::float32 det = determinant(a);
     // Tolerance rather than an exact zero, for the reason given in the 2x2
     // case above.
     if (std::fabs(det) < singular_tolerance) {
@@ -90,7 +91,7 @@ vc_mat3 inverse(const vc_mat3& a) {
             vc::vc_error_code::invalid_argument,
             "vc::math::inverse(vc_mat3): matrix is singular");
     }
-    const float inv_det = 1.0f / det;
+    const vc::float32 inv_det = 1.0f / det;
     vc_mat3 result{};
     result.m[0][0] = (a.m[1][1] * a.m[2][2] - a.m[1][2] * a.m[2][1]) * inv_det;
     result.m[0][1] = -(a.m[0][1] * a.m[2][2] - a.m[0][2] * a.m[2][1]) * inv_det;
@@ -116,7 +117,7 @@ vc_vec2 operator-(const vc_vec2& a, const vc_vec2& b) {
     return vc_vec2{.x = a.x - b.x, .y = a.y - b.y};
 }
 
-vc_vec2 operator*(const vc_vec2& v, float s) {
+vc_vec2 operator*(const vc_vec2& v, vc::float32 s) {
     return vc_vec2{.x = v.x * s, .y = v.y * s};
 }
 
@@ -124,53 +125,53 @@ vc_vec3 operator-(const vc_vec3& a, const vc_vec3& b) {
     return vc_vec3{.x = a.x - b.x, .y = a.y - b.y, .z = a.z - b.z};
 }
 
-vc_vec3 operator*(const vc_vec3& v, float s) {
+vc_vec3 operator*(const vc_vec3& v, vc::float32 s) {
     return vc_vec3{.x = v.x * s, .y = v.y * s, .z = v.z * s};
 }
 
-float dot(const vc_vec2& a, const vc_vec2& b) {
+vc::float32 dot(const vc_vec2& a, const vc_vec2& b) {
     return a.x * b.x + a.y * b.y;
 }
 
-float dot(const vc_vec3& a, const vc_vec3& b) {
+vc::float32 dot(const vc_vec3& a, const vc_vec3& b) {
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
-float norm_squared(const vc_vec2& v) {
+vc::float32 norm_squared(const vc_vec2& v) {
     return dot(v, v);
 }
 
-float norm_squared(const vc_vec3& v) {
+vc::float32 norm_squared(const vc_vec3& v) {
     return dot(v, v);
 }
 
-float norm(const vc_vec2& v) {
+vc::float32 norm(const vc_vec2& v) {
     return std::sqrt(norm_squared(v));
 }
 
-float norm(const vc_vec3& v) {
+vc::float32 norm(const vc_vec3& v) {
     return std::sqrt(norm_squared(v));
 }
 
 vc_vec2 project(const vc_vec2& v, const vc_vec2& onto) {
-    const float onto_norm_sq = norm_squared(onto);
+    const vc::float32 onto_norm_sq = norm_squared(onto);
     if (onto_norm_sq < degenerate_norm_squared_tolerance) {
         throw vc::vc_exception(
             vc::vc_error_code::invalid_argument,
             "vc::math::project(vc_vec2): `onto` vector is degenerate");
     }
-    const float k = dot(v, onto) / onto_norm_sq;
+    const vc::float32 k = dot(v, onto) / onto_norm_sq;
     return onto * k;
 }
 
 vc_vec3 project(const vc_vec3& v, const vc_vec3& onto) {
-    const float onto_norm_sq = norm_squared(onto);
+    const vc::float32 onto_norm_sq = norm_squared(onto);
     if (onto_norm_sq < degenerate_norm_squared_tolerance) {
         throw vc::vc_exception(
             vc::vc_error_code::invalid_argument,
             "vc::math::project(vc_vec3): `onto` vector is degenerate");
     }
-    const float k = dot(v, onto) / onto_norm_sq;
+    const vc::float32 k = dot(v, onto) / onto_norm_sq;
     return onto * k;
 }
 
