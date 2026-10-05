@@ -598,8 +598,42 @@ TEST_CASE("render_image: propagates cancellation through build_pipeline's"
     }
 }
 
+// ---- the three RED placeholders below are marked should_fail ----------------
+//
+// They exercise bodies that are still TODO(you) shells and therefore throw.
+// Until 2026-10-04 they simply failed, which made `ctest` red on every push
+// and `.github/workflows/build.yml` red with it -- and a suite that is always
+// red carries no information, because nobody reads a failure that was already
+// failing. A genuine regression would have been invisible.
+//
+// doctest::should_fail() inverts the verdict: a failing test reports as PASS,
+// and -- the part that matters -- a PASSING test reports as FAIL. So the
+// decorator is self-removing. The moment one of these bodies is written, this
+// file goes red and tells you to delete the decorator. That is strictly
+// better than skip(), which would stop running them and let them rot.
+//
+// Verified against the vendored doctest rather than assumed: doctest.h:6242
+// sets ShouldHaveFailedButDidnt when a should_fail test passes, reported as
+// `addError("should_fail", "Should have failed, but didn't")` at :7508.
+//
+// ONE SURPRISE IN THE OUTPUT, so it does not look like a bug later. The
+// TEST-CASE line goes green while the ASSERTION line still counts the
+// individual failures:
+//
+//     [doctest] test cases: 163 | 163 passed |  0 failed
+//     [doctest] assertions: 664 | 662 passed |  2 failed     <- still 2
+//     [doctest] Status: SUCCESS!                                exit code 0
+//
+// The verdict and the exit code are what ctest reads, so this is green. But
+// a grep for "failed" in the log still matches, which is worth knowing
+// before someone goes hunting for a failure that is not there.
+//
+// If you add another RED placeholder, mark it here too, and say in its
+// comment what has to exist before the decorator comes off.
+
 TEST_CASE("export_image: renders a session and writes it to a file (RED"
-          " until export_image() is written)") {
+          " until export_image() is written)" *
+          doctest::should_fail()) { // remove the decorator when the body lands
     // The end of the export chain: vc_edit_session -> export_image -> a real
     // file on disk. Checks only that the file lands
     // (std::filesystem::exists), not its contents — decoding it back would
@@ -625,7 +659,8 @@ TEST_CASE("export_image: renders a session and writes it to a file (RED"
 }
 
 TEST_CASE("vc_cached_edits_table: get misses, then hits after set()"
-          " (RED until get()/set() are written)") {
+          " (RED until get()/set() are written)" *
+          doctest::should_fail()) { // remove when get()/set() land
     // Content-hash adapter over the byte store: a miss returns nullopt
     // (=> recompute), and a set() then makes the same hash hit. The shells
     // throw, so this is RED; when written, the miss-then-hit sequence holds
@@ -650,7 +685,8 @@ TEST_CASE("vc_cached_edits_table: get misses, then hits after set()"
 }
 
 TEST_CASE("vc_persistent_edits_table: get misses, then hits after set()"
-          " (RED until get()/set() are written)") {
+          " (RED until get()/set() are written)" *
+          doctest::should_fail()) { // remove when get()/set() land
     // Id adapter over the byte store: a miss returns nullopt, and a set()
     // then makes the same id hit. The shells throw, so this is RED; when
     // written, the miss-then-hit sequence holds -> GREEN. This is the
