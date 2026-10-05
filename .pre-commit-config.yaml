@@ -20,17 +20,29 @@ repos:
         exclude: ^third_party/
 
   - repo: https://github.com/pre-commit/mirrors-clang-format
-    rev: v22.1.8
+    rev: v23.1.2
     hooks:
       - id: clang-format
         name: clang-format (C/C++ formatting)
         # Pinned (like addlicense above) rather than "language: system": the
-        # tree was normalized under clang-format 22.1.8, and an unpinned
+        # tree is normalized under clang-format 23.1.2, and an unpinned
         # system hook runs whatever version a contributor happens to have —
         # a different major version fails the hook and dirties the tree on
-        # their very first commit. This mirror downloads 22.1.8 itself
+        # their very first commit. This mirror downloads 23.1.2 itself
         # (see its pinned setup.py), so every contributor formats with the
         # same binary regardless of what (if anything) is on their PATH.
+        #
+        # ⚠ THIS REV AND THE PIN IN .github/workflows/clang-format.yml MUST
+        # MATCH. Until 2026-10-04 this hook was pinned at v22.1.8 while CI
+        # installed ubuntu-latest's unpinned clang-format (18.1.3), so the
+        # hook WOULD HAVE formatted files that CI then rejects. It had not
+        # actually done so: `.git/hooks/pre-commit` was absent, i.e. nobody
+        # had run `pre-commit install`, which is also why the tree carried
+        # violations at all. Run it — an unused hook is a pin that protects
+        # nothing.
+        #
+        # Verified 2026-10-04 that the whole tree is clean under 23.1.2 with
+        # no reformatting, so the bump from 22.1.8 moved no lines.
         args: ["-style=file"]
         # Matches the same extension set as addlicense (minus .py/.sh — clang-format is C/C++ only).
         files: \.(c|cc|cxx|cpp|h|hh|hpp|hxx|inl|ipp|tpp)$
