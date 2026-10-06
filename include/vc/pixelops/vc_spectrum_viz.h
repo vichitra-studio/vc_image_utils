@@ -61,29 +61,63 @@ struct spectrum_dump {
     vc::vc_image linear_magnitude;
     vc::vc_image phase;
 
-    // Printed, never asserted. These say whether the picture is TRUSTWORTHY,
-    // and the honest numbers are whatever the caller's own image produces --
-    // not a figure quoted from somewhere.
+    // These say whether the picture is TRUSTWORTHY, and the honest numbers
+    // are whatever the caller's own image produces -- not a figure quoted
+    // from somewhere.
+
+    // |F| at bin 0 of the UNSHIFTED input. Same number before or after the
+    // shift; said this way so there is no question which bin is meant.
     float dc_magnitude{0.0F};
 
-    // The MIDDLE magnitude once sorted: a typical bin. Median rather than
-    // mean, because the mean is dragged up by DC and the few large
-    // low-frequency bins and so describes no actual bin.
+    // The element at index count/2 of the magnitudes once SORTED ASCENDING --
+    // the upper middle for an even count, with no averaging of the two middle
+    // elements. Pinned because "the median" of an even-length list is
+    // genuinely ambiguous and an undeclared edge case is how dft1d's
+    // empty-input contract went wrong.
+    //
+    // ALL bins are included, DC among them.
+    //
+    // Median rather than mean: the mean is dragged up by DC and the few large
+    // low-frequency bins, so it describes no actual bin.
     float median_magnitude{0.0F};
 
     // dc_magnitude / median_magnitude. If this is large, a linear display
-    // cannot work -- which is the entire case for the log, measured rather
-    // than asserted.
+    // cannot work -- the entire case for the log, measured rather than
+    // asserted.
+    //
+    // ---- ZERO WHEN THE MEDIAN IS ZERO, AND THAT MEANS UNDEFINED ----
+    //
+    // Set to 0 when median_magnitude is 0, which is NOT a small ratio -- it
+    // is no ratio at all. This is not a rare corner: any sparse synthetic
+    // spectrum has it. A pure cosine on an 8x4 grid puts energy in 2 bins out
+    // of 32, so 30 bins are exactly zero and the median is 0.
+    //
+    // So this number is only meaningful on a REAL image. That is also why the
+    // example prints it there and asserts it only on a hand-built case whose
+    // median is non-zero by construction.
     float dc_to_median{0.0F};
 
-    // Fraction of bins that round to grey 0 in linear_magnitude. The
+    // Fraction of bins that round to grey 0 in linear_magnitude -- the
     // companion number: how much of the picture a linear display throws away.
+    //
+    // Counted against what the PNG will ACTUALLY show, not against the float:
+    // the stb path writes floor(v * 255 + 0.5), so a bin counts as lost when
+    // v * 255 + 0.5 < 1, i.e. v < 1/510.
     float linear_zero_fraction{0.0F};
 };
 
 // `spectrum` is dft2d output in its NATURAL order -- unshifted. Shifting is
 // this function's job, so a caller that shifts first gets DC back in the
 // corner.
+//
+// ---- AN ALL-ZERO SPECTRUM IS LEGAL AND RETURNS BLACK ----
+//
+// The transform of a black image is all zeros, which is a legitimate input,
+// not an error -- and throwing on legitimate input is exactly the mistake
+// dft1d's empty-input contract made. So when the maximum magnitude is 0,
+// emit three all-zero images rather than dividing by it, with every
+// diagnostic 0 (and linear_zero_fraction therefore 1.0, since every bin is
+// lost).
 [[nodiscard]] spectrum_dump spectrum_viz(vc::math::complex_view spectrum,
                                          vc::math::grid2d extent);
 

@@ -268,6 +268,97 @@ int main() {
                    "phase spans more than atan() can produce (use atan2)");
         }
 
+        // ---- 5b. the log is ACTUALLY APPLIED, and the four diagnostics --
+        //
+        // Nothing above could tell log_magnitude from linear_magnitude: both
+        // normalise to the same maximum, and on the sparse fixtures used so
+        // far every non-zero bin IS the maximum. So an implementation that
+        // forgot the log would pass every check written so far. This is the
+        // one that catches it.
+        //
+        // Hand-built spectrum, 4 wide by 1 high, real and unshifted:
+        //
+        //     |F|            1000     1     0     0
+        //
+        //     shift by W/2 = 2  ->  out[2]=1000 (DC, at the centre)
+        //                           out[3]=1
+        //
+        //     linear   1000/1000 = 1.0      1/1000 = 0.001     -> INVISIBLE
+        //     log      ln(1001) = 6.9088    ln(2)  = 0.6931
+        //              normalised:  1.0                0.1003  -> VISIBLE
+        //
+        // A hundredfold difference on the same bin. That gap is the log.
+        //
+        // The diagnostics are closed form here, unlike on a photograph:
+        //     dc_magnitude          1000
+        //     median                sorted [0,0,1,1000], index 4/2 = 2  ->  1
+        //     dc_to_median          1000
+        //     linear_zero_fraction  greys are 255, 0, 0, 0  ->  3/4 = 0.75
+        {
+            constexpr std::uint32_t w = 4;
+            constexpr std::uint32_t h = 1;
+            complex_signal spec(w, vc_complex{0.0F, 0.0F});
+            spec[0] = vc_complex{1000.0F, 0.0F};
+            spec[1] = vc_complex{1.0F, 0.0F};
+
+            const grid2d g = grid2d::checked(vc::math::complex_view{spec}, w, h,
+                                             "08_spectrum_viz");
+            const vc::pixelops::spectrum_dump d =
+                vc::pixelops::spectrum_viz(spec, g);
+
+            expect(px(d.linear_magnitude, 2, 0) > 0.99F &&
+                       px(d.log_magnitude, 2, 0) > 0.99F,
+                   "DC normalises to 1.0 in both dumps");
+
+            // THE check. Same bin, two dumps, two orders of magnitude apart.
+            expect(px(d.linear_magnitude, 3, 0) < 0.01F,
+                   "a 1000:1 bin is INVISIBLE on the linear dump");
+            expect(px(d.log_magnitude, 3, 0) > 0.05F &&
+                       px(d.log_magnitude, 3, 0) < 0.20F,
+                   "the same bin is VISIBLE on the log dump (log was applied)");
+
+            // A positive real DC has zero phase, which maps to the middle.
+            expect(std::fabs(px(d.phase, 2, 0) - 0.5F) < 1e-5F,
+                   "positive real DC has phase 0, i.e. 0.5 in the dump");
+
+            expect(std::fabs(d.dc_magnitude - 1000.0F) < 1e-2F,
+                   "dc_magnitude is bin 0 of the unshifted input");
+            expect(std::fabs(d.median_magnitude - 1.0F) < 1e-5F,
+                   "median is the UPPER middle of the sorted magnitudes");
+            expect(std::fabs(d.dc_to_median - 1000.0F) < 1e-1F,
+                   "dc_to_median = 1000");
+            expect(std::fabs(d.linear_zero_fraction - 0.75F) < 1e-5F,
+                   "3 of 4 bins round to grey 0 on the linear dump");
+        }
+
+        // ---- 5c. an all-zero spectrum is legal, not an error -------------
+        //
+        // The transform of a black image. Throwing here would repeat dft1d's
+        // empty-input mistake: refusing a legitimate input.
+        {
+            constexpr std::uint32_t w = 4;
+            constexpr std::uint32_t h = 2;
+            const complex_signal zeros(static_cast<std::size_t>(w) * h,
+                                       vc_complex{0.0F, 0.0F});
+            const grid2d g = grid2d::checked(vc::math::complex_view{zeros}, w,
+                                             h, "08_spectrum_viz");
+            const vc::pixelops::spectrum_dump d =
+                vc::pixelops::spectrum_viz(zeros, g);
+
+            bool all_black = true;
+            for (vc::image_dim y = 0; y < h && all_black; ++y) {
+                for (vc::image_dim x = 0; x < w && all_black; ++x) {
+                    all_black = px(d.log_magnitude, x, y) == 0.0F &&
+                                px(d.linear_magnitude, x, y) == 0.0F;
+                }
+            }
+            expect(all_black, "all-zero spectrum returns black, does not throw");
+            expect(d.dc_to_median == 0.0F,
+                   "dc_to_median is 0 when the median is 0 (undefined, not small)");
+            expect(std::fabs(d.linear_zero_fraction - 1.0F) < 1e-5F,
+                   "every bin is lost on a linear dump of nothing");
+        }
+
         // ---- 6. a real image: PRINT the diagnostics, write the PNGs ------
         //
         // 128x128 from the centre, one channel. Sized from the timing table in

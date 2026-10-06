@@ -31,8 +31,10 @@ spectrum_dump spectrum_viz(vc::math::complex_view spectrum,
     //      mag/max_mag * 255 + 0.5 truncates to 0 -- i.e. what the PNG will
     //      actually show, not what the float says.
     //
-    // Guard the divisions: an all-zero spectrum has max 0. Decide what that
-    // returns and the header will need a line about it.
+    // Guard the divisions: an all-zero spectrum has max 0, and the header
+    // now pins that case -- three black images, every diagnostic 0. Likewise
+    // dc_to_median when the median is 0, which happens on any sparse
+    // synthetic spectrum.
     (void)spectrum;
     (void)extent;
     throw vc::vc_exception(vc::vc_error_code::invalid_argument,
