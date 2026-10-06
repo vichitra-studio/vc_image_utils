@@ -177,11 +177,16 @@ int main() {
                          "NOT four. A single grating is one frequency and its "
                          "mirror, whatever its orientation."});
         atlas.push_back({"08_stripes_off_bin", make(grating(4.5F, 0.0F)),
-                         "A SMEAR instead of two dots -- energy across 4, 5 "
-                         "and 6. The grating does not complete a whole number "
-                         "of cycles across the window, so it matches no single "
-                         "basis function. This is LEAKAGE, and it is why "
-                         "windowing exists."});
+                         "A LINE RIGHT ACROSS THE FRAME instead of two dots. "
+                         "Compare 04, which is the same grating at k=4 and "
+                         "shows three clean dots. The 4.5 version does not "
+                         "complete a whole number of cycles across the window, "
+                         "so it matches NO basis function exactly and leaves a "
+                         "little in every one of them, brightest near 4 and 5 "
+                         "and tailing off slowly. This is LEAKAGE, and it is "
+                         "why windowing exists. (An earlier draft said 'energy "
+                         "across 4, 5 and 6' -- the actual spread is the whole "
+                         "axis.)"});
         atlas.push_back({"09_checkerboard_8",
                          make([](vc::image_dim x, vc::image_dim y) {
                              return ((x / 8 + y / 8) % 2 == 0) ? 0.0F : 1.0F;
