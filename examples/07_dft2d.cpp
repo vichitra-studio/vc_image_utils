@@ -56,8 +56,8 @@
 
 namespace {
 
-using vc::math::complex_signal;
-using vc::math::complex_view;
+using vc::math::vc_complex_signal;
+using vc::math::vc_complex_view;
 using vc::math::grid2d;
 using vc::math::vc_complex;
 
@@ -86,7 +86,7 @@ bool near_c(vc_complex a, vc_complex b, float tol) {
 
 // Largest |a[i] - b[i]|. Infinity on a length mismatch -- a transform that
 // returns the wrong length is a failure, not undefined behaviour.
-float max_abs_diff(const complex_signal& a, const complex_signal& b) {
+float max_abs_diff(const vc_complex_signal& a, const vc_complex_signal& b) {
     if (a.size() != b.size()) {
         return std::numeric_limits<float>::infinity();
     }
@@ -97,7 +97,7 @@ float max_abs_diff(const complex_signal& a, const complex_signal& b) {
     return worst;
 }
 
-float max_imag(const complex_signal& a) {
+float max_imag(const vc_complex_signal& a) {
     float worst = 0.0F;
     for (const vc_complex& z : a) {
         worst = std::max(worst, std::abs(z.imag()));
@@ -105,7 +105,7 @@ float max_imag(const complex_signal& a) {
     return worst;
 }
 
-float rms(const complex_signal& a) {
+float rms(const vc_complex_signal& a) {
     if (a.empty()) {
         return 0.0F;
     }
@@ -117,7 +117,7 @@ float rms(const complex_signal& a) {
 }
 
 // Sum of |z|^2 -- for Parseval.
-double energy(const complex_signal& a) {
+double energy(const vc_complex_signal& a) {
     double acc = 0.0;
     for (const vc_complex& z : a) {
         acc += static_cast<double>(std::norm(z));
@@ -138,9 +138,9 @@ double energy(const complex_signal& a) {
 // the normalisation.
 //
 // Accumulates in double and narrows once at the end, same as dft1d.
-complex_signal
-naive_dft2d(complex_view plane, std::size_t width, std::size_t height) {
-    complex_signal out(plane.size());
+vc_complex_signal
+naive_dft2d(vc_complex_view plane, std::size_t width, std::size_t height) {
+    vc_complex_signal out(plane.size());
     for (std::size_t ky = 0; ky < height; ++ky) {
         for (std::size_t kx = 0; kx < width; ++kx) {
             std::complex<double> sum{0.0, 0.0};
@@ -167,12 +167,12 @@ naive_dft2d(complex_view plane, std::size_t width, std::size_t height) {
 // Build the extent for a buffer. The span overload reads the length from the
 // buffer itself, so the count cannot be passed wrongly.
 grid2d
-at(const complex_signal& buf, vc::math::grid_dim w, vc::math::grid_dim h) {
-    return grid2d::checked(complex_view{buf}, w, h, "07_dft2d");
+at(const vc_complex_signal& buf, vc::math::grid_dim w, vc::math::grid_dim h) {
+    return grid2d::checked(vc_complex_view{buf}, w, h, "07_dft2d");
 }
 
-complex_signal lift(const std::vector<float>& real_samples) {
-    complex_signal out;
+vc_complex_signal lift(const std::vector<float>& real_samples) {
+    vc_complex_signal out;
     out.reserve(real_samples.size());
     for (const float v : real_samples) {
         out.emplace_back(v, 0.0F);
@@ -205,8 +205,8 @@ int main() {
         // fault as a heap-buffer-overflow inside dft1d. None of that is
         // reachable now: the bad call does not compile or does not construct.
         {
-            const complex_signal eight(8, vc_complex{1.0F, 0.0F});
-            const complex_view v{eight};
+            const vc_complex_signal eight(8, vc_complex{1.0F, 0.0F});
+            const vc_complex_view v{eight};
 
             bool threw_mismatch = false;
             try {
@@ -270,9 +270,9 @@ int main() {
         // the 1-D transform. This ties the new code to the 28 checks that
         // already passed, and it is the cheapest possible smoke test.
         {
-            const complex_signal row = lift({1.0F, 2.0F, 3.0F, 4.0F});
-            const complex_signal one_d = dft1d(row);
-            const complex_signal two_d = dft2d(row, at(row, 4, 1));
+            const vc_complex_signal row = lift({1.0F, 2.0F, 3.0F, 4.0F});
+            const vc_complex_signal one_d = dft1d(row);
+            const vc_complex_signal two_d = dft2d(row, at(row, 4, 1));
             expect(two_d.size() == 4, "dft2d 4x1 keeps length");
             expect(max_abs_diff(two_d, one_d) <= 1e-5F,
                    "dft2d of a single ROW equals dft1d");
@@ -288,9 +288,9 @@ int main() {
         // Same data, 1 wide by 4 high. If width and height are swapped
         // anywhere, this and check 3 cannot both pass.
         {
-            const complex_signal col = lift({1.0F, 2.0F, 3.0F, 4.0F});
-            const complex_signal one_d = dft1d(col);
-            const complex_signal two_d = dft2d(col, at(col, 1, 4));
+            const vc_complex_signal col = lift({1.0F, 2.0F, 3.0F, 4.0F});
+            const vc_complex_signal one_d = dft1d(col);
+            const vc_complex_signal two_d = dft2d(col, at(col, 1, 4));
             expect(max_abs_diff(two_d, one_d) <= 1e-5F,
                    "dft2d of a single COLUMN equals dft1d");
         }
@@ -315,15 +315,15 @@ int main() {
         // vertical direction holds only a DC step, and -16 is that step
         // times the 4 columns it spans.
         {
-            const complex_signal plane =
+            const vc_complex_signal plane =
                 lift({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F});
-            const complex_signal got = dft2d(plane, at(plane, 4, 2));
-            const complex_signal want = naive_dft2d(plane, 4, 2);
+            const vc_complex_signal got = dft2d(plane, at(plane, 4, 2));
+            const vc_complex_signal want = naive_dft2d(plane, 4, 2);
             expect(got.size() == 8, "dft2d 4x2 keeps length");
             expect(max_abs_diff(got, want) <= 1e-4F,
                    "dft2d 4x2 matches the direct definition");
 
-            const complex_signal pinned = {
+            const vc_complex_signal pinned = {
                 vc_complex{36.0F, 0.0F},  vc_complex{-4.0F, 4.0F},
                 vc_complex{-4.0F, 0.0F},  vc_complex{-4.0F, -4.0F},
                 vc_complex{-16.0F, 0.0F}, vc_complex{0.0F, 0.0F},
@@ -347,17 +347,16 @@ int main() {
         // stride taken from the wrong dimension passes check 5 and fails
         // here, or vice versa. Neither orientation alone is sufficient.
         {
-            const complex_signal plane =
+            const vc_complex_signal plane =
                 lift({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F});
-            const complex_signal got = dft2d(plane, at(plane, 2, 4));
-            const complex_signal want = naive_dft2d(plane, 2, 4);
+            const vc_complex_signal got = dft2d(plane, at(plane, 2, 4));
+            const vc_complex_signal want = naive_dft2d(plane, 2, 4);
             expect(got.size() == 8, "dft2d 2x4 keeps length");
             expect(max_abs_diff(got, want) <= 1e-4F,
                    "dft2d 2x4 matches the direct definition");
         }
 
         // ---- 6b. COPRIME AND ODD: 5 wide x 3 high ----------------------
-        //
         // Every other size in this file has an even side, and in each one
         // dimension divides the other (4/2, 2/4, 8/4, 64/48 share factors).
         // That leaves two blind spots:
@@ -390,9 +389,9 @@ int main() {
                         static_cast<float>(((x * 7U) + (y * 5U)) % 4U);
                 }
             }
-            const complex_signal plane = lift(v);
-            const complex_signal got = dft2d(plane, at(plane, w, h));
-            const complex_signal want = naive_dft2d(plane, w, h);
+            const vc_complex_signal plane = lift(v);
+            const vc_complex_signal got = dft2d(plane, at(plane, w, h));
+            const vc_complex_signal want = naive_dft2d(plane, w, h);
             expect(got.size() == w * h, "dft2d 5x3 keeps length");
             expect(max_abs_diff(got, want) <= 1e-3F,
                    "dft2d 5x3 (coprime, both odd) matches the definition");
@@ -401,7 +400,7 @@ int main() {
             expect(!got.empty() && near(got[0].real(), 141.0F, 1e-2F),
                    "dft2d 5x3 X[0,0] == 141, the sum of the samples");
 
-            const complex_signal back = idft2d(got, at(got, w, h));
+            const vc_complex_signal back = idft2d(got, at(got, w, h));
             expect(back.size() == w * h && max_abs_diff(back, plane) <= 1e-3F,
                    "5x3 round trips (odd sides do not break the 1/MN)");
         }
@@ -411,9 +410,9 @@ int main() {
         // All the exponentials are 1 at kx=ky=0, so X[0] is a plain total.
         // Divide by width*height to get the mean brightness.
         {
-            const complex_signal plane =
+            const vc_complex_signal plane =
                 lift({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F});
-            const complex_signal spec = dft2d(plane, at(plane, 4, 2));
+            const vc_complex_signal spec = dft2d(plane, at(plane, 4, 2));
             expect(!spec.empty() && near(spec[0].real(), 36.0F, 1e-4F) &&
                        near(spec[0].imag(), 0.0F, 1e-4F),
                    "dft2d X[0,0] == sum of all samples");
@@ -430,9 +429,9 @@ int main() {
         // back 1/(4*2) = 1/8 of the input. Non-square on purpose, so a
         // 1/width-twice error is also visible.
         {
-            const complex_signal plane =
+            const vc_complex_signal plane =
                 lift({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F});
-            const complex_signal back =
+            const vc_complex_signal back =
                 idft2d(dft2d(plane, at(plane, 4, 2)), at(plane, 4, 2));
             expect(back.size() == 8, "round trip keeps length");
             expect(max_abs_diff(back, plane) <= 1e-4F,
@@ -482,9 +481,9 @@ int main() {
                         edge + (0.1F * u * v);
                 }
             }
-            const complex_signal plane = lift(image);
-            const complex_signal spec = dft2d(plane, at(plane, w, h));
-            const complex_signal back = idft2d(spec, at(spec, w, h));
+            const vc_complex_signal plane = lift(image);
+            const vc_complex_signal spec = dft2d(plane, at(plane, w, h));
+            const vc_complex_signal back = idft2d(spec, at(spec, w, h));
             expect(spec.size() == w * h, "64x48: length preserved");
 
             const float scale = std::max(rms(plane), 1e-12F);
@@ -527,8 +526,8 @@ int main() {
             constexpr std::size_t y0 = 1;
             std::vector<float> d(w * h, 0.0F);
             d[(y0 * w) + x0] = 1.0F;
-            const complex_signal plane = lift(d);
-            const complex_signal spec = dft2d(plane, at(plane, w, h));
+            const vc_complex_signal plane = lift(d);
+            const vc_complex_signal spec = dft2d(plane, at(plane, w, h));
 
             // Both loops run to completion rather than bailing on the
             // first mismatch. An earlier version guarded the outer loop on
@@ -554,7 +553,7 @@ int main() {
                    "off-centre impulse gives the predicted phase ramp");
             expect(flat_ok, "off-centre impulse has flat unit magnitude");
 
-            const complex_signal pinned = {
+            const vc_complex_signal pinned = {
                 vc_complex{1.0F, 0.0F},  vc_complex{0.0F, -1.0F},
                 vc_complex{-1.0F, 0.0F}, vc_complex{0.0F, 1.0F},
                 vc_complex{-1.0F, 0.0F}, vc_complex{0.0F, 1.0F},
@@ -577,10 +576,10 @@ int main() {
             std::vector<float> b(w * h, 0.0F);
             a[1] = 1.0F;           // (x=1, y=0)
             b[(1 * w) + 3] = 1.0F; // (x=3, y=1)
-            const complex_signal pa = lift(a);
-            const complex_signal pb = lift(b);
-            const complex_signal sa = dft2d(pa, at(pa, w, h));
-            const complex_signal sb = dft2d(pb, at(pb, w, h));
+            const vc_complex_signal pa = lift(a);
+            const vc_complex_signal pb = lift(b);
+            const vc_complex_signal sa = dft2d(pa, at(pa, w, h));
+            const vc_complex_signal sb = dft2d(pb, at(pb, w, h));
 
             bool mags_identical = sa.size() == sb.size() && !sa.empty();
             for (std::size_t i = 0; i < sa.size() && mags_identical; ++i) {
@@ -617,8 +616,8 @@ int main() {
                     s[(y * w) + x] = std::cos(phase);
                 }
             }
-            const complex_signal plane = lift(s);
-            const complex_signal spec = dft2d(plane, at(plane, w, h));
+            const vc_complex_signal plane = lift(s);
+            const vc_complex_signal spec = dft2d(plane, at(plane, w, h));
             const float peak = 0.5F * static_cast<float>(w * h); // 32
 
             bool twins_ok = spec.size() == w * h;
@@ -665,8 +664,8 @@ int main() {
                 im[i] = std::sin(0.7F * static_cast<float>(i)) +
                         (0.4F * static_cast<float>(i % 5));
             }
-            const complex_signal plane = lift(im);
-            const complex_signal spec = dft2d(plane, at(plane, w, h));
+            const vc_complex_signal plane = lift(im);
+            const vc_complex_signal spec = dft2d(plane, at(plane, w, h));
 
             bool herm = spec.size() == w * h;
             const float scale = std::max(rms(spec), 1e-12F);
@@ -686,7 +685,7 @@ int main() {
             // it this check PASSES on a stub that returns nothing -- a test
             // that is satisfied by the absence of an implementation is worse
             // than no test, because it reports green.
-            const complex_signal back = idft2d(spec, at(spec, w, h));
+            const vc_complex_signal back = idft2d(spec, at(spec, w, h));
             expect(back.size() == w * h &&
                        max_imag(back) / std::max(rms(plane), 1e-12F) <= 1e-5F,
                    "inverse of a real image's spectrum is real");

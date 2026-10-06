@@ -62,7 +62,7 @@ bool near_c(vc::math::vc_complex a, vc::math::vc_complex b, float tol) {
     return near(a.real(), b.real(), tol) && near(a.imag(), b.imag(), tol);
 }
 
-using vc::math::complex_signal;
+using vc::math::vc_complex_signal;
 using vc::math::vc_complex;
 
 constexpr float k_two_pi = 6.28318530717958647692F;
@@ -70,7 +70,7 @@ constexpr float k_two_pi = 6.28318530717958647692F;
 // Largest |imag(a[i])|. A real signal's spectrum must invert back to a real
 // signal, and this is the number that says so by name rather than by having
 // it absorbed into a round-trip tolerance. See check 8b.
-float max_imag(const complex_signal& a) {
+float max_imag(const vc_complex_signal& a) {
     float worst = 0.0F;
     for (const vc_complex& z : a) {
         worst = std::max(worst, std::abs(z.imag()));
@@ -81,7 +81,7 @@ float max_imag(const complex_signal& a) {
 // Largest |a[i] - b[i]|. Returns infinity on a length mismatch rather than
 // indexing off the end of the shorter one -- a transform that returns the
 // wrong length is a failure, not undefined behaviour.
-float max_abs_diff(const complex_signal& a, const complex_signal& b) {
+float max_abs_diff(const vc_complex_signal& a, const vc_complex_signal& b) {
     if (a.size() != b.size()) {
         return std::numeric_limits<float>::infinity();
     }
@@ -92,7 +92,7 @@ float max_abs_diff(const complex_signal& a, const complex_signal& b) {
     return worst;
 }
 
-float energy(const complex_signal& s) {
+float energy(const vc_complex_signal& s) {
     double total = 0.0;
     for (const auto& v : s) {
         total += static_cast<double>(std::norm(v)); // norm() is |v|^2
@@ -123,12 +123,12 @@ int main() {
         // N=1 is the transform's fixed point: one sample, one bin, no
         // rotation anywhere.
         {
-            const complex_signal empty{};
+            const vc_complex_signal empty{};
             expect(dft1d(empty).empty(), "dft1d(empty) is empty");
             expect(idft1d(empty).empty(), "idft1d(empty) is empty");
 
-            const complex_signal one{vc_complex{7.0F, -3.0F}};
-            const complex_signal one_spec = dft1d(one);
+            const vc_complex_signal one{vc_complex{7.0F, -3.0F}};
+            const vc_complex_signal one_spec = dft1d(one);
             expect(one_spec.size() == 1 &&
                        near_c(one_spec[0], vc_complex{7.0F, -3.0F}, 1e-6F),
                    "N=1: X[0] == x[0], untouched");
@@ -140,8 +140,8 @@ int main() {
         // this isolates the accumulation from the rotation. If this fails,
         // the loop is wrong; if only later bins fail, the exponent is.
         const std::vector<float> ramp_real{1.0F, 2.0F, 3.0F, 4.0F};
-        const complex_signal ramp = to_signal(ramp_real);
-        const complex_signal spec = dft1d(ramp);
+        const vc_complex_signal ramp = to_signal(ramp_real);
+        const vc_complex_signal spec = dft1d(ramp);
 
         expect(spec.size() == 4, "dft1d preserves length");
         expect(near_c(spec[0], vc_complex{10.0F, 0.0F}, 1e-5F),
@@ -182,9 +182,9 @@ int main() {
         // A flat spectrum of exactly 1 is the strongest statement that no
         // stray normalisation crept into the FORWARD transform.
         {
-            const complex_signal delta =
+            const vc_complex_signal delta =
                 to_signal(std::vector<float>{1.0F, 0.0F, 0.0F, 0.0F});
-            const complex_signal d = dft1d(delta);
+            const vc_complex_signal d = dft1d(delta);
             bool flat = d.size() == 4;
             for (const auto& v : d) {
                 flat = flat && near_c(v, vc_complex{1.0F, 0.0F}, 1e-5F);
@@ -204,9 +204,9 @@ int main() {
         // CENTRED impulse is a useless test: |DFT(delta_m)| is flat for every
         // shift m, so a magnitude-only check is blind to position entirely.
         {
-            const complex_signal shifted =
+            const vc_complex_signal shifted =
                 to_signal(std::vector<float>{0.0F, 1.0F, 0.0F, 0.0F});
-            const complex_signal s = dft1d(shifted);
+            const vc_complex_signal s = dft1d(shifted);
             expect(s.size() == 4 &&
                        near_c(s[0], vc_complex{1.0F, 0.0F}, 1e-5F) &&
                        near_c(s[1], vc_complex{0.0F, -1.0F}, 1e-5F) &&
@@ -239,10 +239,10 @@ int main() {
         // conjugate-symmetry shortcut from being baked in by accident while
         // passing every test above.
         {
-            const complex_signal wind{
+            const vc_complex_signal wind{
                 vc_complex{1.0F, 0.0F}, vc_complex{0.0F, 1.0F},
                 vc_complex{-1.0F, 0.0F}, vc_complex{0.0F, -1.0F}};
-            const complex_signal w = dft1d(wind);
+            const vc_complex_signal w = dft1d(wind);
             expect(w.size() == 4 &&
                        near_c(w[0], vc_complex{0.0F, 0.0F}, 1e-5F) &&
                        near_c(w[1], vc_complex{4.0F, 0.0F}, 1e-5F) &&
@@ -265,23 +265,23 @@ int main() {
         // N=3, x = [1,2,3]:  X = [6, -1.5+0.866i, -1.5-0.866i]
         // (sqrt(3)/2 = 0.8660254; confirmed against numpy.fft.)
         {
-            const complex_signal odd =
+            const vc_complex_signal odd =
                 to_signal(std::vector<float>{1.0F, 2.0F, 3.0F});
-            const complex_signal o = dft1d(odd);
+            const vc_complex_signal o = dft1d(odd);
             expect(o.size() == 3 &&
                        near_c(o[0], vc_complex{6.0F, 0.0F}, 1e-5F) &&
                        near_c(o[1], vc_complex{-1.5F, 0.8660254F}, 1e-5F) &&
                        near_c(o[2], vc_complex{-1.5F, -0.8660254F}, 1e-5F),
                    "odd N=3 transforms correctly (no power-of-two assumption)");
 
-            const complex_signal odd_back = idft1d(o);
+            const vc_complex_signal odd_back = idft1d(o);
             expect(odd_back.size() == 3 && max_abs_diff(odd_back, odd) <= 1e-5F,
                    "odd N=3 round trip");
         }
 
         // ---- 7c. the real-input overload ------------------------------
         //
-        // dft1d(real_view) must be exactly dft1d(to_signal(x)) -- it exists
+        // dft1d(vc_real_view) must be exactly dft1d(to_signal(x)) -- it exists
         // for call-site ergonomics, not as a second algorithm. Asserting the
         // equivalence is what stops the two paths drifting if either is ever
         // specialised (a real-input DFT exploiting Hermitian symmetry is the
@@ -289,13 +289,13 @@ int main() {
         // disagreeing with the reference).
         {
             const std::vector<float> reals{1.0F, 2.0F, 3.0F, 4.0F};
-            const complex_signal via_overload = dft1d(reals);
-            const complex_signal via_lift = dft1d(to_signal(reals));
+            const vc_complex_signal via_overload = dft1d(reals);
+            const vc_complex_signal via_lift = dft1d(to_signal(reals));
             expect(max_abs_diff(via_overload, via_lift) == 0.0F,
-                   "dft1d(real_view) is bit-identical to dft1d(to_signal(x))");
+                   "dft1d(vc_real_view) is bit-identical to dft1d(to_signal(x))");
             expect(via_overload.size() == 4 &&
                        near_c(via_overload[1], vc_complex{-2.0F, 2.0F}, 1e-5F),
-                   "dft1d(real_view) gives the same X[1] = -2 + 2i");
+                   "dft1d(vc_real_view) gives the same X[1] = -2 + 2i");
         }
 
         // ---- 8. round trip -------------------------------------------------
@@ -303,7 +303,7 @@ int main() {
         // The 1/N lives on the inverse and nowhere else. If it is split
         // across both, or applied twice, this is where it shows.
         {
-            const complex_signal back = idft1d(spec);
+            const vc_complex_signal back = idft1d(spec);
             expect(back.size() == 4 && max_abs_diff(back, ramp) <= 1e-5F,
                    "idft1d(dft1d(x)) == x");
         }
@@ -332,13 +332,13 @@ int main() {
         // evidence that the filter was not twin-symmetric. A real-valued
         // H[k] with H[k] == H[N-k] is the condition that keeps output real.
         {
-            const complex_signal back = idft1d(spec);
+            const vc_complex_signal back = idft1d(spec);
             expect(max_imag(back) <= 1e-6F,
                    "inverse of a real signal's spectrum is real");
 
-            complex_signal broken = spec;
+            vc_complex_signal broken = spec;
             broken[3] = vc_complex{0.0F, 0.0F};
-            const complex_signal broken_back = idft1d(broken);
+            const vc_complex_signal broken_back = idft1d(broken);
             expect(max_imag(broken_back) > 1e-2F,
                    "breaking one twin makes the inverse NOT real");
         }
@@ -393,9 +393,9 @@ int main() {
                 big_real[n] = std::cos(k_two_pi * 5.0F * t) +
                               0.5F * std::sin(k_two_pi * 137.0F * t);
             }
-            const complex_signal big = to_signal(big_real);
-            const complex_signal big_spec = dft1d(big);
-            const complex_signal big_back = idft1d(big_spec);
+            const vc_complex_signal big = to_signal(big_real);
+            const vc_complex_signal big_spec = dft1d(big);
+            const vc_complex_signal big_back = idft1d(big_spec);
 
             expect(big_spec.size() == n_big, "large N: length preserved");
             expect(max_abs_diff(big_back, big) <= 1e-7F,
@@ -454,12 +454,12 @@ int main() {
         // If it ever fails, nothing is broken; dft1d's own 27 checks are the
         // ones that matter.
         {
-            const complex_signal evens =
+            const vc_complex_signal evens =
                 to_signal(std::vector<float>{1.0F, 3.0F});
-            const complex_signal odds =
+            const vc_complex_signal odds =
                 to_signal(std::vector<float>{2.0F, 4.0F});
-            const complex_signal e_spec = dft1d(evens); // half-size, N=2
-            const complex_signal o_spec = dft1d(odds);  // half-size, N=2
+            const vc_complex_signal e_spec = dft1d(evens); // half-size, N=2
+            const vc_complex_signal o_spec = dft1d(odds);  // half-size, N=2
 
             std::cout << "\n  [combine rule] x = [1,2,3,4], N = 4\n";
             std::cout << "    evens [1,3] -> E = ";

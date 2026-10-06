@@ -4,22 +4,34 @@
 #pragma once
 
 #include "vc/core/vc_image.h"
-#include "vc/math/vc_dft.h"     // complex_view
+#include "vc/math/vc_dft.h"     // vc_complex_view
 #include "vc/math/vc_grid2d.h"  // grid2d -- dimensions that cannot be wrong
 
-namespace vc::pixelops {
+namespace vc::debug {
 
 // Turn a 2-D spectrum into pictures you can open.
 //
-// ---- WHY THIS IS IN pixelops AND NOT math ----
+// ---- WHY THIS IS IN debug, NOT pixelops AND NOT math ----
 //
-// 2.1's rule is phrased about INPUTS -- "does it take a vc_image? no -> math".
-// This is the first case the phrasing does not settle: spectrum_viz takes
-// complex samples and RETURNS vc_images. Putting it in vc::math would make
-// vc::math include vc_image.h, which is the exact dependency vc_scalar.h and
-// vc_grid2d.h were created to avoid. So the rule is read as being about the
-// dependency rather than the signature, and outputs count. Worth folding back
-// into 2.1's wording.
+// Two questions, in order, and an earlier draft only asked the second.
+//
+// FIRST: is this pipeline machinery at all? No. Nothing in a processing
+// pipeline calls this -- it exists so a human can look at a spectrum and
+// decide whether a filter did what was intended. That is what vc::debug is
+// for, and vc_image_dumper is the precedent: encode an image so somebody can
+// open it, never part of the result.
+//
+// pixelops holds operations the pipeline RUNS -- warp, convolve, edge policy.
+// spectrum_viz is not one of those, and filing it there would have made
+// pixelops the place where anything image-shaped lands.
+//
+// SECOND, had it been pipeline machinery: 2.1's math/pixelops rule is phrased
+// about INPUTS -- "does it take a vc_image? no -> math" -- and would not have
+// settled it either way, because this takes complex samples and RETURNS
+// vc_images. That reading still holds and is now in 2.1: naming vc_image in
+// EITHER direction forces the vc_image.h dependency that vc_scalar.h and
+// vc_grid2d.h exist to keep out of vc::math. It just is not the question that
+// decides this file.
 //
 // ---- WHAT THE THREE IMAGES ARE ----
 //
@@ -115,10 +127,17 @@ struct spectrum_dump {
 // The transform of a black image is all zeros, which is a legitimate input,
 // not an error -- and throwing on legitimate input is exactly the mistake
 // dft1d's empty-input contract made. So when the maximum magnitude is 0,
-// emit three all-zero images rather than dividing by it, with every
+// emit BLACK MAGNITUDE images rather than dividing by it, with every
 // diagnostic 0 (and linear_zero_fraction therefore 1.0, since every bin is
 // lost).
-[[nodiscard]] spectrum_dump spectrum_viz(vc::math::complex_view spectrum,
+//
+// The PHASE image is NOT black in that case, and an earlier draft of this
+// comment said "three all-zero images", which was wrong. atan2(0, 0) is 0 by
+// definition, and 0 maps to the middle of the range -- so a spectrum of
+// nothing has a phase image that is uniformly 0.5, mid-grey. That is correct
+// and not worth special-casing: phase is meaningless where the magnitude is
+// zero, which is the whole of Nuisance 4.
+[[nodiscard]] spectrum_dump spectrum_viz(vc::math::vc_complex_view spectrum,
                                          vc::math::grid2d extent);
 
-} // namespace vc::pixelops
+} // namespace vc::debug

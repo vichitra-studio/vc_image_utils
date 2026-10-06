@@ -44,7 +44,7 @@
 #include "vc/io/vc_io_stb.h"
 #include "vc/math/vc_dft.h"
 #include "vc/math/vc_grid2d.h"
-#include "vc/pixelops/vc_spectrum_viz.h"
+#include "vc/debug/vc_spectrum_viz.h"
 
 namespace {
 
@@ -60,7 +60,7 @@ void expect(bool condition, const char* what) {
     }
 }
 
-using vc::math::complex_signal;
+using vc::math::vc_complex_signal;
 using vc::math::grid2d;
 using vc::math::vc_complex;
 
@@ -69,8 +69,8 @@ constexpr float k_two_pi = 2.0F * k_pi;
 
 // A plane whose every element is DISTINCT, so a shift that loses or duplicates
 // an element cannot pass by coincidence.
-complex_signal numbered(std::uint32_t w, std::uint32_t h) {
-    complex_signal plane(static_cast<std::size_t>(w) * h);
+vc_complex_signal numbered(std::uint32_t w, std::uint32_t h) {
+    vc_complex_signal plane(static_cast<std::size_t>(w) * h);
     for (std::size_t i = 0; i < plane.size(); ++i) {
         plane[i] = vc_complex{static_cast<float>(i + 1), 0.0F};
     }
@@ -92,9 +92,9 @@ int main() {
         // a real choice -- and on 4x2, where it is not.
         for (auto [w, h] : {std::pair<std::uint32_t, std::uint32_t>{5, 3},
                             std::pair<std::uint32_t, std::uint32_t>{4, 2}}) {
-            const complex_signal in = numbered(w, h);
-            const complex_signal out = vc::math::fftshift2d(
-                in, grid2d::checked(vc::math::complex_view{in}, w, h,
+            const vc_complex_signal in = numbered(w, h);
+            const vc_complex_signal out = vc::math::fftshift2d(
+                in, grid2d::checked(vc::math::vc_complex_view{in}, w, h,
                                     "08_spectrum_viz"));
 
             bool mapped = out.size() == in.size();
@@ -118,12 +118,12 @@ int main() {
         {
             constexpr std::uint32_t w = 5;
             constexpr std::uint32_t h = 3;
-            complex_signal in(static_cast<std::size_t>(w) * h,
+            vc_complex_signal in(static_cast<std::size_t>(w) * h,
                               vc_complex{0.0F, 0.0F});
             in[0] = vc_complex{1.0F, 0.0F}; // the DC bin, marked
 
-            const complex_signal out = vc::math::fftshift2d(
-                in, grid2d::checked(vc::math::complex_view{in}, w, h,
+            const vc_complex_signal out = vc::math::fftshift2d(
+                in, grid2d::checked(vc::math::vc_complex_view{in}, w, h,
                                     "08_spectrum_viz"));
 
             const std::size_t centre =
@@ -145,8 +145,8 @@ int main() {
         // would break one and not the other.
         {
             auto twice = [](std::uint32_t w, std::uint32_t h) {
-                const complex_signal in = numbered(w, h);
-                const grid2d g = grid2d::checked(vc::math::complex_view{in}, w,
+                const vc_complex_signal in = numbered(w, h);
+                const grid2d g = grid2d::checked(vc::math::vc_complex_view{in}, w,
                                                  h, "08_spectrum_viz");
                 return std::pair{in, vc::math::fftshift2d(
                                          vc::math::fftshift2d(in, g), g)};
@@ -176,7 +176,7 @@ int main() {
             constexpr std::uint32_t h = 4;
             constexpr std::uint32_t kx = 2;
 
-            complex_signal plane(static_cast<std::size_t>(w) * h);
+            vc_complex_signal plane(static_cast<std::size_t>(w) * h);
             for (std::uint32_t y = 0; y < h; ++y) {
                 for (std::uint32_t x = 0; x < w; ++x) {
                     const float v = std::cos(k_two_pi * static_cast<float>(kx) *
@@ -186,10 +186,10 @@ int main() {
                         vc_complex{v, 0.0F};
                 }
             }
-            const grid2d g = grid2d::checked(vc::math::complex_view{plane}, w,
+            const grid2d g = grid2d::checked(vc::math::vc_complex_view{plane}, w,
                                              h, "08_spectrum_viz");
-            const vc::pixelops::spectrum_dump dump =
-                vc::pixelops::spectrum_viz(vc::math::dft2d(plane, g), g);
+            const vc::debug::spectrum_dump dump =
+                vc::debug::spectrum_viz(vc::math::dft2d(plane, g), g);
 
             const vc::image_dim cx = w / 2;
             const vc::image_dim cy = h / 2;
@@ -248,13 +248,13 @@ int main() {
         {
             constexpr std::uint32_t w = 8;
             constexpr std::uint32_t h = 1;
-            complex_signal plane(w, vc_complex{0.0F, 0.0F});
+            vc_complex_signal plane(w, vc_complex{0.0F, 0.0F});
             plane[1] = vc_complex{1.0F, 0.0F};
 
-            const grid2d g = grid2d::checked(vc::math::complex_view{plane}, w,
+            const grid2d g = grid2d::checked(vc::math::vc_complex_view{plane}, w,
                                              h, "08_spectrum_viz");
-            const vc::pixelops::spectrum_dump dump =
-                vc::pixelops::spectrum_viz(vc::math::dft2d(plane, g), g);
+            const vc::debug::spectrum_dump dump =
+                vc::debug::spectrum_viz(vc::math::dft2d(plane, g), g);
 
             float lo = 2.0F;
             float hi = -1.0F;
@@ -297,14 +297,14 @@ int main() {
         {
             constexpr std::uint32_t w = 4;
             constexpr std::uint32_t h = 1;
-            complex_signal spec(w, vc_complex{0.0F, 0.0F});
+            vc_complex_signal spec(w, vc_complex{0.0F, 0.0F});
             spec[0] = vc_complex{1000.0F, 0.0F};
             spec[1] = vc_complex{1.0F, 0.0F};
 
-            const grid2d g = grid2d::checked(vc::math::complex_view{spec}, w, h,
+            const grid2d g = grid2d::checked(vc::math::vc_complex_view{spec}, w, h,
                                              "08_spectrum_viz");
-            const vc::pixelops::spectrum_dump d =
-                vc::pixelops::spectrum_viz(spec, g);
+            const vc::debug::spectrum_dump d =
+                vc::debug::spectrum_viz(spec, g);
 
             expect(px(d.linear_magnitude, 2, 0) > 0.99F &&
                        px(d.log_magnitude, 2, 0) > 0.99F,
@@ -338,12 +338,12 @@ int main() {
         {
             constexpr std::uint32_t w = 4;
             constexpr std::uint32_t h = 2;
-            const complex_signal zeros(static_cast<std::size_t>(w) * h,
+            const vc_complex_signal zeros(static_cast<std::size_t>(w) * h,
                                        vc_complex{0.0F, 0.0F});
-            const grid2d g = grid2d::checked(vc::math::complex_view{zeros}, w,
+            const grid2d g = grid2d::checked(vc::math::vc_complex_view{zeros}, w,
                                              h, "08_spectrum_viz");
-            const vc::pixelops::spectrum_dump d =
-                vc::pixelops::spectrum_viz(zeros, g);
+            const vc::debug::spectrum_dump d =
+                vc::debug::spectrum_viz(zeros, g);
 
             bool all_black = true;
             for (vc::image_dim y = 0; y < h && all_black; ++y) {
@@ -378,7 +378,7 @@ int main() {
             const vc::image_dim x0 = (src.width() - side) / 2;
             const vc::image_dim y0 = (src.height() - side) / 2;
 
-            complex_signal plane(static_cast<std::size_t>(side) * side);
+            vc_complex_signal plane(static_cast<std::size_t>(side) * side);
             for (vc::image_dim y = 0; y < side; ++y) {
                 for (vc::image_dim x = 0; x < side; ++x) {
                     plane[static_cast<std::size_t>(y) * side + x] =
@@ -387,10 +387,10 @@ int main() {
                 }
             }
 
-            const grid2d g = grid2d::checked(vc::math::complex_view{plane},
+            const grid2d g = grid2d::checked(vc::math::vc_complex_view{plane},
                                              side, side, "08_spectrum_viz");
-            const vc::pixelops::spectrum_dump dump =
-                vc::pixelops::spectrum_viz(vc::math::dft2d(plane, g), g);
+            const vc::debug::spectrum_dump dump =
+                vc::debug::spectrum_viz(vc::math::dft2d(plane, g), g);
 
             std::cout << "\n  " << side << " x " << side
                       << " centre crop, channel 0\n"

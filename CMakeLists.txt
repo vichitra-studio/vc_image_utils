@@ -102,10 +102,10 @@ set(VC_LIB_SOURCES
     src/pixelops/vc_edge_policy.cpp
     src/pixelops/vc_warp.cpp
     src/pixelops/vc_convolve.cpp
-    src/pixelops/vc_spectrum_viz.cpp
     src/utils/vc_log.cpp
     src/utils/vc_perf.cpp
     src/debug/vc_image_dumper.cpp
+    src/debug/vc_spectrum_viz.cpp
     src/pipe/vc_pipe_contract.cpp
     src/pipe/vc_pipe_context.cpp
     src/pipe/vc_pipe_errors.cpp

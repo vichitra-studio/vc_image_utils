@@ -118,12 +118,20 @@ it — a warp takes a `vc_image`, so putting it in `vc::math` would invert the d
 and cost the layer its defining property. The split rule, stated once: **does it take a
 `vc_image`?** No → `vc::math`. Yes → `vc::pixelops`.
 
-**Returning one counts too** (added 2026-10-06, from `spectrum_viz`). The rule reads as
-being about the *dependency*, not the signature: a function that takes complex samples
-and **returns** `vc_image`s would still force `vc::math` to include `vc_image.h`, which
-is the exact inversion the layer exists to prevent. So `spectrum_viz` is `pixelops`
-despite taking no image. The short form: **if it needs to name `vc_image` in either
-direction, it is `pixelops`.**
+**Returning one counts too** (added 2026-10-06). The rule reads as being about the
+*dependency*, not the signature: a function that takes complex samples and **returns**
+`vc_image`s would still force `vc::math` to include `vc_image.h`, which is the exact
+inversion the layer exists to prevent. Short form: **if it needs to name `vc_image` in
+either direction, it is not `vc::math`.**
+
+**But ask a prior question first** (corrected 2026-10-07): **is it pipeline machinery at
+all?** `vc::pixelops` holds operations the pipeline *runs* — warp, convolve, edge
+policy. A tool that exists so a human can look at something and judge it is `vc::debug`,
+alongside `vc_image_dumper`. `spectrum_viz` was filed in `pixelops` on the strength of
+the input/output rule above, which was the wrong question: the rule settles math versus
+pixelops, and says nothing about whether the thing belongs in a pipeline module in the
+first place. Moved to `vc::debug`. Without this question, `pixelops` becomes the place
+anything image-shaped lands.
 
 Operations on images divide four ways by what an interface must give them — range (per-pixel
 value maps), domain (a sampler + an output-size policy + an edge policy), neighbourhood (a
@@ -768,14 +776,17 @@ include/vc/pixelops/vc_warp.h  — vc::pixelops: inverse-mapped affine warp + bi
 include/vc/pixelops/vc_convolve.h
                                — vc::pixelops: vc_kernel + convolve/correlate/separable —
                                  the first neighbourhood operation (src/pixelops/vc_convolve.cpp)
-include/vc/pixelops/vc_spectrum_viz.h
-                               — vc::pixelops: spectrum_dump + spectrum_viz — a 2-D
+include/vc/debug/vc_spectrum_viz.h
+                               — vc::debug: spectrum_dump + spectrum_viz — a 2-D
                                  spectrum turned into three openable PNGs: log(1+|F|),
                                  the same thing WITHOUT the log so the two can be
                                  compared by eye, and phase. All single-channel f32 in
                                  0..1, because the stb f32 write path multiplies by 255
-                                 (src/pixelops/vc_spectrum_viz.cpp). Here rather than in
-                                 math because it RETURNS vc_images — see 2.1
+                                 (src/debug/vc_spectrum_viz.cpp). In debug, not
+                                 pixelops: nothing in a pipeline calls it — it exists so
+                                 a human can look at a spectrum. Same job as
+                                 vc_image_dumper. (Filed in pixelops first, on the
+                                 input/output rule; moved 2026-10-07 — see 2.1.)
 
 src/main.cpp                  — application entry point (`imgtoy`)
 

@@ -12,8 +12,8 @@
 
 namespace vc::math {
 
-complex_signal to_signal(real_view real_samples) {
-    complex_signal out;
+vc_complex_signal to_signal(vc_real_view real_samples) {
+    vc_complex_signal out;
     out.reserve(real_samples.size());
     for (const vc::float32 v : real_samples) {
         out.emplace_back(v, 0.0F);
@@ -21,7 +21,7 @@ complex_signal to_signal(real_view real_samples) {
     return out;
 }
 
-complex_signal dft1d(complex_view x) {
+vc_complex_signal dft1d(vc_complex_view x) {
     // Empty in, empty out -- the header's contract, and the reason the
     // division below can never be by zero. Not an error: the transform of an
     // empty sequence IS the empty sequence, so there is nothing to report.
@@ -30,7 +30,7 @@ complex_signal dft1d(complex_view x) {
     }
     const double angle_scale =
         -2.0 * std::numbers::pi / static_cast<double>(x.size());
-    complex_signal out(x.size());
+    vc_complex_signal out(x.size());
     for (std::size_t k = 0; k < x.size(); ++k) {
         std::complex<double> sum{0.0, 0.0};
         for (std::size_t n = 0; n < x.size(); ++n) {
@@ -44,19 +44,19 @@ complex_signal dft1d(complex_view x) {
     return out;
 }
 
-complex_signal dft1d(real_view x) {
-    const complex_signal lifted = to_signal(x);
+vc_complex_signal dft1d(vc_real_view x) {
+    const vc_complex_signal lifted = to_signal(x);
     return dft1d(lifted);
 }
 
-complex_signal idft1d(complex_view spectrum) {
+vc_complex_signal idft1d(vc_complex_view spectrum) {
     if (spectrum.empty()) {
         return {};
     }
     const double angle_scale =
         2.0 * std::numbers::pi / static_cast<double>(spectrum.size());
     const double scale_factor = 1.0 / static_cast<double>(spectrum.size());
-    complex_signal out(spectrum.size());
+    vc_complex_signal out(spectrum.size());
     for (std::size_t n = 0; n < spectrum.size(); ++n) {
         std::complex<double> sum{0.0, 0.0};
         for (std::size_t k = 0; k < spectrum.size(); ++k) {
@@ -113,7 +113,7 @@ namespace {
 // functions. std::forward<T>(pass) would compile here and do precisely
 // nothing, which is worse than not writing it -- a reader would look for the
 // ownership question it implies and find none.
-using pass1d = complex_signal (*)(complex_view);
+using pass1d = vc_complex_signal (*)(vc_complex_view);
 
 // Row pass, then column pass. The whole 2-D transform.
 //
@@ -121,19 +121,19 @@ using pass1d = complex_signal (*)(complex_view);
 // the declarations. Nothing is validated here: grid2d cannot hold dimensions
 // that disagree with the buffer, so by the time `extent` exists there is
 // nothing left to check.
-complex_signal separable_passes(complex_view in, grid2d extent, pass1d pass) {
+vc_complex_signal separable_passes(vc_complex_view in, grid2d extent, pass1d pass) {
     const std::size_t width = extent.width();
     const std::size_t height = extent.height();
 
-    complex_signal out;
+    vc_complex_signal out;
     out.reserve(in.size()); // one allocation, not one per row
 
     // PASS 1 -- rows. A row is a contiguous slice, so the view over it costs
     // nothing; this is the cheap pass and it goes first for that reason.
     for (std::size_t y = 0; y < height; ++y) {
         const std::size_t row_start = y * width;
-        const complex_view row_view(in.data() + row_start, width);
-        const complex_signal transformed_row = pass(row_view);
+        const vc_complex_view row_view(in.data() + row_start, width);
+        const vc_complex_signal transformed_row = pass(row_view);
         out.insert(out.end(), transformed_row.begin(), transformed_row.end());
     }
 
@@ -143,11 +143,11 @@ complex_signal separable_passes(complex_view in, grid2d extent, pass1d pass) {
     // column is gathered once and then has N operations done on it, so the
     // cost is amortised over the arithmetic. See vc_dft.h.
     for (std::size_t kx = 0; kx < width; ++kx) {
-        complex_signal column(height);
+        vc_complex_signal column(height);
         for (std::size_t ky = 0; ky < height; ++ky) {
             column[ky] = out[(ky * width) + kx];
         }
-        const complex_signal transformed_column = pass(column);
+        const vc_complex_signal transformed_column = pass(column);
         for (std::size_t ky = 0; ky < height; ++ky) {
             out[(ky * width) + kx] = transformed_column[ky];
         }
@@ -159,28 +159,34 @@ complex_signal separable_passes(complex_view in, grid2d extent, pass1d pass) {
 } // namespace
 
 // Both entry points are now the same two passes with a different 1-D
-// transform. Passing `dft1d` bare is unambiguous despite the real_view
+// transform. Passing `dft1d` bare is unambiguous despite the vc_real_view
 // overload: the parameter's type is pass1d, and overload resolution against a
 // specific function-pointer target picks the matching one.
-complex_signal dft2d(complex_view plane, grid2d extent) {
+vc_complex_signal dft2d(vc_complex_view plane, grid2d extent) {
     return separable_passes(plane, extent, dft1d);
 }
 
-complex_signal idft2d(complex_view spectrum, grid2d extent) {
+vc_complex_signal idft2d(vc_complex_view spectrum, grid2d extent) {
     return separable_passes(spectrum, extent, idft1d);
 }
 
-complex_signal fftshift2d(complex_view plane, grid2d extent) {
-    // TODO(you): out[(x + W/2) % W, (y + H/2) % H] = in[x, y], integer
-    // division. The header pins the convention and 08_spectrum_viz asserts the
-    // exact index mapping on a 4x2 and a 5x3 grid.
-    //
-    // extent cannot disagree with plane.size() -- that is what grid2d is for --
-    // so there is nothing to validate here.
-    (void)plane;
-    (void)extent;
-    throw vc::vc_exception(vc::vc_error_code::invalid_argument,
-                           "fftshift2d: not implemented yet");
+vc_complex_signal fftshift2d(vc_complex_view plane, grid2d extent) {
+    // reserve() ALLOCATES but does not CREATE: size() stays 0, so every
+    // out[...] below was a write past the end of an empty vector. The index
+    // arithmetic was already correct -- only the container was. Construct at
+    // the right size instead, which also zero-fills, so a bin the loop
+    // somehow misses reads as 0 rather than as garbage.
+    vc_complex_signal out(extent.count());
+    const auto width = extent.width();
+    const auto height = extent.height();
+    for(std::size_t y = 0; y < height; ++y) {
+        for (std::size_t x = 0; x < width; ++x) {
+            const std::size_t shifted_x = (x + (width / 2)) % width;
+            const std::size_t shifted_y = (y + (height / 2)) % height;
+            out[(shifted_y * width) + shifted_x] = plane[(y * width) + x];
+        }
+    }
+    return out;
 }
 
 } // namespace vc::math

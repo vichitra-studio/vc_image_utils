@@ -172,7 +172,7 @@ using vc_complex = std::complex<vc::float32>;
 // A sequence of samples, OWNED. The same type serves as a signal and as a
 // spectrum, because the transform is a change of basis and not a change of
 // kind.
-using complex_signal = std::vector<vc_complex>;
+using vc_complex_signal = std::vector<vc_complex>;
 
 // The same sequence, BORROWED. Every entry point below follows one rule:
 //
@@ -188,16 +188,16 @@ using complex_signal = std::vector<vc_complex>;
 // This matches vc_image::with_pixels, which already hands out a
 // std::span<const vc::buf_f32> rather than the underlying vector.
 //
-// complex_signal converts to complex_view implicitly, so chaining still reads
+// vc_complex_signal converts to vc_complex_view implicitly, so chaining still reads
 // the same: idft1d(dft1d(x)). The usual span caveat applies -- a view does not
-// extend a temporary's lifetime, so bind a result to a complex_signal, never
-// to a complex_view.
-using complex_view = std::span<const vc_complex>;
-using real_view = std::span<const vc::float32>;
+// extend a temporary's lifetime, so bind a result to a vc_complex_signal, never
+// to a vc_complex_view.
+using vc_complex_view = std::span<const vc_complex>;
+using vc_real_view = std::span<const vc::float32>;
 
 // Lift real samples into a complex signal, imaginary parts zero. Convenience
 // for callers whose data is a scanline rather than a spectrum.
-[[nodiscard]] complex_signal to_signal(real_view real_samples);
+[[nodiscard]] vc_complex_signal to_signal(vc_real_view real_samples);
 
 // ---- the transforms ---------------------------------------------------------
 
@@ -211,7 +211,7 @@ using real_view = std::span<const vc::float32>;
 // stays the reference because it is the literal definition.
 //
 // Output is the same length as the input. Empty in, empty out.
-[[nodiscard]] complex_signal dft1d(complex_view x);
+[[nodiscard]] vc_complex_signal dft1d(vc_complex_view x);
 
 // Forward DFT of REAL samples -- identical to dft1d(to_signal(x)), provided
 // because image data is real and the two-call form is ceremony at every call
@@ -232,12 +232,12 @@ using real_view = std::span<const vc::float32>;
 // symmetry to compute only N/2+1 bins for half the work, which is what Smith's
 // Ch 8 real DFT is and what FFTW calls r2c -- and it belongs at P4, where
 // FFTW replaces this.
-[[nodiscard]] complex_signal dft1d(real_view x);
+[[nodiscard]] vc_complex_signal dft1d(vc_real_view x);
 
 // Inverse DFT, O(N^2). Same sum with the sign flipped and a 1/N applied.
 //
 // Empty in, empty out -- which is also why the 1/N cannot divide by zero.
-[[nodiscard]] complex_signal idft1d(complex_view spectrum);
+[[nodiscard]] vc_complex_signal idft1d(vc_complex_view spectrum);
 
 // ---- the 2-D transforms -----------------------------------------------------
 //
@@ -356,7 +356,7 @@ using real_view = std::span<const vc::float32>;
 // is no sensible answer to "the DFT of a 0-by-7 image". vc_grid2d.h argues
 // this at length, and vc_image_writer::validated() has refused zero-sized
 // images since P1, so this is the library's existing position, not a new one.
-[[nodiscard]] complex_signal dft2d(complex_view plane, grid2d extent);
+[[nodiscard]] vc_complex_signal dft2d(vc_complex_view plane, grid2d extent);
 
 // Inverse 2-D DFT. Two idft1d passes, so the 1/(width*height) arrives for
 // free -- see the scaling note above.
@@ -367,7 +367,7 @@ using real_view = std::span<const vc::float32>;
 // away the only signal that says a frequency-domain filter was not
 // twin-symmetric -- which is what 06_dft check 8b exists to assert, and what
 // conv_theorem will need in week 6.
-[[nodiscard]] complex_signal idft2d(complex_view spectrum, grid2d extent);
+[[nodiscard]] vc_complex_signal idft2d(vc_complex_view spectrum, grid2d extent);
 
 // Move DC from index 0 to the middle of each axis, for DISPLAY only.
 //
@@ -406,6 +406,6 @@ using real_view = std::span<const vc::float32>;
 // shift needs a rotation by ceil(N/2) instead, which this function does not
 // provide because nothing here needs to invert a display transform. Filter in
 // UNSHIFTED order and shift only on the way to a PNG.
-[[nodiscard]] complex_signal fftshift2d(complex_view plane, grid2d extent);
+[[nodiscard]] vc_complex_signal fftshift2d(vc_complex_view plane, grid2d extent);
 
 } // namespace vc::math
