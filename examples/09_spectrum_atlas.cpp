@@ -11,6 +11,7 @@
 //
 //     09_<name>.png            the pattern
 //     09_<name>_spectrum.png   its log-magnitude spectrum, DC centred
+//     09_<name>_phase.png      its phase, DC centred, mid-grey = zero phase
 //
 // and prints the expected reading plus the measured DC:median. Read the
 // prediction, look at the picture, and only then read on.
@@ -291,6 +292,13 @@ int main() {
             writer.write(out_dir + "/09_" + e.name + "_spectrum.png",
                          d.log_magnitude, png);
 
+            // Phase too, for every entry. Magnitude alone cannot distinguish
+            // 02 from 03 -- their spectra are pixel-identical -- and the
+            // phase dump is the only place the difference between those two
+            // pictures is written down. Mid-grey (0.5) is zero phase.
+            writer.write(out_dir + "/09_" + e.name + "_phase.png", d.phase,
+                         png);
+
             std::cout << "  " << std::left << std::setw(26) << e.name
                       << std::right << std::setw(10) << std::fixed
                       << std::setprecision(1) << d.dc_to_median << "   "
@@ -309,7 +317,7 @@ int main() {
                       << '\n';
         }
 
-        std::cout << "\n  " << atlas.size() * 2 << " PNGs in " << out_dir
+        std::cout << "\n  " << atlas.size() * 3 << " PNGs in " << out_dir
                   << "\n  Start with 02 and 03: two different pictures, one "
                      "identical spectrum.\n";
 
