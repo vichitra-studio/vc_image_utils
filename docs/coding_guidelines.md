@@ -118,6 +118,13 @@ it — a warp takes a `vc_image`, so putting it in `vc::math` would invert the d
 and cost the layer its defining property. The split rule, stated once: **does it take a
 `vc_image`?** No → `vc::math`. Yes → `vc::pixelops`.
 
+**Returning one counts too** (added 2026-10-06, from `spectrum_viz`). The rule reads as
+being about the *dependency*, not the signature: a function that takes complex samples
+and **returns** `vc_image`s would still force `vc::math` to include `vc_image.h`, which
+is the exact inversion the layer exists to prevent. So `spectrum_viz` is `pixelops`
+despite taking no image. The short form: **if it needs to name `vc_image` in either
+direction, it is `pixelops`.**
+
 Operations on images divide four ways by what an interface must give them — range (per-pixel
 value maps), domain (a sampler + an output-size policy + an edge policy), neighbourhood (a
 kernel + a boundary policy) and reduction (a non-image result). Whether those want one
@@ -706,19 +713,35 @@ src/io/vc_io_fs.cpp           — vc::io filesystem helpers implementation
 src/utils/vc_log.cpp          — vc::utils::log implementation
 src/utils/vc_perf.cpp         — vc::utils::perf implementation
 src/debug/vc_image_dumper.cpp — vc::debug implementation
-include/vc/core/vc_scalar.h    — vc: real32 — the library's real-number precision,
-                                 declared ONCE. A LEAF: includes nothing, and must stay
-                                 that way, so vc::math can include it without acquiring
-                                 a dependency on image machinery (see 2.1). buf_f32 is
-                                 defined in terms of it and stays a separate NAME so it
-                                 remains greppable as "pixel data"; vc_dft.h spells the
-                                 same type real32 because a spectrum coefficient is not
-                                 pixel data. Header-only.
+include/vc/core/vc_scalar.h    — vc: float32 (and element_count) — the library's
+                                 real-number precision, declared ONCE. A LEAF: includes
+                                 nothing, and must stay that way, so vc::math can
+                                 include it without acquiring a dependency on image
+                                 machinery (see 2.1). buf_f32 is defined in terms of it
+                                 and stays a separate NAME so it remains greppable as
+                                 "pixel data"; vc_dft.h spells the same type float32
+                                 because a spectrum coefficient is not pixel data.
+                                 Header-only. (Name corrected 2026-10-06: this entry
+                                 said real32, which the header has never spelled.)
 include/vc/math/vc_linalg.h    — vc::math: vc_vec2/3, vc_mat2/3, apply/compose/invert,
                                  dot/norm/project (header + src/math/vc_linalg.cpp).
-                                 ⚠ still spells its precision as bare `float` in ~14
-                                 places rather than vc::real32 — pre-dates vc_scalar.h,
-                                 not yet retrofitted
+                                 (A ⚠ here said it still spelled its precision as bare
+                                 `float` in ~14 places. RETROFITTED — removed
+                                 2026-10-06; vc_linalg.h and vc_transform.h now carry
+                                 zero bare `float`. The warning had outlived the work,
+                                 which is worse than no warning: it tells a reader
+                                 there is a job to do that is already done.)
+include/vc/math/vc_grid2d.h    — vc::math: grid_dim + grid2d::checked — a 2-D extent
+                                 that is KNOWN to agree with its buffer's length
+                                 (src/math/vc_grid2d.cpp). The only route in is
+                                 checked(), so a function taking one has nothing left
+                                 to validate — a parameter you cannot construct beats a
+                                 helper you must remember to call, which is why dft2d
+                                 shipped with no dimension check despite its own header
+                                 documenting the exact check to write. uint32_t
+                                 dimensions so width*height provably cannot overflow a
+                                 size_t. Names an extent WITHOUT image vocabulary, same
+                                 layering reason as vc_scalar.h
 include/vc/math/vc_transform.h — vc::math: affine transform builders in homogeneous
                                  coordinates (src/math/vc_transform.cpp)
 include/vc/math/vc_dft.h       — vc::math: vc_complex/complex_signal + dft1d/idft1d —
@@ -726,8 +749,16 @@ include/vc/math/vc_dft.h       — vc::math: vc_complex/complex_signal + dft1d/i
                                  pins the e^(-i...) sign convention as a cross-phase
                                  contract (src/math/vc_dft.cpp). Lives here and not in
                                  pixelops by the rule in 2.1: it takes no vc_image.
-                                 Week 6's fft1d joins it; fft2d and spectrum_viz do
-                                 take a vc_image and go to pixelops.
+                                 Also carries dft2d/idft2d (row pass first, then
+                                 columns — a row is a contiguous view, a column must be
+                                 gathered) and fftshift2d, the display-only reordering
+                                 that moves DC to the centre.
+                                 (Corrected 2026-10-06. This said "Week 6's fft1d joins
+                                 it; fft2d and spectrum_viz do take a vc_image and go to
+                                 pixelops" — wrong three ways: fft1d was dropped from the
+                                 phase, the 2-D transform takes a complex_view and so
+                                 stays HERE, and spectrum_viz takes no image either —
+                                 it goes to pixelops for RETURNING them. See 2.1.)
 include/vc/pixelops/vc_edge_policy.h
                                — vc::pixelops: vc_edge_policy + fetch — what it means to read
                                  a pixel the image does not have. Depends on neither warp nor
@@ -737,6 +768,14 @@ include/vc/pixelops/vc_warp.h  — vc::pixelops: inverse-mapped affine warp + bi
 include/vc/pixelops/vc_convolve.h
                                — vc::pixelops: vc_kernel + convolve/correlate/separable —
                                  the first neighbourhood operation (src/pixelops/vc_convolve.cpp)
+include/vc/pixelops/vc_spectrum_viz.h
+                               — vc::pixelops: spectrum_dump + spectrum_viz — a 2-D
+                                 spectrum turned into three openable PNGs: log(1+|F|),
+                                 the same thing WITHOUT the log so the two can be
+                                 compared by eye, and phase. All single-channel f32 in
+                                 0..1, because the stb f32 write path multiplies by 255
+                                 (src/pixelops/vc_spectrum_viz.cpp). Here rather than in
+                                 math because it RETURNS vc_images — see 2.1
 
 src/main.cpp                  — application entry point (`imgtoy`)
 
