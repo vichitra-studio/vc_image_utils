@@ -369,4 +369,43 @@ using real_view = std::span<const vc::float32>;
 // conv_theorem will need in week 6.
 [[nodiscard]] complex_signal idft2d(complex_view spectrum, grid2d extent);
 
+// Move DC from index 0 to the middle of each axis, for DISPLAY only.
+//
+// dft2d returns bins in the order the transform produces them, which puts DC
+// at index 0 and the finest detail in the middle. In 2-D that places low
+// frequency at the four CORNERS of the picture and the finest detail at the
+// centre -- backwards from how an image is read. See
+// vc_docs/curriculum/notes/waves_and_signals.txt section 7d for the N=8 table.
+//
+// This is a pure reordering: no arithmetic, nothing gained or lost. It is here
+// in vc::math rather than pixelops because it takes and returns complex
+// samples and never sees a vc_image (the 2.1 rule).
+//
+// ---- THE CONVENTION, BECAUSE floor IS A CHOICE AT ODD N ----
+//
+// grid2d accepts any non-zero extent, so odd widths are legal, and "rotate by
+// N/2" does not say which way to round. Pinned here, per axis:
+//
+//     out[(x + W/2) % W, (y + H/2) % H]  =  in[x, y]        INTEGER division
+//
+// so DC lands at (W/2, H/2) with the division truncating. Worked both ways:
+//
+//     N = 4, N/2 = 2   output reads  in[2] in[3] in[0] in[1]  =  -2 -1  0 +1
+//                                                 ^ DC at index 2
+//     N = 5, N/2 = 2   output reads  in[3] in[4] in[0] in[1] in[2]
+//                                                 ^ DC at index 2  =  -2 -1 0 +1 +2
+//
+// Declaring this is not ceremony. An undeclared edge case is exactly how
+// dft1d's empty-input contract went wrong and how dft2d shipped with no
+// dimension validation at all.
+//
+// ---- NOT ITS OWN INVERSE AT ODD N ----
+//
+// Applying it twice shifts by 2*(N/2). For even N that is N, i.e. the
+// identity. For odd N it is N-1, which is NOT the identity -- undoing an odd
+// shift needs a rotation by ceil(N/2) instead, which this function does not
+// provide because nothing here needs to invert a display transform. Filter in
+// UNSHIFTED order and shift only on the way to a PNG.
+[[nodiscard]] complex_signal fftshift2d(complex_view plane, grid2d extent);
+
 } // namespace vc::math

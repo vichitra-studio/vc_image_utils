@@ -102,6 +102,7 @@ set(VC_LIB_SOURCES
     src/pixelops/vc_edge_policy.cpp
     src/pixelops/vc_warp.cpp
     src/pixelops/vc_convolve.cpp
+    src/pixelops/vc_spectrum_viz.cpp
     src/utils/vc_log.cpp
     src/utils/vc_perf.cpp
     src/debug/vc_image_dumper.cpp
@@ -361,6 +362,7 @@ if(VC_BUILD_EXAMPLES)
         05_convolve
         06_dft
         07_dft2d
+        08_spectrum_viz
     )
 
     foreach(example ${VC_EXAMPLE_TARGETS})

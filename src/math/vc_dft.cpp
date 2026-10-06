@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 #include "vc/math/vc_dft.h"
+#include "vc/core/vc_exception.h"
 #include "vc/core/vc_scalar.h"
 
 #include <complex>
@@ -167,6 +168,19 @@ complex_signal dft2d(complex_view plane, grid2d extent) {
 
 complex_signal idft2d(complex_view spectrum, grid2d extent) {
     return separable_passes(spectrum, extent, idft1d);
+}
+
+complex_signal fftshift2d(complex_view plane, grid2d extent) {
+    // TODO(you): out[(x + W/2) % W, (y + H/2) % H] = in[x, y], integer
+    // division. The header pins the convention and 08_spectrum_viz asserts the
+    // exact index mapping on a 4x2 and a 5x3 grid.
+    //
+    // extent cannot disagree with plane.size() -- that is what grid2d is for --
+    // so there is nothing to validate here.
+    (void)plane;
+    (void)extent;
+    throw vc::vc_exception(vc::vc_error_code::invalid_argument,
+                           "fftshift2d: not implemented yet");
 }
 
 } // namespace vc::math
