@@ -99,10 +99,17 @@ struct spectrum_dump {
     //
     // ---- ZERO WHEN THE MEDIAN IS ZERO, AND THAT MEANS UNDEFINED ----
     //
-    // Set to 0 when median_magnitude is 0, which is NOT a small ratio -- it
-    // is no ratio at all. This is not a rare corner: any sparse synthetic
-    // spectrum has it. A pure cosine on an 8x4 grid puts energy in 2 bins out
-    // of 32, so 30 bins are exactly zero and the median is 0.
+    // Set to 0 when the median is indistinguishable from zero, which is NOT a
+    // small ratio -- it is no ratio at all. Not a rare corner: any sparse
+    // synthetic spectrum has it. A pure cosine on an 8x4 grid puts energy in 2
+    // bins out of 32.
+    //
+    // The test is RELATIVE -- median > max * 1e-6 -- and an earlier version
+    // testing `> 0` was wrong in a way worth recording. "Exactly zero" does
+    // not survive floating point: a flat field's non-DC bins come back around
+    // 1e-27 rather than 0, the guard never fired, and the atlas printed a
+    // DC:median of 4.2e30 for a uniform grey square. Meaningless, and it did
+    // not LOOK meaningless.
     //
     // So this number is only meaningful on a REAL image. That is also why the
     // example prints it there and asserts it only on a hand-built case whose

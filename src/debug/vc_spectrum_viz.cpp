@@ -102,11 +102,20 @@ spectrum_dump spectrum_viz(vc::math::vc_complex_view spectrum,
                      mags.end());
     const float median_magnitude = mags[mid];
 
-    // Zero when the median is zero, which means UNDEFINED and not small. Any
-    // sparse synthetic spectrum lands here -- a cosine on an 8x4 grid has 30
-    // of its 32 bins exactly zero.
-    const float dc_to_median =
-        median_magnitude > 0.0F ? dc_magnitude / median_magnitude : 0.0F;
+    // Zero when the median is zero, meaning UNDEFINED and not small. Any
+    // sparse synthetic spectrum lands here.
+    //
+    // RELATIVE, not `> 0.0F` -- corrected after the guard failed to fire.
+    // "Exactly zero" is a fiction in floating point: a flat field's non-DC
+    // bins should all be 0, but the transform leaves noise around 1e-27, and
+    // dividing DC by THAT reported a ratio of 4.2e30. The number was
+    // meaningless and did not look meaningless, which is the worst
+    // combination. A bin below max * 1e-6 is indistinguishable from zero for
+    // float32 storage, so treat the median as absent there.
+    constexpr float k_noise_floor = 1e-6F;
+    const float dc_to_median = median_magnitude > max_mag * k_noise_floor
+                                   ? dc_magnitude / median_magnitude
+                                   : 0.0F;
 
     // Counted on the NORMALISED values, because that is what the PNG holds.
     // With max_mag == 0 every normalised value is 0, so this comes out 1.0
