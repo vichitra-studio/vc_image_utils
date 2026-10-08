@@ -364,6 +364,7 @@ if(VC_BUILD_EXAMPLES)
         07_dft2d
         08_spectrum_viz
         09_spectrum_atlas
+        10_defect_atlas
     )
 
     foreach(example ${VC_EXAMPLE_TARGETS})
