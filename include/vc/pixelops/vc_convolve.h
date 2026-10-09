@@ -187,7 +187,7 @@ using kernel_offset = std::int64_t;
 // seam: these are plain `float`, deliberately NOT the vc::buf_f32 that pixel
 // storage uses. Kernel weights and pixel elements are different things and are
 // free to stay different types.
-using kernel_weights = std::vector<float>;
+using kernel_weights = std::vector<vc::float32>;
 
 // A 2-D convolution kernel: weights, plus the declaration that its centre tap
 // is the origin.
