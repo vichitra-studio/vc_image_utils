@@ -121,6 +121,35 @@ using pass1d = vc_complex_signal (*)(vc_complex_view);
 // the declarations. Nothing is validated here: grid2d cannot hold dimensions
 // that disagree with the buffer, so by the time `extent` exists there is
 // nothing left to check.
+// A grid2d certifies that width * height equals SOME count. It does NOT
+// certify that it matches the span it is passed alongside -- the dimensions-only
+// construction grid2d::checked(w*h, w, h, ...) is a tautology that anyone can
+// write, and frequency_extent legitimately needs it.
+//
+// Without this check that gap is a live out-of-bounds READ, not a wrong answer:
+// separable_passes() slices `width` elements per row straight out of the span,
+// so a 4-element plane with a 6x1 extent reads two elements past the
+// allocation. Proven under ASan (heap-buffer-overflow in dft1d, via
+// separable_passes) while reviewing convolve_frequency, which set up exactly
+// that mismatch by transforming an unpadded plane at a padded extent.
+//
+// One comparison, at the three entry points that take a span and an extent.
+// It costs nothing and it is what makes a dimensions-only grid2d safe to hand
+// around at all.
+void require_matching_extent(vc_complex_view plane,
+                             grid2d extent,
+                             const char* caller) {
+    if (plane.size() != extent.count()) {
+        throw vc::vc_exception(
+            vc::vc_error_code::invalid_argument,
+            std::string(caller) + ": plane holds " +
+                std::to_string(plane.size()) + " samples but extent " +
+                std::to_string(extent.width()) + " x " +
+                std::to_string(extent.height()) + " needs " +
+                std::to_string(extent.count()));
+    }
+}
+
 vc_complex_signal separable_passes(vc_complex_view in, grid2d extent, pass1d pass) {
     const std::size_t width = extent.width();
     const std::size_t height = extent.height();
@@ -163,14 +192,17 @@ vc_complex_signal separable_passes(vc_complex_view in, grid2d extent, pass1d pas
 // overload: the parameter's type is pass1d, and overload resolution against a
 // specific function-pointer target picks the matching one.
 vc_complex_signal dft2d(vc_complex_view plane, grid2d extent) {
+    require_matching_extent(plane, extent, "dft2d");
     return separable_passes(plane, extent, dft1d);
 }
 
 vc_complex_signal idft2d(vc_complex_view spectrum, grid2d extent) {
+    require_matching_extent(spectrum, extent, "idft2d");
     return separable_passes(spectrum, extent, idft1d);
 }
 
 vc_complex_signal fftshift2d(vc_complex_view plane, grid2d extent) {
+    require_matching_extent(plane, extent, "fftshift2d");
     // reserve() ALLOCATES but does not CREATE: size() stays 0, so every
     // out[...] below was a write past the end of an empty vector. The index
     // arithmetic was already correct -- only the container was. Construct at

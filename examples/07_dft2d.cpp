@@ -247,6 +247,19 @@ int main() {
             // What CAN still go wrong: a grid2d built against a different
             // buffer of the same length. Two arguments cannot rule that out;
             // only bundling the span and the extent into one type could.
+            //
+            // UPDATED 2026-10-10. That note understated it. The dangerous case
+            // is not a different buffer of the SAME length -- it is a buffer of
+            // a DIFFERENT length, reachable because
+            // grid2d::checked(w*h, w, h, ...) is a tautology whose count check
+            // cannot fail, and frequency_extent legitimately needs that form to
+            // return an extent before any buffer exists.
+            //
+            // Found while reviewing convolve_frequency, which transformed an
+            // unpadded 4-sample plane at a padded 6x1 extent. ASan: heap-buffer
+            // -overflow, READ of size 4, in dft1d via separable_passes. The
+            // next block is the regression test, and dft2d/idft2d/fftshift2d
+            // now each check the span against the extent.
             const grid2d ok = grid2d::checked(v, 4, 2, "test");
             expect(ok.width() == 4 && ok.height() == 2 && ok.count() == 8,
                    "a valid grid2d reports its own dimensions and count");
@@ -261,6 +274,53 @@ int main() {
                                std::string::npos;
             }
             expect(named_caller, "the grid2d message names the caller");
+        }
+
+        // ---- the span must match the extent, at every 2-D entry point -----
+        //
+        // A dimensions-only grid2d says nothing about the buffer beside it, so
+        // each function that takes both has to check. Without this the read
+        // runs off the allocation rather than returning a wrong answer -- see
+        // the ASan trace referenced above.
+        {
+            const vc_complex_signal four(4, vc_complex{1.0F, 0.0F});
+            const vc_complex_view v{four};
+
+            // The tautological construction: count computed FROM the
+            // dimensions, so grid2d itself cannot object.
+            const grid2d six =
+                grid2d::checked(vc::element_count{6}, 6, 1, "test");
+
+            auto rejects = [](auto&& call) {
+                try {
+                    call();
+                } catch (const vc::vc_exception& e) {
+                    return e.code() == vc::vc_error_code::invalid_argument;
+                } catch (...) {
+                    return false;
+                }
+                return false;
+            };
+
+            expect(rejects([&] { (void)dft2d(v, six); }),
+                   "dft2d rejects a plane shorter than its extent");
+            expect(rejects([&] { (void)idft2d(v, six); }),
+                   "idft2d rejects a spectrum shorter than its extent");
+            expect(rejects([&] { (void)vc::math::fftshift2d(v, six); }),
+                   "fftshift2d rejects a plane shorter than its extent");
+
+            // And a LONGER plane is refused too -- it would silently transform
+            // a prefix and discard the rest, which is a wrong answer rather
+            // than a crash and therefore worse.
+            const vc_complex_signal nine(9, vc_complex{1.0F, 0.0F});
+            expect(rejects([&] { (void)dft2d(vc_complex_view{nine}, six); }),
+                   "dft2d rejects a plane LONGER than its extent");
+
+            // The matching case still works, so the check is not just a
+            // blanket refusal.
+            const vc_complex_signal six_samples(6, vc_complex{1.0F, 0.0F});
+            expect(dft2d(vc_complex_view{six_samples}, six).size() == 6,
+                   "a plane that matches its extent still transforms");
         }
 
         // ---- 3. a single row reduces to dft1d --------------------------
