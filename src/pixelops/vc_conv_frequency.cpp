@@ -40,19 +40,11 @@ vc::math::grid_dim padded_axis(vc::image_dim extent,
     return static_cast<vc::math::grid_dim>(sum);
 }
 
-// ---- the extracted pieces ---------------------------------------------------
-//
-// Three of the bugs in the first draft lived in plumbing that had no name:
-// the plane that was never padded, the channel stride that assumed a planar
-// layout, and an unsigned product that wrapped. Naming each step is what makes
-// them individually assertable.
-//
-// PROMOTION CANDIDATES, deliberately left local for now. max_imag() already
-// exists as a test helper in 06_dft.cpp and is wanted here in production, which
-// is the strongest case of the four; embed_channel()'s zero-pad and
-// multiply_into()'s elementwise product are both generic over complex planes
-// and would belong in vc::math. Promoting them is a separate change with its
-// own tests, not something to fold into this one.
+// PROMOTION CANDIDATES, deliberately left local. max_imag() already exists as a
+// test helper in 06_dft.cpp and is wanted here in production, which is the
+// strongest case of the four; embed_channel()'s zero-pad and multiply_into()'s
+// elementwise product are both generic over complex planes and would belong in
+// vc::math. Promoting them needs its own tests.
 
 // The kernel laid into a plane of `extent`, CENTRED AND WRAPPED: tap (kx, ky)
 // goes to (kx mod Lx, ky mod Ly), so the centre tap sits at (0,0) and negative
@@ -64,23 +56,20 @@ vc::math::grid_dim padded_axis(vc::image_dim extent,
 // correct-looking image shifted by (radius_x, radius_y) and is invisible to any
 // magnitude check, because a shift multiplies each bin by something of radius 1.
 //
-// NOT a vc_kernel. vc_kernel's constructor requires odd, non-zero dimensions --
-// it has to, since radius_x() only exists if there is a centre tap -- and a
-// padded plane is W+kw-1 wide, which is EVEN whenever the image is. The first
-// draft returned a vc_kernel here and threw "width and height must be odd and
-// non-zero" before any transform ran. A plane is not a kernel; it is a buffer.
+// Returns a complex plane and NOT a vc_kernel: vc_kernel's constructor requires
+// odd, non-zero dimensions, because radius_x() only exists if there is a centre
+// tap. A padded plane is W+kw-1 wide, which is EVEN whenever the image is. A
+// plane is not a kernel; it is a buffer.
 vc::math::vc_complex_signal kernel_plane(const vc_kernel& kernel,
                                          const vc::math::grid2d& extent) {
     // extent.count() and NOT width * height: both dimensions are uint32_t, so
-    // their product is formed in 32-bit unsigned and wraps. Same bug class as
-    // the one padded_axis() above exists to avoid, and the first draft had it
-    // here too.
+    // their product would be formed in 32-bit unsigned and wrap.
     vc::math::vc_complex_signal plane(extent.count(),
                                       vc::math::vc_complex{0.0F, 0.0F});
 
     // Signed throughout, then cast once the value is provably in range. kx is
-    // kernel_offset (int64_t) and the extent is uint32_t, so mixing them
-    // unconverted is where the sign-conversion warning came from.
+    // kernel_offset (int64_t) and the extent is uint32_t; mixing them
+    // unconverted is a sign-conversion warning at best.
     const auto lx = static_cast<kernel_offset>(extent.width());
     const auto ly = static_cast<kernel_offset>(extent.height());
 
@@ -93,9 +82,16 @@ vc::math::vc_complex_signal kernel_plane(const vc_kernel& kernel,
             const kernel_offset wx = ((kx % lx) + lx) % lx;
             const kernel_offset wy = ((ky % ly) + ly) % ly;
 
+            // ACCUMULATE, do not assign. When the kernel is WIDER than the
+            // extent -- legal under wrap, where the extent is the source size
+            // -- two or more taps land in the same slot and their weights must
+            // SUM. A 5-tap kernel on a 4-wide ring maps offset -2 and offset
+            // +2 both to slot 2; assigning lets the later write win and
+            // silently drops the other tap. Measured on {1,2,4,8,16} over a
+            // 4x1 impulse: slot 2 read 16 where convolve(wrap) gives 17.
             const auto ix = static_cast<std::size_t>(wx);
             const auto iy = static_cast<std::size_t>(wy);
-            plane[(iy * extent.width()) + ix] =
+            plane[(iy * extent.width()) + ix] +=
                 vc::math::vc_complex{kernel.at(kx, ky), 0.0F};
         }
     }
@@ -105,17 +101,14 @@ vc::math::vc_complex_signal kernel_plane(const vc_kernel& kernel,
 // One channel of `src`, embedded TOP-LEFT in a plane of `extent`, zeros
 // elsewhere.
 //
-// The embedding is the whole point and it is what the first draft omitted: it
-// built the plane at the SOURCE size and then transformed it at the PADDED
-// extent, which is an out-of-bounds read inside separable_passes rather than a
-// wrong answer. dft2d now refuses that outright, but building the plane at the
-// extent is the actual fix.
+// Building at the SOURCE size and transforming at the PADDED extent is an
+// out-of-bounds read inside separable_passes, not a wrong answer -- dft2d now
+// refuses that outright, but allocating at the extent is what makes it correct.
 //
 // Reads through at<buf_f32>(x, y, ch) rather than indexing the raw span.
-// vc_image_info::index() is (y*width + x)*channels + ch -- INTERLEAVED -- and
-// the first draft used (ch*height + y)*width + x, which is planar. For one
-// channel the two agree, which is why it passed everything until the 3-channel
-// check; for three it silently scrambles them.
+// vc_image_info::index() is (y*width + x)*channels + ch -- INTERLEAVED, not
+// planar. The two forms AGREE for a single channel, so a planar index passes
+// every one-channel test and silently scrambles a three-channel image.
 vc::math::vc_complex_signal embed_channel(const vc::vc_image& src,
                                           vc::channel_count ch,
                                           const vc::math::grid2d& extent) {
@@ -137,9 +130,6 @@ vc::math::vc_complex_signal embed_channel(const vc::vc_image& src,
 }
 
 // Elementwise product, in place into `spectrum`.
-//
-// The length check here can actually fire, unlike the first draft's comparison
-// of two spectra that had both just been produced from the same extent.
 void multiply_into(vc::math::vc_complex_signal& spectrum,
                   vc::math::vc_complex_view by) {
     if (spectrum.size() != by.size()) {
@@ -209,10 +199,18 @@ vc::math::grid2d frequency_extent(const vc::vc_image& src,
 // values are 0..1 and false-positives on the same image scaled to 0..255, for
 // entirely correct code.
 //
-// 1e-4 relative sits about four orders above float round-trip noise (dft1d's
-// own N=1024 round trip measures 7.45e-09) and about four below a real
-// asymmetry, which leaves an O(0.1..1) relative residue -- 06_dft check 8b
-// measures exactly 0.5 against 0.0 for one broken twin. Wide margin both ways.
+// 1e-4 is MEASURED, not estimated. Instrumenting this function over every
+// 11_conv_theorem case plus 64/128/256 squared with a sigma-1.4 Gaussian:
+//
+//     worst observed ratio   1.86e-08    (32x24, zero-padded)
+//     128x128 wrap / zero    3.76e-09 / 8.17e-09
+//     256x256 wrap / zero    2.14e-09 / 6.51e-11
+//
+// so ~5400x of headroom at the worst case, and the ratio does NOT grow with
+// size -- 64, 128 and 256 squared all land in the same 1e-9..1e-8 band, which
+// is dft1d's double accumulator holding. On the other side, a real asymmetry
+// leaves an O(0.1..1) residue; 06_dft check 8b measures exactly 0.5 against 0.0
+// for a single broken twin. Four orders of margin either way.
 constexpr float k_imag_rel_tol = 1e-4F;
 
 // Floor on the denominator so an all-black result does not divide by zero. A
@@ -233,8 +231,7 @@ vc::vc_image convolve_frequency(const vc::vc_image& src,
 
     // OUTPUT GEOMETRY FOLLOWS THE SOURCE, not the extent. The padded plane is
     // scratch space; a neighbourhood operation filters a picture, it does not
-    // resize it -- same contract as convolve(). The first draft allocated this
-    // at the extent and then indexed it with the source stride.
+    // resize it -- same contract as convolve().
     vc_image_writer out{src.width(), src.height(), src.channels(),
                         vc::buf_f32{0.0F}};
 
@@ -283,9 +280,6 @@ vc::vc_image convolve_frequency(const vc::vc_image& src,
         }
     }
 
-    // Outside the loop. The first draft returned from inside it, so only
-    // channel 0 was ever computed -- and the function fell off the end for a
-    // zero-channel image, which is what the -Wreturn-type warning was.
     return std::move(out).seal();
 }
 

@@ -478,6 +478,107 @@ int main() {
                    "wrap: frequency == SEPARABLE spatial, 3 channels");
         }
 
+        // ---- 10. A KERNEL WIDER THAN THE IMAGE, which collides under wrap
+        //
+        // Added after a review found this silently wrong. Under wrap the extent
+        // IS the source extent, so a kernel wider than the image maps two or
+        // more taps into the same plane slot and their weights must SUM. A
+        // 5-tap kernel on a 4-wide ring sends offset -2 and offset +2 both to
+        // slot 2; assigning instead of accumulating lets the later write win
+        // and drops the other tap.
+        //
+        // Weights are powers of two so every contribution is identifiable in
+        // the result -- 17 can only be 1+16, which is exactly the collision.
+        //
+        // x = [1,0,0,0], h = {1,2,4,8,16} at offsets -2..+2. Since x is an
+        // impulse at 0, the output IS the kernel plane, so these four numbers
+        // read it directly:
+        //
+        //   WRAP   y[0] = h( 0)          = 4
+        //          y[1] = h(+1)          = 8
+        //          y[2] = h(-2) + h(+2)  = 1 + 16 = 17   <- THE COLLISION
+        //          y[3] = h(-1)          = 2
+        //
+        //   ZERO   extent 4+5-1 = 8, so no two offsets share a slot
+        //          y = [4, 8, 16, 0]
+        {
+            const vc::vc_image impulse =
+                make_image(4, 1, 1, {1.0F, 0.0F, 0.0F, 0.0F});
+            const vc_kernel k5{5, 1, {1.0F, 2.0F, 4.0F, 8.0F, 16.0F}};
+
+            const vc::vc_image w =
+                convolve_frequency(impulse, k5, vc_edge_policy::wrap);
+            expect(near(pixel(w, 0, 0), 4.0F, 1e-4F) &&
+                       near(pixel(w, 1, 0), 8.0F, 1e-4F) &&
+                       near(pixel(w, 2, 0), 17.0F, 1e-4F) &&
+                       near(pixel(w, 3, 0), 2.0F, 1e-4F),
+                   "wide kernel, wrap: colliding taps SUM to 17, not 16");
+
+            const vc::vc_image z =
+                convolve_frequency(impulse, k5, vc_edge_policy::zero);
+            expect(near(pixel(z, 0, 0), 4.0F, 1e-4F) &&
+                       near(pixel(z, 1, 0), 8.0F, 1e-4F) &&
+                       near(pixel(z, 2, 0), 16.0F, 1e-4F) &&
+                       near(pixel(z, 3, 0), 0.0F, 1e-4F),
+                   "wide kernel, zero: padded wide enough, no collision");
+
+            // And against the spatial path, which accumulates per tap and so
+            // was right all along.
+            expect(rel_diff(w, convolve(impulse, k5, vc_edge_policy::wrap)) <=
+                       1e-5F,
+                   "wide kernel, wrap: matches convolve(wrap)");
+            expect(rel_diff(z, convolve(impulse, k5, vc_edge_policy::zero)) <=
+                       1e-5F,
+                   "wide kernel, zero: matches convolve(zero)");
+        }
+
+        // ---- 11. the 1x1 identity kernel -------------------------------------
+        //
+        // The degenerate case, and the one where zero and wrap must AGREE:
+        // N+M-1 = N+1-1 = N, so the zero policy pads by nothing and the two
+        // paths are the same computation. A padding implementation that added a
+        // constant margin rather than kw-1 would differ here.
+        {
+            const vc::vc_image img = noise_image(8, 5, 1, 97U);
+            const vc_kernel scale3{1, 1, {3.0F}};
+
+            const vc::vc_image w =
+                convolve_frequency(img, scale3, vc_edge_policy::wrap);
+            const vc::vc_image z =
+                convolve_frequency(img, scale3, vc_edge_policy::zero);
+
+            expect(rel_diff(w, convolve(img, scale3, vc_edge_policy::wrap)) <=
+                       1e-5F,
+                   "1x1 kernel: wrap just scales the image");
+            expect(rel_diff(z, w) <= 1e-5F,
+                   "1x1 kernel: zero and wrap agree, because kw-1 == 0");
+        }
+
+        // ---- 12. ODD dimensions, both axes ---------------------------------
+        //
+        // Every other image in this file is even on both axes, so an off-by-one
+        // that only shows on an odd extent would pass the whole file. 5x3 with a
+        // 3x3 kernel gives odd source dims AND odd padded dims (7x5).
+        {
+            const vc::vc_image img = noise_image(5, 3, 1, 61U);
+            const vc_kernel asym{3, 3,
+                                 {0.0F, 0.1F, 0.2F,
+                                  0.3F, 0.4F, 0.0F,
+                                  0.0F, 0.0F, 0.5F}};
+
+            expect(frequency_extent(img, asym, vc_edge_policy::zero).width() ==
+                       7 &&
+                   frequency_extent(img, asym, vc_edge_policy::zero).height() ==
+                       5,
+                   "odd dims: 5x3 with 3x3 -> 7x5");
+            expect(rel_diff(convolve_frequency(img, asym, vc_edge_policy::wrap),
+                            convolve(img, asym, vc_edge_policy::wrap)) <= 1e-5F,
+                   "odd dims: wrap matches convolve(wrap)");
+            expect(rel_diff(convolve_frequency(img, asym, vc_edge_policy::zero),
+                            convolve(img, asym, vc_edge_policy::zero)) <= 1e-5F,
+                   "odd dims: zero matches convolve(zero)");
+        }
+
     } catch (const std::exception& e) {
         std::cerr << "EXCEPTION: " << e.what() << '\n';
         std::cout << "11_conv_theorem: " << passed << " / " << total
