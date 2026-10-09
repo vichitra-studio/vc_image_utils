@@ -579,6 +579,68 @@ int main() {
                    "odd dims: zero matches convolve(zero)");
         }
 
+        // ---- 13. collisions in BOTH axes, and more than two per slot ------
+        //
+        // Group 10 is 1-D and collides exactly one pair. A kernel wider than
+        // the image in BOTH axes collides on both, and a kernel more than twice
+        // the image collides THREE taps into one slot: 9x9 on a 4-wide ring
+        // sends offsets -4, 0 and +4 all to slot 0.
+        //
+        // Normalised weights deliberately. With raw weights 1..81 the outputs
+        // reach ~1500 and float error is proportionally visible -- measured
+        // 2.5e-07 relative, which is correct but only 40x inside the
+        // tolerance. Normalising keeps the margin at ~100x so this check fails
+        // for a real reason or not at all.
+        {
+            const vc::vc_image img = noise_image(4, 4, 1, 5U);
+            const vc_kernel k9{9, 9, std::vector<float>(81, 1.0F / 81.0F)};
+
+            expect(rel_diff(convolve_frequency(img, k9, vc_edge_policy::wrap),
+                            convolve(img, k9, vc_edge_policy::wrap)) <= 1e-5F,
+                   "9x9 on 4x4 wrap: THREE taps per slot, both axes");
+            expect(rel_diff(convolve_frequency(img, k9, vc_edge_policy::zero),
+                            convolve(img, k9, vc_edge_policy::zero)) <= 1e-5F,
+                   "9x9 on 4x4 zero: extent 12x12, so no collision at all");
+        }
+
+        // ---- 14. the smallest possible image -------------------------------
+        //
+        // grid2d refuses a zero dimension, so 1x1 is the floor. Worth pinning
+        // because it exercises dft1d at N=1 on both axes, where the transform
+        // is the identity and every loop bound is degenerate.
+        {
+            const vc::vc_image one = make_image(1, 1, 1, {0.25F});
+            const vc_kernel twice{1, 1, {2.0F}};
+            const vc::vc_image doubled =
+                convolve_frequency(one, twice, vc_edge_policy::wrap);
+            expect(doubled.width() == 1 && doubled.height() == 1 &&
+                       near(pixel(doubled, 0, 0), 0.5F, 1e-5F),
+                   "1x1 image with a 1x1 kernel scales and keeps its shape");
+
+            // A 1x1 image with a 3x3 kernel under zero: only the centre tap
+            // sees the pixel, so the answer is pixel x centre weight.
+            const vc_kernel box{3, 3, std::vector<float>(9, 1.0F / 9.0F)};
+            const vc::vc_image blurred =
+                convolve_frequency(one, box, vc_edge_policy::zero);
+            expect(near(pixel(blurred, 0, 0), 0.25F / 9.0F, 1e-6F),
+                   "1x1 image, 3x3 kernel, zero: only the centre tap lands");
+        }
+
+        // ---- 15. a non-f32 source is REJECTED ------------------------------
+        //
+        // The header says f32 only and the code checks it, but nothing
+        // exercised the check. An untested throw is an untested branch.
+        {
+            vc::vc_image_writer u8{4, 4, 1, vc::buf_u8{0}};
+            const vc::vc_image not_f32 = std::move(u8).seal();
+            const vc_kernel box{3, 3, std::vector<float>(9, 1.0F / 9.0F)};
+            expect(rejects([&] {
+                       (void)convolve_frequency(not_f32, box,
+                                                vc_edge_policy::wrap);
+                   }),
+                   "a non-f32 source is rejected");
+        }
+
     } catch (const std::exception& e) {
         std::cerr << "EXCEPTION: " << e.what() << '\n';
         std::cout << "11_conv_theorem: " << passed << " / " << total

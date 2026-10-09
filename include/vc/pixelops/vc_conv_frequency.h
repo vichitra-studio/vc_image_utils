@@ -140,17 +140,33 @@ namespace vc::pixelops {
 // relative to the result's RMS, per section F.3 -- an absolute tolerance that
 // passes on a dark image fails on a bright one for entirely correct code.
 //
-// ---- COST, HONESTLY ----
+// ---- COST, MEASURED ----
 //
-// Direct convolution is W*H*kw*kh multiplies. This path is three 2-D
-// transforms, and dft2d over dft1d is about 2*W*H*(W+H) per transform. At
-// 128x128 with a 5x5 kernel that is roughly 410k against 25M -- this path is
-// ~60x SLOWER, and it is slower for every size this library will use.
+// 128x128 image, 5x5 kernel, five runs averaged, wrap policy:
 //
-// Even with a real FFT the crossover is around kernel area > 3*log2(W*H),
-// which at 128x128 is about 42, i.e. somewhere near 7x7. Small kernels belong
-// in the spatial domain. The frequency domain is for filters that are DEFINED
-// in frequency (Wiener) or for kernels large enough to pay for the transforms.
+//     spatial convolve()          0.0035 s release   0.0169 s debug
+//     convolve_frequency()        0.0638 s release   0.3900 s debug
+//     ratio                       18.2x              23.1x
+//
+// So this path is roughly 20x slower, and slower at every size this library
+// will use. That is the expected outcome: it does three O(N^2) transforms
+// where the spatial path does W*H*kw*kh multiplies.
+//
+// AN EARLIER VERSION OF THIS NOTE SAID ~60x, derived from an operation count
+// (410k against 25M) rather than a clock. It was wrong by a factor of three,
+// because operation counts do not transfer between different inner loops: the
+// spatial path resolves an edge policy per tap, while the DFT's inner loop is
+// a tight multiply-add. Recorded because the mistake is reusable.
+//
+// UNVERIFIED, and suspect for the same reason: with a real FFT the crossover
+// is somewhere around kernel area > 3*log2(W*H), about 42 at 128x128, so
+// roughly 7x7. That estimate rests on the same operation-counting that just
+// proved wrong by 3x, and there is no FFT here to measure it against. Treat it
+// as an order of magnitude, not a number.
+//
+// What is NOT in doubt: small kernels belong in the spatial domain, and the
+// frequency domain is for filters DEFINED in frequency (P9a-ii's Wiener) or
+// for kernels large enough to pay for the transforms.
 
 // The extent the frequency path will transform at, for this source and policy.
 //
