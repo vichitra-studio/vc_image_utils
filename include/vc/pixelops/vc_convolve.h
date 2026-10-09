@@ -215,6 +215,9 @@ class vc_kernel {
     [[nodiscard]] vc::image_dim height() const noexcept {
         return height_;
     }
+    vc::element_count weight_count() const noexcept {
+        return weights_.size();
+    }
 
     // Offset from the centre tap to the edge of support, in each axis. A 3x3
     // has radius (1,1) and taps at offsets -1..+1; a 1x5 has radius (0,2).
