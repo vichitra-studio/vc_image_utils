@@ -106,6 +106,7 @@ set(VC_LIB_SOURCES
     src/utils/vc_perf.cpp
     src/debug/vc_image_dumper.cpp
     src/debug/vc_spectrum_viz.cpp
+    src/pixelops/vc_conv_frequency.cpp
     src/pipe/vc_pipe_contract.cpp
     src/pipe/vc_pipe_context.cpp
     src/pipe/vc_pipe_errors.cpp
@@ -365,6 +366,7 @@ if(VC_BUILD_EXAMPLES)
         08_spectrum_viz
         09_spectrum_atlas
         10_defect_atlas
+        11_conv_theorem
     )
 
     foreach(example ${VC_EXAMPLE_TARGETS})
