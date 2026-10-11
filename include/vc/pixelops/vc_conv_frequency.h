@@ -136,9 +136,23 @@ namespace vc::pixelops {
 // So the implementation must CHECK max|imag| before taking the real part, not
 // just call .real() and move on. Calling .real() blind throws away the
 // evidence that something upstream was not twin-symmetric, which is the
-// classic way a frequency-domain filter ships quietly wrong. The threshold is
-// relative to the result's RMS, per section F.3 -- an absolute tolerance that
-// passes on a dark image fails on a bright one for entirely correct code.
+// classic way a frequency-domain filter ships quietly wrong.
+//
+// The threshold is RELATIVE, per section F.3 -- an absolute one that passes on
+// a dark image fails on a bright one for entirely correct code. And it is
+// relative to the INPUT's RMS, not the output's, which is not interchangeable:
+// float noise in the imaginary part is proportional to the magnitudes the
+// arithmetic actually handled, and those are the input's. The output can be far
+// smaller without the intermediate sums being any smaller.
+//
+// Scaling against the output was a live FALSE POSITIVE. A SUM-TO-ZERO kernel --
+// a derivative, a Sobel column -- on a FLAT region gives an exactly-zero real
+// part, so the output RMS is 0, the floor takes over, the threshold collapses
+// to 1e-16, and float noise of ~1e-16 trips it. Measured: [-1,0,1] on a flat
+// 0.5 image under wrap threw on a correct answer. The same case under `zero`
+// PASSED, because padding creates a real edge that lifts the output RMS -- so
+// the bug was reachable through one policy only. P3 builds gradient and Sobel
+// operators, so sum-to-zero kernels are a category of input here, not a corner.
 //
 // ---- COST, MEASURED ----
 //

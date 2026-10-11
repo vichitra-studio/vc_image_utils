@@ -13,6 +13,8 @@
 #include "vc/utils/vc_strings.h"
 
 #include <algorithm>
+#include <array>
+#include <cstdio>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -200,22 +202,39 @@ vc::math::grid2d frequency_extent(const vc::vc_image& src,
 // entirely correct code.
 //
 // 1e-4 is MEASURED, not estimated. Instrumenting this function over every
-// 11_conv_theorem case plus 64/128/256 squared with a sigma-1.4 Gaussian:
+// 11_conv_theorem case plus 64/128/256 squared with a sigma-1.4 Gaussian, and a
+// derivative kernel on flat/noise/black -- all against the INPUT's RMS:
 //
-//     worst observed ratio   1.86e-08    (32x24, zero-padded)
-//     128x128 wrap / zero    3.76e-09 / 8.17e-09
-//     256x256 wrap / zero    2.14e-09 / 6.51e-11
+//     worst observed ratio   2.58e-08
+//     128x128 wrap / zero    3.27e-09 / 7.03e-09
+//     256x256 wrap / zero    1.86e-09 / 5.64e-11
+//     derivative on flat     3.57e-15 / 4.98e-15   (the former false positive)
 //
-// so ~5400x of headroom at the worst case, and the ratio does NOT grow with
+// so ~3900x of headroom at the worst case, and the ratio does NOT grow with
 // size -- 64, 128 and 256 squared all land in the same 1e-9..1e-8 band, which
 // is dft1d's double accumulator holding. On the other side, a real asymmetry
 // leaves an O(0.1..1) residue; 06_dft check 8b measures exactly 0.5 against 0.0
 // for a single broken twin. Four orders of margin either way.
+//
+// (An earlier version of this table measured against the OUTPUT's RMS and read
+// 1.86e-08 worst. The numbers moved slightly when the scale changed; the
+// conclusion did not.)
 constexpr float k_imag_rel_tol = 1e-4F;
 
-// Floor on the denominator so an all-black result does not divide by zero. A
-// genuinely black plane has an exactly-zero imaginary part, so it passes.
+// Floor on the denominator, for the case where even the INPUT is all zeros.
+// A genuinely black plane transforms to exactly zero, so its residue is exactly
+// zero and no threshold is needed -- this only keeps the division defined.
 constexpr float k_rms_floor = 1e-12F;
+
+// Format a float in scientific notation. std::to_string gives six DECIMALS, so
+// it renders every residue below 1e-6 as the string "0.000000" -- which made the
+// one diagnostic this check exists to produce report "max|imag| 0.000000 against
+// RMS 0.000000" while throwing.
+std::string sci(float v) {
+    std::array<char, 32> buf{};
+    std::snprintf(buf.data(), buf.size(), "%.3e", static_cast<double>(v));
+    return std::string(buf.data());
+}
 
 vc::vc_image convolve_frequency(const vc::vc_image& src,
                                 const vc_kernel& kernel,
@@ -242,8 +261,11 @@ vc::vc_image convolve_frequency(const vc::vc_image& src,
         vc::math::dft2d(kernel_plane(kernel, extent), extent);
 
     for (vc::channel_count ch = 0; ch < src.channels(); ++ch) {
-        vc::math::vc_complex_signal spectrum =
-            vc::math::dft2d(embed_channel(src, ch, extent), extent);
+        const vc::math::vc_complex_signal plane =
+            embed_channel(src, ch, extent);
+        const float input_rms = real_rms(plane);
+
+        vc::math::vc_complex_signal spectrum = vc::math::dft2d(plane, extent);
 
         multiply_into(spectrum, kernel_freq);
 
@@ -256,16 +278,32 @@ vc::vc_image convolve_frequency(const vc::vc_image& src,
         // and calling .real() blind would throw away the only evidence that
         // something upstream was not twin-symmetric -- which is how a
         // frequency-domain filter ships quietly wrong.
-        const float scale = std::max(real_rms(result), k_rms_floor);
+        //
+        // SCALED AGAINST THE INPUT, NOT THE OUTPUT. Float noise in the
+        // imaginary part is proportional to the magnitudes the arithmetic
+        // actually handled, which are the INPUT's -- the output can be far
+        // smaller without the intermediate sums being any smaller.
+        //
+        // Scaling against the output was a live false positive. A sum-to-zero
+        // kernel (a derivative, a Sobel column) on a FLAT region produces an
+        // exactly-zero real part, so the output RMS is 0, the floor takes over
+        // and the threshold collapses to 1e-16 -- below float noise, which is
+        // ~1e-16 here. Measured: [-1,0,1] on a flat 0.5 image under wrap threw,
+        // with a correct answer. The same case under `zero` passed only because
+        // the padding creates a real edge and lifts the output RMS.
+        //
+        // P3 builds gradient and Sobel operators, so sum-to-zero kernels are
+        // not a corner case for this library -- they are a category of input.
+        const float scale = std::max(input_rms, k_rms_floor);
         const float residue = max_imag(result);
         if (residue > k_imag_rel_tol * scale) {
             throw vc::vc_exception(
                 vc::vc_error_code::invalid_argument,
                 std::string("convolve_frequency: inverse transform is not "
                             "real -- max|imag| ") +
-                    std::to_string(residue) + " against RMS " +
-                    std::to_string(scale) +
-                    ", which means the spectra were not twin-symmetric");
+                    sci(residue) + " against input RMS " + sci(scale) +
+                    " (tolerance " + sci(k_imag_rel_tol * scale) +
+                    "), which means the spectra were not twin-symmetric");
         }
 
         // CROP: the top-left source-sized window, with NO offset, because

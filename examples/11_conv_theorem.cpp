@@ -149,13 +149,14 @@ float pixel(const vc::vc_image& img, vc::image_dim x, vc::image_dim y) {
 vc::vc_image noise_image(vc::image_dim w,
                          vc::image_dim h,
                          vc::channel_count ch,
-                         std::uint32_t seed) {
+                         std::uint32_t seed,
+                         float amplitude = 1.0F) {
     std::vector<float> v;
     v.reserve(static_cast<std::size_t>(w) * h * ch);
     std::uint32_t s = seed;
     for (std::size_t i = 0; i < static_cast<std::size_t>(w) * h * ch; ++i) {
         s = s * 1664525U + 1013904223U;
-        v.push_back(static_cast<float>(s >> 8U) /
+        v.push_back(amplitude * static_cast<float>(s >> 8U) /
                     static_cast<float>(1U << 24U));
     }
     return make_image(w, h, ch, v);
@@ -639,6 +640,218 @@ int main() {
                                                 vc_edge_policy::wrap);
                    }),
                    "a non-f32 source is rejected");
+        }
+
+        // ---- 16. SUM-TO-ZERO kernels, where the OUTPUT scale collapses -----
+        //
+        // Added after a review found a live false positive. The imaginary
+        // residue was judged against the RESULT's RMS, and a derivative kernel
+        // on a FLAT region gives an exactly-zero result -- so the RMS was 0,
+        // the floor took over, the threshold collapsed to 1e-16, and float
+        // noise of ~1e-16 tripped it. Measured: [-1,0,1] on a flat 0.5 image
+        // under wrap THREW, on a correct answer.
+        //
+        // The same case under `zero` passed, which is what made it hard to see:
+        // padding creates a real edge at the border and lifts the output RMS.
+        //
+        // P3 builds gradient and Sobel operators, so sum-to-zero kernels are a
+        // category of input for this library, not a corner case. The residue is
+        // now scaled against the INPUT, whose magnitudes are what the
+        // arithmetic actually handled.
+        {
+            const vc_kernel deriv{3, 1, {-1.0F, 0.0F, 1.0F}};
+            const vc::vc_image flat =
+                make_image(16, 16, 1, std::vector<float>(256, 0.5F));
+
+            // Absolute, not relative: the correct answer is exactly zero, so a
+            // ratio against the reference's RMS is 0/0 and means nothing.
+            expect(accepts([&] {
+                       (void)convolve_frequency(flat, deriv,
+                                                vc_edge_policy::wrap);
+                   }),
+                   "a derivative kernel on a FLAT image does not throw");
+            expect(max_abs_diff(
+                       convolve_frequency(flat, deriv, vc_edge_policy::wrap),
+                       convolve(flat, deriv, vc_edge_policy::wrap)) <= 1e-6F,
+                   "derivative on flat, wrap: zero everywhere, both paths");
+
+            const vc::vc_image img = noise_image(16, 16, 1, 53U);
+            expect(rel_diff(convolve_frequency(img, deriv,
+                                               vc_edge_policy::wrap),
+                            convolve(img, deriv, vc_edge_policy::wrap)) <=
+                       1e-5F,
+                   "derivative on noise, wrap: matches convolve");
+            expect(rel_diff(convolve_frequency(img, deriv,
+                                               vc_edge_policy::zero),
+                            convolve(img, deriv, vc_edge_policy::zero)) <=
+                       1e-5F,
+                   "derivative on noise, zero: matches convolve");
+
+            // An all-zero kernel, which is sum-to-zero AND annihilates
+            // everything. Both paths give exactly zero.
+            const vc_kernel zero_k{3, 3, std::vector<float>(9, 0.0F)};
+            expect(max_abs_diff(
+                       convolve_frequency(img, zero_k, vc_edge_policy::wrap),
+                       convolve(img, zero_k, vc_edge_policy::wrap)) <= 1e-6F,
+                   "an all-zero kernel annihilates, and does not throw");
+
+            // A genuinely black image: input RMS is 0 too, so the floor is the
+            // only thing keeping the division defined. Residue is exactly 0.
+            const vc::vc_image black =
+                make_image(8, 8, 1, std::vector<float>(64, 0.0F));
+            expect(accepts([&] {
+                       (void)convolve_frequency(black, deriv,
+                                                vc_edge_policy::wrap);
+                   }),
+                   "a black image with a zero-sum kernel does not throw");
+        }
+
+        // ---- 17. extreme collision, and the combinations -------------------
+        //
+        // Group 13 collides three taps per slot. This collides about SIXTY: a
+        // 31x31 kernel on a 4x4 ring puts 961 taps into 16 slots, so each slot
+        // accumulates ~60 float additions. Correct, and worth pinning because
+        // the error grows with the number of summed taps -- measured 1.4e-06
+        // relative, which is 7x inside the tolerance rather than the ~100x the
+        // other groups enjoy.
+        //
+        // Then the combination no single group covered: odd dimensions AND
+        // multiple channels AND a kernel wider than the image, together.
+        {
+            const vc::vc_image small = noise_image(4, 4, 1, 59U);
+            const vc_kernel k31{31, 31, std::vector<float>(961, 1.0F / 961.0F)};
+            expect(rel_diff(convolve_frequency(small, k31,
+                                               vc_edge_policy::wrap),
+                            convolve(small, k31, vc_edge_policy::wrap)) <=
+                       1e-5F,
+                   "31x31 on 4x4 wrap: ~60 taps summed per slot");
+
+            const vc::vc_image rgb = noise_image(5, 3, 3, 61U);
+            const vc_kernel k7{7, 5, std::vector<float>(35, 1.0F / 35.0F)};
+            expect(rel_diff(convolve_frequency(rgb, k7, vc_edge_policy::wrap),
+                            convolve(rgb, k7, vc_edge_policy::wrap)) <= 1e-5F,
+                   "7x5 kernel on 5x3 RGB, wrap: odd + 3ch + wide together");
+            expect(rel_diff(convolve_frequency(rgb, k7, vc_edge_policy::zero),
+                            convolve(rgb, k7, vc_edge_policy::zero)) <= 1e-5F,
+                   "7x5 kernel on 5x3 RGB, zero: odd + 3ch + wide together");
+        }
+
+        // ---- 18. SCALE INVARIANCE -- this pins a CLAIM, not a behaviour ---
+        //
+        // The header justifies scaling the imaginary residue against the INPUT's
+        // RMS by asserting that float noise is proportional to the magnitudes
+        // the arithmetic handled. If that were false, the tolerance would be
+        // right at one brightness and wrong at another, and group 16's fix
+        // would be luck rather than reasoning.
+        //
+        // So: the same image at amplitudes spanning EIGHT orders of magnitude,
+        // asserting the RELATIVE agreement is unchanged. Measured 1.52e-07,
+        // 1.56e-07, 1.60e-07, 2.05e-07 at 0.001, 1, 1e3 and 1e5 -- flat across
+        // the range, which is the claim.
+        //
+        // This is the only group here that tests a sentence in the header
+        // rather than a property of the output.
+        {
+            const vc_kernel asym{3, 3,
+                                 {0.0F, 0.1F, 0.2F,
+                                  0.3F, 0.4F, 0.0F,
+                                  0.0F, 0.0F, 0.5F}};
+            bool flat_across_scales = true;
+            for (const float amp : {0.001F, 1.0F, 1000.0F, 100000.0F}) {
+                const vc::vc_image img = noise_image(32, 32, 1, 67U, amp);
+                flat_across_scales =
+                    flat_across_scales &&
+                    rel_diff(convolve_frequency(img, asym,
+                                                vc_edge_policy::wrap),
+                             convolve(img, asym, vc_edge_policy::wrap)) <=
+                        1e-5F;
+            }
+            expect(flat_across_scales,
+                   "relative error is SCALE INVARIANT over 1e-3 .. 1e5");
+        }
+
+        // ---- 19. four more input shapes, none of them used above ------------
+        //
+        // Every kernel in groups 1-18 is a square or a ROW. Every separable
+        // cross-check is under `wrap`. And correlation has never gone through
+        // this path at all, despite being how block matching will use it.
+        {
+            const vc_kernel asym{3, 3,
+                                 {0.0F, 0.1F, 0.2F,
+                                  0.3F, 0.4F, 0.0F,
+                                  0.0F, 0.0F, 0.5F}};
+            const vc::vc_image img = noise_image(24, 16, 1, 71U);
+
+            // (a) CORRELATION, which is convolution with the kernel rotated
+            // 180 degrees -- vc_kernel::reversed() exists precisely so that is
+            // one named operation. An asymmetric kernel, necessarily: a
+            // symmetric one is its own reverse and could not tell the two
+            // apart, which is week 5's recorded lesson.
+            expect(rel_diff(convolve_frequency(img, asym.reversed(),
+                                               vc_edge_policy::wrap),
+                            correlate(img, asym, vc_edge_policy::wrap)) <=
+                       1e-5F,
+                   "correlate via the frequency path, wrap");
+            expect(rel_diff(convolve_frequency(img, asym.reversed(),
+                                               vc_edge_policy::zero),
+                            correlate(img, asym, vc_edge_policy::zero)) <=
+                       1e-5F,
+                   "correlate via the frequency path, zero");
+
+            // (b) A COLUMN kernel. Also confirms padded_axis is genuinely
+            // PER-AXIS: a 1x5 kernel on a 16x16 image pads y to 20 and leaves
+            // x at 16, because kw-1 is 0 along x.
+            const vc_kernel col{1, 5, {0.1F, 0.2F, 0.4F, 0.2F, 0.1F}};
+            const vc::vc_image sq = noise_image(16, 16, 1, 73U);
+            expect(frequency_extent(sq, col, vc_edge_policy::zero).width() ==
+                           16 &&
+                       frequency_extent(sq, col, vc_edge_policy::zero)
+                               .height() == 20,
+                   "a 1x5 kernel pads Y only: 16x16 -> 16x20");
+            expect(rel_diff(convolve_frequency(sq, col, vc_edge_policy::wrap),
+                            convolve(sq, col, vc_edge_policy::wrap)) <= 1e-5F,
+                   "column kernel, wrap");
+
+            // A column kernel taller than the image, so the collision is on Y
+            // alone -- group 10 collides on X, group 13 on both.
+            const vc_kernel tall{1, 9, std::vector<float>(9, 1.0F / 9.0F)};
+            const vc::vc_image tiny = noise_image(4, 4, 1, 79U);
+            expect(rel_diff(convolve_frequency(tiny, tall,
+                                               vc_edge_policy::wrap),
+                            convolve(tiny, tall, vc_edge_policy::wrap)) <=
+                       1e-5F,
+                   "1x9 on 4x4 wrap: taps collide on Y only");
+
+            // (c) separable agreement under ZERO. Group 9 checks only wrap, and
+            // the zero path crops a padded result, which is different code.
+            const vc::vc_image rgb = noise_image(32, 32, 3, 83U);
+            expect(rel_diff(convolve_frequency(rgb,
+                                               make_gaussian(1.4F, 1.4F),
+                                               vc_edge_policy::zero),
+                            convolve_separable(rgb, make_gaussian_1d_x(1.4F),
+                                               make_gaussian_1d_y(1.4F),
+                                               vc_edge_policy::zero)) <= 1e-5F,
+                   "zero: frequency == separable spatial, 3 channels");
+
+            // (d) NEGATIVE weights in colliding slots, including a pair that
+            // cancels to EXACTLY zero. kernel_plane accumulates, so a slot can
+            // legitimately end up empty, and an implementation special-casing
+            // "already written" rather than summing would differ here.
+            const vc::vc_image signed_row = noise_image(4, 1, 1, 89U);
+            const vc_kernel signed_k{5, 1,
+                                     {1.0F, -2.0F, 0.5F, -2.0F, 1.0F}};
+            expect(rel_diff(convolve_frequency(signed_row, signed_k,
+                                               vc_edge_policy::wrap),
+                            convolve(signed_row, signed_k,
+                                     vc_edge_policy::wrap)) <= 1e-5F,
+                   "signed weights, colliding slots, wrap");
+            const vc_kernel cancel_k{5, 1,
+                                     {1.0F, -2.0F, 0.5F, -2.0F, -1.0F}};
+            expect(rel_diff(convolve_frequency(signed_row, cancel_k,
+                                               vc_edge_policy::wrap),
+                            convolve(signed_row, cancel_k,
+                                     vc_edge_policy::wrap)) <= 1e-5F,
+                   "colliding taps that cancel to EXACTLY zero in a slot");
         }
 
     } catch (const std::exception& e) {
