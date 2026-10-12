@@ -134,9 +134,13 @@ namespace vc::pixelops {
 // ---- TWO THINGS DELIBERATELY ABSENT ----
 //
 // No 9-point (8-neighbour) variant. [[1,1,1],[1,-8,1],[1,1,1]] is the usual
-// alternative, it is less direction-dependent, and it is a different operator
-// with a different frequency response. One stencil, derived and tested, is what
-// the solvers need; a second would double the surface with no caller.
+// alternative. It also sums to zero, but it is a DIFFERENT operator: on x^2+y^2
+// it gives 12 rather than 4, so it approximates three times the Laplacian and
+// needs a 1/3 factor to be comparable at all. (It is often reached for on
+// isotropy grounds -- that the diagonals make it less direction-dependent -- but
+// that claim is NOT verified here and is left unasserted rather than repeated.)
+// One stencil, derived and tested, is what the solvers need; a second would
+// double the surface with no caller.
 //
 // No grid-spacing parameter. The continuous operator on a grid of spacing h
 // carries a factor 1/h^2. Pixels are one unit apart, h = 1, and a parameter
