@@ -66,6 +66,7 @@
 #include <functional>
 #include <iostream>
 #include <span>
+#include <string>
 #include <vector>
 
 #include "vc/core/vc_error_code.h"
@@ -129,9 +130,8 @@ bool interior_all_exactly(const vc::vc_image& img, float want) {
     for (vc::image_dim y = 1; y + 1 < img.height(); ++y) {
         for (vc::image_dim x = 1; x + 1 < img.width(); ++x) {
             if (pixel(img, x, y) != want) {
-                std::cerr << "  at (" << x << ',' << y
-                          << ") got " << pixel(img, x, y) << " want " << want
-                          << '\n';
+                std::cerr << "  at (" << x << ',' << y << ") got "
+                          << pixel(img, x, y) << " want " << want << '\n';
                 return false;
             }
         }
@@ -174,6 +174,23 @@ bool accepts(const std::function<void()>& f) {
     return true;
 }
 
+// Looped assertions below run the same check under several policies. Without a
+// name in the message a failure says only that one of them broke, which is the
+// kind of diagnostic that turns a two-minute fix into a bisect.
+const char* policy_name(vc::pixelops::vc_edge_policy p) {
+    switch (p) {
+    case vc::pixelops::vc_edge_policy::clamp:
+        return "clamp";
+    case vc::pixelops::vc_edge_policy::zero:
+        return "zero";
+    case vc::pixelops::vc_edge_policy::reflect:
+        return "reflect";
+    case vc::pixelops::vc_edge_policy::wrap:
+        return "wrap";
+    }
+    return "?";
+}
+
 } // namespace
 
 int main() {
@@ -198,8 +215,8 @@ int main() {
             const vc_kernel k = make_laplacian();
             expect(k.width() == 3 && k.height() == 3, "stencil is 3x3");
 
-            const std::vector<float> want{0.0F, 1.0F,  0.0F, 1.0F, -4.0F,
-                                          1.0F, 0.0F, 1.0F,  0.0F};
+            const std::vector<float> want{0.0F, 1.0F, 0.0F, 1.0F, -4.0F,
+                                          1.0F, 0.0F, 1.0F, 0.0F};
             bool weights_match = k.weights().size() == want.size();
             for (std::size_t i = 0; weights_match && i < want.size(); ++i) {
                 weights_match = (k.weights()[i] == want[i]);
@@ -225,14 +242,12 @@ int main() {
             // A single 1 at the centre of a 5x5 of zeros. convolve(delta, h)
             // reproduces h, centred where the impulse was. `zero` because the
             // surround is zero anyway, so no policy can affect the answer.
-            const vc::vc_image delta =
-                from_rule(5, 5, [](int x, int y) {
-                    return (x == 2 && y == 2) ? 1.0F : 0.0F;
-                });
+            const vc::vc_image delta = from_rule(5, 5, [](int x, int y) {
+                return (x == 2 && y == 2) ? 1.0F : 0.0F;
+            });
             const vc::vc_image out = laplacian(delta, vc_edge_policy::zero);
 
-            expect(out.width() == 5 && out.height() == 5 &&
-                       out.channels() == 1,
+            expect(out.width() == 5 && out.height() == 5 && out.channels() == 1,
                    "impulse response keeps the source geometry");
 
             // The expected picture, written out in full:
@@ -288,8 +303,7 @@ int main() {
                 const vc::vc_image src = from_rule(5, 3, [&](int x, int) {
                     return rc.row[static_cast<std::size_t>(x)];
                 });
-                const vc::vc_image out =
-                    laplacian(src, vc_edge_policy::clamp);
+                const vc::vc_image out = laplacian(src, vc_edge_policy::clamp);
                 expect(interior_all_exactly(out, rc.want), rc.name);
             }
         }
@@ -303,9 +317,9 @@ int main() {
             // clamp, reflect and wrap all redirect an out-of-range tap onto a
             // REAL pixel, which on a constant image is k. So the result is 0
             // everywhere, boundary included.
-            for (const vc_edge_policy p : {vc_edge_policy::clamp,
-                                           vc_edge_policy::reflect,
-                                           vc_edge_policy::wrap}) {
+            for (const vc_edge_policy p :
+                 {vc_edge_policy::clamp, vc_edge_policy::reflect,
+                  vc_edge_policy::wrap}) {
                 const vc::vc_image out = laplacian(src, p);
                 bool all_zero = true;
                 for (vc::image_dim y = 0; y < out.height(); ++y) {
@@ -313,9 +327,10 @@ int main() {
                         all_zero = all_zero && (pixel(out, x, y) == 0.0F);
                     }
                 }
-                expect(all_zero,
-                       "constant gives exactly 0 EVERYWHERE under "
-                       "clamp/reflect/wrap");
+                const std::string what =
+                    std::string("constant gives exactly 0 EVERYWHERE under ") +
+                    policy_name(p);
+                expect(all_zero, what.c_str());
             }
 
             // `zero` invents a 0 outside, so the boundary loses weight in an
@@ -324,8 +339,7 @@ int main() {
             //     edge      3 of 4              3k - 4k =  -k
             //     corner    2 of 4              2k - 4k = -2k
             {
-                const vc::vc_image out =
-                    laplacian(src, vc_edge_policy::zero);
+                const vc::vc_image out = laplacian(src, vc_edge_policy::zero);
                 expect(interior_all_exactly(out, 0.0F),
                        "constant under `zero`: interior is still exactly 0");
                 expect(pixel(out, 0, 0) == -2.0F * k &&
@@ -393,8 +407,7 @@ int main() {
             //
             // with the four corners counted TWICE -- which is the -2k corner
             // against -k edge of group 4, now on a non-constant input.
-            const vc::vc_image zeroed =
-                laplacian(src, vc_edge_policy::zero);
+            const vc::vc_image zeroed = laplacian(src, vc_edge_policy::zero);
             const auto rule = [](int x, int y) {
                 return static_cast<double>(((7 * x) + (13 * y)) % 17);
             };
@@ -412,18 +425,23 @@ int main() {
 
         // ---- 8. a 1x1 image, where nothing is interior ---------------------
         {
-            const vc::vc_image one = from_rule(1, 1, [](int, int) {
-                return 3.0F;
-            });
+            const vc::vc_image one =
+                from_rule(1, 1, [](int, int) { return 3.0F; });
             // clamp/reflect/wrap: all four neighbours redirect onto the single
             // pixel itself, so 4(3) - 4(3) = 0.
-            for (const vc_edge_policy p : {vc_edge_policy::clamp,
-                                           vc_edge_policy::reflect,
-                                           vc_edge_policy::wrap}) {
+            for (const vc_edge_policy p :
+                 {vc_edge_policy::clamp, vc_edge_policy::reflect,
+                  vc_edge_policy::wrap}) {
                 const vc::vc_image out = laplacian(one, p);
+                // reflect on a 1-wide image is a 3-tap kernel wider than
+                // its source -- the double-bounce case vc_convolve.h flags as
+                // "not reachable with the small kernels this phase builds".
+                // It is reachable here, and it is checked rather than assumed.
+                const std::string what =
+                    std::string("1x1 gives exactly 0 under ") + policy_name(p);
                 expect(out.width() == 1 && out.height() == 1 &&
                            pixel(out, 0, 0) == 0.0F,
-                       "1x1 gives exactly 0 under clamp/reflect/wrap");
+                       what.c_str());
             }
             // `zero`: no neighbour is in range at all, so 0 - 4(3) = -12.
             const vc::vc_image out = laplacian(one, vc_edge_policy::zero);
@@ -457,9 +475,8 @@ int main() {
                 ok = ok && (pixel(out, x, 1, 1) == 0.0F);
                 ok = ok && (pixel(out, x, 1, 2) == 20.0F);
             }
-            expect(ok,
-                   "each channel filtered independently: bowl 2, ramp 0, "
-                   "scaled bowl 20");
+            expect(ok, "each channel filtered independently: bowl 2, ramp 0, "
+                       "scaled bowl 20");
         }
 
         // ---- 10. rejection, PAIRED with acceptance -------------------------
@@ -473,34 +490,34 @@ int main() {
 
             const vc::vc_image f32 =
                 from_rule(4, 4, [](int, int) { return 1.0F; });
-            expect(accepts([&] {
-                       (void)laplacian(f32, vc_edge_policy::clamp);
-                   }),
-                   "an f32 source is ACCEPTED (so the rejection above is not "
-                   "vacuous)");
+            expect(
+                accepts([&] { (void)laplacian(f32, vc_edge_policy::clamp); }),
+                "an f32 source is ACCEPTED (so the rejection above is not "
+                "vacuous)");
 
             // laplacian() must BE convolve() with the stencil, not a parallel
             // implementation that could drift from it.
-            const vc::vc_image structured =
-                from_rule(9, 7, [](int x, int y) {
-                    return static_cast<float>(((5 * x) + (3 * y)) % 11);
-                });
-            bool agrees = true;
+            const vc::vc_image structured = from_rule(9, 7, [](int x, int y) {
+                return static_cast<float>(((5 * x) + (3 * y)) % 11);
+            });
             for (const vc_edge_policy p :
                  {vc_edge_policy::clamp, vc_edge_policy::zero,
                   vc_edge_policy::reflect, vc_edge_policy::wrap}) {
                 const vc::vc_image a = laplacian(structured, p);
                 const vc::vc_image b =
                     convolve(structured, make_laplacian(), p);
+                bool agrees = true;
                 for (vc::image_dim y = 0; y < a.height(); ++y) {
                     for (vc::image_dim x = 0; x < a.width(); ++x) {
                         agrees = agrees && (pixel(a, x, y) == pixel(b, x, y));
                     }
                 }
+                const std::string what =
+                    std::string(
+                        "laplacian() == convolve(stencil) bit for bit under ") +
+                    policy_name(p);
+                expect(agrees, what.c_str());
             }
-            expect(agrees,
-                   "laplacian() == convolve() with the stencil, bit for bit, "
-                   "under all four policies");
         }
 
     } catch (const std::exception& e) {
