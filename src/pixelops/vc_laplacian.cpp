@@ -3,7 +3,8 @@
 
 #include "vc/pixelops/vc_laplacian.h"
 
-#include <stdexcept>
+#include <stdexcept> // ONLY for the two stubs below -- drop this include
+                     // once both throws are gone.
 
 namespace vc::pixelops {
 
