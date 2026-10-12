@@ -35,10 +35,13 @@
 //     reversed() == itself. Cheap, and it fails first when the weights are
 //     wrong, so the later failures are not noise from one root cause.
 //
-// 2   THE IMPULSE, AND IT IS THE ONLY COMPLETE CHECK IN THIS FILE.
-//     convolve(delta, h) reproduces h, so this reads all nine weights back out
-//     of a real convolution, in place. Groups 3-6 are weaker CONSEQUENCES of it,
-//     not independent detectors, and the moments above are why.
+// 2   THE IMPULSE, AND IT IS THE ONLY COMPLETE CHECK OF THE OPERATOR AS
+//     APPLIED. convolve(delta, h) reproduces h, so this reads all nine weights
+//     back out of a REAL convolution, in place. Group 1 also pins all nine, but
+//     only inside make_laplacian() -- it says nothing about whether laplacian()
+//     then applies them, centres them, or wires the policy through. Group 2
+//     covers both halves at once. Groups 3-6 are weaker CONSEQUENCES of it, not
+//     independent detectors, and the moments above are why.
 //
 // 3   the three paper rows: flat 0, ramp 0, bowl 2. A 5x3 whose rows are
 //     identical, so the y second difference is 0 and what is measured is purely
