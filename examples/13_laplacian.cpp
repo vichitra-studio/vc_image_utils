@@ -16,48 +16,74 @@
 //
 // ---- WHAT EACH GROUP CAN AND CANNOT CATCH ----
 //
-// 1   the kernel itself. Dimensions, the nine weights, sum() == 0 exactly, and
+// Worked out, not asserted, because the first version of this block was wrong
+// about two groups. Expand the output of ANY 3x3 kernel w on a polynomial input
+// and each gate becomes a constraint on the kernel's MOMENTS, which says both
+// what it pins and -- the useful half -- what it is blind to. Writing (i,j) for
+// a tap's offset from the centre:
+//
+//     S0  = sum of w          on a constant k   output = k * S0
+//     Sx  = sum of w*i        on a plane        output = a*Sx + b*Sy
+//     Sy  = sum of w*j          f = ax + by
+//     Sxx = sum of w*i*i      on x^2 + y^2      output = Sxx + Syy
+//     Syy = sum of w*j*j
+//
+// Each line is one expansion and a cancellation; the real stencil has S0 = 0,
+// Sx = Sy = 0, Sxx = Syy = 2, hence the 4.
+//
+// 1   the kernel itself. Dimensions, all nine weights, sum() == 0 exactly, and
 //     reversed() == itself. Cheap, and it fails first when the weights are
 //     wrong, so the later failures are not noise from one root cause.
 //
-// 2   THE IMPULSE, AND IT IS THE STRONGEST CHECK IN THE FILE. convolve(delta,h)
-//     reproduces h, so this reads all nine weights back out of a real
-//     convolution, in place. It catches every typo, the sign flip, any scale
-//     error, the 8-neighbour substitute, and clamping-at-zero (the -4 has to
-//     come back as -4). Groups 3-6 are then DEMONSTRATIONS of properties, not
-//     independent detectors -- the honest framing, since each is weaker.
+// 2   THE IMPULSE, AND IT IS THE ONLY COMPLETE CHECK IN THIS FILE.
+//     convolve(delta, h) reproduces h, so this reads all nine weights back out
+//     of a real convolution, in place. Groups 3-6 are weaker CONSEQUENCES of it,
+//     not independent detectors, and the moments above are why.
 //
-// 3   the three paper rows, reproduced exactly: flat 0, ramp 0, bowl 2. Run on
-//     a 5x3 whose rows are identical, so the y second difference is 0 and what
-//     is measured is purely the x one. The RAMP is the interesting one.
+// 3   the three paper rows: flat 0, ramp 0, bowl 2. A 5x3 whose rows are
+//     identical, so the y second difference is 0 and what is measured is purely
+//     the x one -- which makes this the only group that pins Sxx ON ITS OWN.
 //
-// 4   constant. Catches weights that do not sum to zero -- a wrong centre, a
-//     missing arm. Blind to overall SIGN and SCALE (negate everything and a
-//     constant still gives 0). Includes `zero`'s exact three-tier boundary.
+// 4   constant. Under clamp/reflect/wrap this pins S0 AND NOTHING ELSE, because
+//     the output is k*S0: sign, scale and arm placement are all invisible to it.
+//     The `zero` sub-check is strictly stronger, since WHICH taps fall off the
+//     edge depends on where the arms actually sit.
 //
-// 5   plane. Catches an ASYMMETRIC kernel: a missing or offset arm survives
-//     group 4 if the weights still total zero, but not a plane. Also blind to
-//     sign and scale.
+// 5   plane 3x + 5y. Pins 3*Sx + 5*Sy == 0 -- that the arms are BALANCED about
+//     the centre. It does NOT catch a missing arm, contrary to what this block
+//     claimed before it was checked: the pure 1-D kernel [[0,0,0],[1,-2,1],
+//     [0,0,0]] has Sx = Sy = 0 and sails straight through.
 //
-// 6   x^2 + y^2 -> 4, the X2 gate. The only one of 3-6 that sees SIGN (a
-//     negated stencil gives -4) and SCALE (doubled gives 8, the 8-neighbour
-//     stencil gives 12).
+// 6   x^2 + y^2 -> 4, the X2 gate. Pins Sxx + Syy == 4, which is ONE number and
+//     not two. It does see a sign flip (-4) and the 8-neighbour variant (12),
+//     but it CANNOT separate the axes: [[0,0,0],[2,-4,2],[0,0,0]] also totals 4.
+//     That kernel was built and run against this suite -- groups 4, 5 and 6 all
+//     PASSED it, and groups 1, 2, 3, 7 and 9 caught it. So the x^2+y^2 gate is
+//     a demonstration, and group 2 is the detector.
 //
-// 7   sum of all output == 0 exactly under `wrap`, on a deterministic integer
-//     pattern. Circular convolution totals multiply: sum(x*h) = sum(x).sum(h),
-//     and sum(h) = 0. S7 depends on this fact.
+// 7   totals, two of them. Under `wrap` the output sums to exactly 0 for any
+//     input, because circular convolution totals multiply: sum(x*h) =
+//     sum(x).sum(h) and sum(h) = 0. Under `zero` it sums to exactly minus the
+//     border, corners twice -- which depends on arm placement and so is a real
+//     check rather than a restatement. S7 depends on the `wrap` fact.
 //
-// 8   1x1, where EVERY pixel is a boundary pixel and nothing is interior.
+// 8   1x1, where EVERY pixel is a boundary pixel and nothing is interior. The
+//     `reflect` case here is a 3-tap kernel on a 1-wide image: the double-bounce
+//     that vc_convolve.h calls "not reachable with the small kernels this phase
+//     builds". It IS reachable, so it is run rather than assumed.
 //
-// 9   three channels, filtered independently. A planar/interleaved mix-up
-//     agrees with itself at one channel, which is how it survived week 6.
+// 9   three channels with three DIFFERENT expected answers, so a channel-index
+//     slip cannot land on the right value by accident. A planar/interleaved
+//     mix-up agrees with itself at one channel, which is how it survived week 6.
 //
-// 10  the rejection, PAIRED WITH AN ACCEPTANCE. Unpaired, a function that threw
-//     for everything would pass it -- which is exactly what happened in week 6
-//     against the throwing stub.
+// 10  the rejection PAIRED WITH AN ACCEPTANCE -- unpaired, a function that threw
+//     for everything would pass it, which is exactly what happened in week 6
+//     against the throwing stub. Plus laplacian() == convolve(stencil) bit for
+//     bit under each policy, which is a tautology for the intended one-line
+//     implementation and only bites if someone writes a second code path.
 //
 // NOT TESTED, deliberately: a transposed stencil. The 5-point stencil is its
-// own transpose, so that is not a reachable bug and no input can distinguish it.
+// own transpose, so that is not a reachable bug and no input distinguishes it.
 
 #include <cmath>
 #include <cstddef>
