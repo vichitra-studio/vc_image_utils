@@ -1,0 +1,49 @@
+template <vc_pixel_element_req T, typename F> void with_pixels(F&& f)
+> Add the iterator inside this function and pass the actual function?
+
+- Optimise multiplication/division by using bitwise ops
+
+- TODO
+
+- Clean up docs
+	- section naming
+	- phase references
+	- book chapters/writers etc references
+	- unnecessary prose
+
+- extract out common exceptions and build exception library
+	- f32 check
+
+- extract out validator checks
+
+- vc_image op library
+	- add/sub/divide/mul two vc_image/scalar
+	- clone/initialise with another vc_image
+	- extracting planes/channels into vector
+	- Sum, mean, rms etc of elements
+	- getting the buffer as complex signal
+
+- complex signal
+	- check for imaginary max
+	- check for all imaginary zero
+
+- poisson/dft have a lot of common code
+	- Poisson hardcodes the kernel and scale. 
+
+- const vc::math::grid2d extent = vc::math::grid2d::checked(f_input.width() * f_input.height(), f_input.width(), f_input.height(), "poisson_fft");
+	- something wrong with extent
+
+- Examples vs test suite: Is the test suite complete?
+
+- Use of bare primitive data types instead of typedefs.
+	- issue of unnecessary static_cast with all the typedefs
+
+-The bug your question surfaced
+
+// vc_convolve.cpp:196
+// Channel outermost because the buffer is planar: index() is
+// (ch * height + y) * width + x, so a channel's plane is contiguous.
+
+The real formula, vc_image_info.h:113:
+
+return (static_cast<std::size_t>(y) * width_ + x) * channels_ + ch;
