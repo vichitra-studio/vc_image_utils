@@ -3,25 +3,15 @@
 
 #include "vc/pixelops/vc_laplacian.h"
 
-#include <stdexcept> // ONLY for the two stubs below -- drop this include
-                     // once both throws are gone.
-
 namespace vc::pixelops {
 
 vc_kernel make_laplacian() {
-    // YOURS. A vc_kernel of width 3, height 3, with the nine weights of the
-    // stencil you derived -- row-major, so the order is top row, middle row,
-    // bottom row.
-    throw std::logic_error("make_laplacian: not implemented");
+    return vc_kernel{
+        3, 3, {0.0F, 1.0F, 0.0F, 1.0F, -4.0F, 1.0F, 0.0F, 1.0F, 0.0F}};
 }
 
 vc::vc_image laplacian(const vc::vc_image& src, vc_edge_policy policy) {
-    // YOURS, and it is one line. convolve() already does the work, already
-    // resolves the boundary through `policy`, and already rejects a non-f32
-    // source -- none of that is re-done here.
-    (void)src;
-    (void)policy;
-    throw std::logic_error("laplacian: not implemented");
+    return convolve(src, make_laplacian(), policy);
 }
 
 } // namespace vc::pixelops
