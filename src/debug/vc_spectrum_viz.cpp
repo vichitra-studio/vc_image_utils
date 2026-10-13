@@ -3,7 +3,6 @@
 
 #include "vc/debug/vc_spectrum_viz.h"
 
-#include "vc/core/vc_image.h"
 #include "vc/core/vc_image_writer.h"
 #include "vc/core/vc_pixel_buffer.h"
 #include "vc/math/vc_dft.h"

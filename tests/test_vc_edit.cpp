@@ -312,7 +312,7 @@ TEST_CASE("vc_stage_registry: create() rejects a registered factory that"
     // unnoticed the way it would behind a bare try/catch with no follow-up
     // check on whether the catch block ever ran.
     vc::edit::vc_stage_registry registry;
-    registry.register_kind("broken", [](vc::pipe::stage_name) {
+    registry.register_kind("broken", [](const vc::pipe::stage_name&) {
         return vc::pipe::stage_ptr{}; // a deliberately-broken factory
     });
 
