@@ -109,6 +109,7 @@ set(VC_LIB_SOURCES
     src/pixelops/vc_conv_frequency.cpp
     src/pixelops/vc_pyramid.cpp
     src/pixelops/vc_laplacian.cpp
+    src/pixelops/vc_poisson.cpp
     src/pipe/vc_pipe_contract.cpp
     src/pipe/vc_pipe_context.cpp
     src/pipe/vc_pipe_errors.cpp
@@ -371,6 +372,7 @@ if(VC_BUILD_EXAMPLES)
         11_conv_theorem
         12_pyramid
         13_laplacian
+        14_poisson
     )
 
     foreach(example ${VC_EXAMPLE_TARGETS})
