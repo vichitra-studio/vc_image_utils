@@ -64,8 +64,7 @@ float fx(vc::image_dim v) {
     return static_cast<float>(v);
 }
 
-template <typename F>
-vc::vc_image make(vc::image_dim n, F f) {
+template <typename F> vc::vc_image make(vc::image_dim n, F f) {
     vc::vc_image_writer out{n, n, 1, vc::buf_f32{0.0F}};
     for (vc::image_dim y = 0; y < n; ++y) {
         for (vc::image_dim x = 0; x < n; ++x) {
@@ -103,10 +102,9 @@ int main() {
         // A FINE grating: 50 cycles across 128 samples. Decimating by 2 leaves
         // 64 samples, whose highest representable frequency is 32 -- so 50
         // cannot survive, and comes back as 64 - 50 = 14.
-        const vc::vc_image fine =
-            make(n, [](vc::image_dim x, vc::image_dim) {
-                return 0.5F + 0.5F * std::cos(k_two_pi * 50.0F * fx(x) / 128.0F);
-            });
+        const vc::vc_image fine = make(n, [](vc::image_dim x, vc::image_dim) {
+            return 0.5F + 0.5F * std::cos(k_two_pi * 50.0F * fx(x) / 128.0F);
+        });
         const vc::vc_image preblurred = vc::pixelops::convolve(
             fine, vc::pixelops::make_gaussian(2.0F, 2.0F),
             vc::pixelops::vc_edge_policy::wrap);
@@ -135,7 +133,8 @@ int main() {
              "50-cycle content BEFORE decimating, so there was nothing left to "
              "fold. Correct: the fine detail is genuinely gone rather than "
              "disguised as something coarse. Measured peak energy after the "
-             "pre-blur is about 1% of DC, against a full-strength pair in 01."});
+             "pre-blur is about 1% of DC, against a full-strength pair in "
+             "01."});
 
         atlas.push_back(
             {"03_row_banding",
@@ -210,10 +209,11 @@ int main() {
              "This is posterisation, the banding you see in smooth skies, and "
              "the null spacing tells you the step width: 128/8 = 16."});
 
-        std::cout << "\n  defect                    DC:median   bins lost on a "
-                     "LINEAR dump\n"
-                  << "  ---------------------------------------------------------"
-                     "------\n";
+        std::cout
+            << "\n  defect                    DC:median   bins lost on a "
+               "LINEAR dump\n"
+            << "  ---------------------------------------------------------"
+               "------\n";
 
         for (const entry& e : atlas) {
             const vc::image_dim w = e.image.width();
@@ -233,7 +233,8 @@ int main() {
             writer.write(out_dir + "/10_" + e.name + ".png", e.image, png);
             writer.write(out_dir + "/10_" + e.name + "_spectrum.png",
                          d.log_magnitude, png);
-            writer.write(out_dir + "/10_" + e.name + "_phase.png", d.phase, png);
+            writer.write(out_dir + "/10_" + e.name + "_phase.png", d.phase,
+                         png);
 
             std::cout << "  " << std::left << std::setw(26) << e.name
                       << std::right << std::setw(10) << std::fixed

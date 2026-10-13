@@ -132,7 +132,8 @@ float rel_mae(const vc::vc_image& got, const vc::vc_image& want) {
     return mae(got, want) / std::max(rms(want), 1e-12F);
 }
 
-vc::vc_image make_image(vc::image_dim w, vc::image_dim h,
+vc::vc_image make_image(vc::image_dim w,
+                        vc::image_dim h,
                         vc::channel_count ch,
                         const std::vector<float>& values) {
     vc::vc_image_writer out{w, h, ch, vc::buf_f32{0.0F}};
@@ -150,8 +151,10 @@ vc::vc_image make_image(vc::image_dim w, vc::image_dim h,
 // A fixed sequence rather than <random>, so a failure reproduces from the
 // source alone. Values land in 0..1, which is what the collapse MAE bound
 // assumes.
-vc::vc_image noise_image(vc::image_dim w, vc::image_dim h,
-                         vc::channel_count ch, std::uint32_t seed,
+vc::vc_image noise_image(vc::image_dim w,
+                         vc::image_dim h,
+                         vc::channel_count ch,
+                         std::uint32_t seed,
                          float amplitude = 1.0F) {
     std::vector<float> v;
     v.reserve(static_cast<std::size_t>(w) * h * ch);
@@ -173,8 +176,7 @@ vc::vc_image structured_image(vc::image_dim w, vc::image_dim h) {
     for (vc::image_dim y = 0; y < h; ++y) {
         for (vc::image_dim x = 0; x < w; ++x) {
             const float broad = static_cast<float>(x) / static_cast<float>(w);
-            const float mid =
-                0.25F * static_cast<float>((x / 8 + y / 8) % 2);
+            const float mid = 0.25F * static_cast<float>((x / 8 + y / 8) % 2);
             const float fine = 0.1F * static_cast<float>((x + y) % 2);
             v.push_back(std::clamp(0.35F * broad + mid + fine, 0.0F, 1.0F));
         }
@@ -290,8 +292,8 @@ int main() {
                    "reduce 1x1 -> 1x1, not 0x0");
 
             expect(r_even.channels() == 1 &&
-                       reduce(noise_image(8, 8, 3, 13U), k_policy)
-                               .channels() == 3,
+                       reduce(noise_image(8, 8, 3, 13U), k_policy).channels() ==
+                           3,
                    "reduce preserves the channel count");
         }
 
@@ -304,8 +306,8 @@ int main() {
             const vc::vc_image flat =
                 make_image(16, 16, 1, std::vector<float>(256, 0.42F));
             const vc::vc_image r = reduce(flat, k_policy);
-            expect(rel_diff(r, make_image(8, 8, 1,
-                                          std::vector<float>(64, 0.42F))) <=
+            expect(rel_diff(
+                       r, make_image(8, 8, 1, std::vector<float>(64, 0.42F))) <=
                        1e-5F,
                    "reduce leaves a flat image flat (clamp)");
         }
@@ -318,21 +320,13 @@ int main() {
         {
             const vc::vc_image three = noise_image(3, 2, 1, 17U);
 
-            expect(accepts([&] {
-                       (void)expand(three, 6, 4, k_policy);
-                   }),
+            expect(accepts([&] { (void)expand(three, 6, 4, k_policy); }),
                    "expand 3x2 -> 6x4 is accepted (exactly doubled)");
-            expect(accepts([&] {
-                       (void)expand(three, 5, 3, k_policy);
-                   }),
+            expect(accepts([&] { (void)expand(three, 5, 3, k_policy); }),
                    "expand 3x2 -> 5x3 is accepted (doubled minus one)");
-            expect(rejects([&] {
-                       (void)expand(three, 7, 4, k_policy);
-                   }),
+            expect(rejects([&] { (void)expand(three, 7, 4, k_policy); }),
                    "expand 3x2 -> 7x4 is REJECTED (unreachable)");
-            expect(rejects([&] {
-                       (void)expand(three, 3, 2, k_policy);
-                   }),
+            expect(rejects([&] { (void)expand(three, 3, 2, k_policy); }),
                    "expand 3x2 -> 3x2 is REJECTED (not an upsample)");
 
             const vc::vc_image e = expand(three, 5, 3, k_policy);
@@ -355,10 +349,10 @@ int main() {
             const vc::vc_image flat =
                 make_image(4, 4, 1, std::vector<float>(16, 0.6F));
             const vc::vc_image e = expand(flat, 8, 8, k_policy);
-            expect(rel_diff(e, make_image(8, 8, 1,
-                                          std::vector<float>(64, 0.6F))) <=
-                       1e-5F,
-                   "expand keeps a flat image flat EVERYWHERE, border included");
+            expect(
+                rel_diff(e, make_image(8, 8, 1,
+                                       std::vector<float>(64, 0.6F))) <= 1e-5F,
+                "expand keeps a flat image flat EVERYWHERE, border included");
 
             // Non-square and odd, where the border parity differs per axis --
             // a 5-wide target has its last column at an even index and a
@@ -413,8 +407,7 @@ int main() {
                     }
                 });
             boosted.bands.front() = std::move(scaled).seal();
-            expect(rel_diff(collapse(boosted, k_policy), flat) <=
-                       1e-5F,
+            expect(rel_diff(collapse(boosted, k_policy), flat) <= 1e-5F,
                    "boosting a band 4x on a flat image stays flat (no ripple)");
         }
 
@@ -426,8 +419,7 @@ int main() {
         {
             const vc::vc_image src = noise_image(8, 6, 1, 19U);
             const vc::vc_image round =
-                reduce(expand(reduce(src, k_policy), 8, 6, k_policy),
-                       k_policy);
+                reduce(expand(reduce(src, k_policy), 8, 6, k_policy), k_policy);
             expect(round.width() == 4 && round.height() == 3,
                    "reduce(expand(reduce(x))) returns to the reduced geometry");
         }
@@ -441,8 +433,7 @@ int main() {
             const vc::vc_image img = structured_image(32, 32);
             const vc_laplacian_pyramid lap =
                 laplacian_pyramid(img, 4, k_policy);
-            expect(lap.bands.size() == 3,
-                   "4 levels gives 3 bands plus a top");
+            expect(lap.bands.size() == 3, "4 levels gives 3 bands plus a top");
             expect(has_negative(lap.bands.front()),
                    "the finest band contains NEGATIVE samples");
         }
@@ -492,8 +483,7 @@ int main() {
                    "collapse is exact on ODD, NON-SQUARE geometry");
 
             const vc::vc_image rgb = noise_image(13, 7, 3, 31U);
-            expect(mae(collapse(laplacian_pyramid(rgb, 3, k_policy),
-                                k_policy),
+            expect(mae(collapse(laplacian_pyramid(rgb, 3, k_policy), k_policy),
                        rgb) < 1e-4F,
                    "collapse is exact on 3 channels");
         }
@@ -557,35 +547,25 @@ int main() {
         {
             const vc::vc_image img = noise_image(8, 8, 1, 43U);
 
-            expect(rejects([&] {
-                       (void)laplacian_pyramid(img, 0, k_policy);
-                   }),
+            expect(rejects([&] { (void)laplacian_pyramid(img, 0, k_policy); }),
                    "levels == 0 is rejected");
-            expect(rejects([&] {
-                       (void)gaussian_pyramid(img, 0, k_policy);
-                   }),
+            expect(rejects([&] { (void)gaussian_pyramid(img, 0, k_policy); }),
                    "levels == 0 is rejected for the Gaussian pyramid too");
-            expect(rejects([&] {
-                       (void)gaussian_pyramid(img, 99, k_policy);
-                   }),
+            expect(rejects([&] { (void)gaussian_pyramid(img, 99, k_policy); }),
                    "more levels than the geometry supports is rejected");
             expect(accepts([&] {
-                       (void)gaussian_pyramid(
-                           img, max_pyramid_levels(8, 8), k_policy);
+                       (void)gaussian_pyramid(img, max_pyramid_levels(8, 8),
+                                              k_policy);
                    }),
                    "exactly max_pyramid_levels is ACCEPTED");
-            expect(accepts([&] {
-                       (void)gaussian_pyramid(img, 2, k_policy);
-                   }),
+            expect(accepts([&] { (void)gaussian_pyramid(img, 2, k_policy); }),
                    "an ordinary level count is ACCEPTED");
 
             vc::vc_image_writer u8{8, 8, 1, vc::buf_u8{0}};
             const vc::vc_image not_f32 = std::move(u8).seal();
-            expect(rejects([&] {
-                       (void)gaussian_pyramid(not_f32, 2, k_policy);
-                   }),
-                   "a non-f32 source is rejected");
-
+            expect(
+                rejects([&] { (void)gaussian_pyramid(not_f32, 2, k_policy); }),
+                "a non-f32 source is rejected");
         }
 
         // ---- 15. COLLAPSE UNDER ALL FOUR EDGE POLICIES --------------------
@@ -603,9 +583,9 @@ int main() {
             for (const vc_edge_policy p :
                  {vc_edge_policy::clamp, vc_edge_policy::zero,
                   vc_edge_policy::reflect, vc_edge_policy::wrap}) {
-                all_exact = all_exact &&
-                            mae(collapse(laplacian_pyramid(img, 4, p), p),
-                                img) < 1e-4F;
+                all_exact =
+                    all_exact &&
+                    mae(collapse(laplacian_pyramid(img, 4, p), p), img) < 1e-4F;
             }
             expect(all_exact,
                    "collapse is exact under clamp, zero, reflect AND wrap");
@@ -636,21 +616,18 @@ int main() {
         // loophole in the validation.
         {
             bool all_exact = true;
-            for (const auto wh : std::vector<std::pair<vc::image_dim,
-                                                       vc::image_dim>>{
+            for (const auto wh :
+                 std::vector<std::pair<vc::image_dim, vc::image_dim>>{
                      {1, 16}, {16, 1}, {1, 1}, {2, 9}}) {
                 const vc::vc_image img =
                     noise_image(wh.first, wh.second, 1, 107U);
-                const std::size_t lv =
-                    max_pyramid_levels(wh.first, wh.second);
-                all_exact =
-                    all_exact &&
-                    mae(collapse(laplacian_pyramid(img, lv, k_policy),
-                                 k_policy),
-                        img) < 1e-4F;
+                const std::size_t lv = max_pyramid_levels(wh.first, wh.second);
+                all_exact = all_exact &&
+                            mae(collapse(laplacian_pyramid(img, lv, k_policy),
+                                         k_policy),
+                                img) < 1e-4F;
             }
-            expect(all_exact,
-                   "collapse is exact on 1xN, Nx1, 1x1 and 2x9");
+            expect(all_exact, "collapse is exact on 1xN, Nx1, 1x1 and 2x9");
             expect(max_pyramid_levels(1, 16) == 5,
                    "1x16 supports 5 levels (16,8,4,2,1) despite width 1");
         }
@@ -669,13 +646,15 @@ int main() {
         {
             vc_laplacian_pyramid bad =
                 laplacian_pyramid(noise_image(8, 8, 3, 109U), 2, k_policy);
-            bad.top = noise_image(4, 4, 1, 111U);   // right geometry, 1 channel
-            expect(rejects([&] { (void)collapse(bad, k_policy); }),
-                   "a channel-count mismatch between bands and top is rejected");
+            bad.top = noise_image(4, 4, 1, 111U); // right geometry, 1 channel
+            expect(
+                rejects([&] { (void)collapse(bad, k_policy); }),
+                "a channel-count mismatch between bands and top is rejected");
 
             vc_laplacian_pyramid wrong_geometry =
                 laplacian_pyramid(noise_image(8, 8, 1, 113U), 2, k_policy);
-            wrong_geometry.top = noise_image(3, 3, 1, 127U);  // 8 is not 2*3 or 2*3-1
+            wrong_geometry.top =
+                noise_image(3, 3, 1, 127U); // 8 is not 2*3 or 2*3-1
             expect(rejects([&] { (void)collapse(wrong_geometry, k_policy); }),
                    "a broken geometry chain is rejected");
         }
@@ -693,14 +672,12 @@ int main() {
         {
             vc::vc_image_writer u8{8, 8, 1, vc::buf_u8{0}};
             const vc::vc_image not_f32 = std::move(u8).seal();
-            expect(rejects([&] {
-                       (void)gaussian_pyramid(not_f32, 1, k_policy);
-                   }),
-                   "non-f32 is rejected at levels == 1, not just levels > 1");
-            expect(rejects([&] {
-                       (void)laplacian_pyramid(not_f32, 1, k_policy);
-                   }),
-                   "non-f32 is rejected by laplacian_pyramid at levels == 1");
+            expect(
+                rejects([&] { (void)gaussian_pyramid(not_f32, 1, k_policy); }),
+                "non-f32 is rejected at levels == 1, not just levels > 1");
+            expect(
+                rejects([&] { (void)laplacian_pyramid(not_f32, 1, k_policy); }),
+                "non-f32 is rejected by laplacian_pyramid at levels == 1");
             expect(rejects([&] { (void)reduce(not_f32, k_policy); }),
                    "non-f32 is rejected by reduce directly");
             expect(rejects([&] { (void)expand(not_f32, 16, 16, k_policy); }),
@@ -728,9 +705,9 @@ int main() {
                 const vc::vc_image img = noise_image(64, 64, 1, 131U, amp);
                 relative_holds =
                     relative_holds &&
-                    rel_mae(collapse(laplacian_pyramid(img, 5, k_policy),
-                                     k_policy),
-                            img) < 1e-6F;
+                    rel_mae(
+                        collapse(laplacian_pyramid(img, 5, k_policy), k_policy),
+                        img) < 1e-6F;
             }
             expect(relative_holds,
                    "collapse is exact RELATIVE to RMS over 1e0 .. 1e7");
@@ -748,15 +725,13 @@ int main() {
                      {1024, 2}, {2, 1024}, {512, 1}}) {
                 const vc::vc_image img =
                     noise_image(wh.first, wh.second, 1, 137U);
-                const std::size_t lv =
-                    max_pyramid_levels(wh.first, wh.second);
+                const std::size_t lv = max_pyramid_levels(wh.first, wh.second);
                 all_exact = all_exact &&
                             mae(collapse(laplacian_pyramid(img, lv, k_policy),
                                          k_policy),
                                 img) < 1e-4F;
             }
-            expect(all_exact,
-                   "collapse is exact on 1024x2, 2x1024 and 512x1");
+            expect(all_exact, "collapse is exact on 1024x2, 2x1024 and 512x1");
             expect(max_pyramid_levels(1024, 2) == 11,
                    "1024x2 supports 11 levels -- driven by the 1024");
         }

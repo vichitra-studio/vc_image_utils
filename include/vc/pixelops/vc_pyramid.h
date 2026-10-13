@@ -217,7 +217,7 @@ using vc_pyramid = std::vector<vc::vc_image>;
 // A single-level pyramid is legal and has NO bands -- `top` is then the source.
 struct vc_laplacian_pyramid {
     vc_pyramid bands; // signed; bands[0] is the finest octave
-    vc::vc_image top;                // the coarsest Gaussian, kept as-is
+    vc::vc_image top; // the coarsest Gaussian, kept as-is
 };
 
 // How many levels this geometry supports: halving until BOTH sides reach 1.

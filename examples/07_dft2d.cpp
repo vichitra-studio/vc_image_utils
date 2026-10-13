@@ -56,10 +56,10 @@
 
 namespace {
 
-using vc::math::vc_complex_signal;
-using vc::math::vc_complex_view;
 using vc::math::grid2d;
 using vc::math::vc_complex;
+using vc::math::vc_complex_signal;
+using vc::math::vc_complex_view;
 
 constexpr float k_two_pi = std::numbers::pi_v<float> * 2.0F;
 constexpr double k_two_pi_d = std::numbers::pi_v<double> * 2.0;

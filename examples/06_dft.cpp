@@ -62,8 +62,8 @@ bool near_c(vc::math::vc_complex a, vc::math::vc_complex b, float tol) {
     return near(a.real(), b.real(), tol) && near(a.imag(), b.imag(), tol);
 }
 
-using vc::math::vc_complex_signal;
 using vc::math::vc_complex;
+using vc::math::vc_complex_signal;
 
 constexpr float k_two_pi = 6.28318530717958647692F;
 
@@ -291,8 +291,9 @@ int main() {
             const std::vector<float> reals{1.0F, 2.0F, 3.0F, 4.0F};
             const vc_complex_signal via_overload = dft1d(reals);
             const vc_complex_signal via_lift = dft1d(to_signal(reals));
-            expect(max_abs_diff(via_overload, via_lift) == 0.0F,
-                   "dft1d(vc_real_view) is bit-identical to dft1d(to_signal(x))");
+            expect(
+                max_abs_diff(via_overload, via_lift) == 0.0F,
+                "dft1d(vc_real_view) is bit-identical to dft1d(to_signal(x))");
             expect(via_overload.size() == 4 &&
                        near_c(via_overload[1], vc_complex{-2.0F, 2.0F}, 1e-5F),
                    "dft1d(vc_real_view) gives the same X[1] = -2 + 2i");

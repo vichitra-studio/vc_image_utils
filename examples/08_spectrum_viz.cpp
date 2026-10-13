@@ -41,10 +41,10 @@
 #include "vc/core/vc_image.h"
 #include "vc/core/vc_image_writer.h"
 #include "vc/core/vc_pixel_buffer.h"
+#include "vc/debug/vc_spectrum_viz.h"
 #include "vc/io/vc_io_stb.h"
 #include "vc/math/vc_dft.h"
 #include "vc/math/vc_grid2d.h"
-#include "vc/debug/vc_spectrum_viz.h"
 
 namespace {
 
@@ -60,9 +60,9 @@ void expect(bool condition, const char* what) {
     }
 }
 
-using vc::math::vc_complex_signal;
 using vc::math::grid2d;
 using vc::math::vc_complex;
+using vc::math::vc_complex_signal;
 
 constexpr float k_pi = std::numbers::pi_v<float>;
 constexpr float k_two_pi = 2.0F * k_pi;
@@ -119,7 +119,7 @@ int main() {
             constexpr std::uint32_t w = 5;
             constexpr std::uint32_t h = 3;
             vc_complex_signal in(static_cast<std::size_t>(w) * h,
-                              vc_complex{0.0F, 0.0F});
+                                 vc_complex{0.0F, 0.0F});
             in[0] = vc_complex{1.0F, 0.0F}; // the DC bin, marked
 
             const vc_complex_signal out = vc::math::fftshift2d(
@@ -146,10 +146,10 @@ int main() {
         {
             auto twice = [](std::uint32_t w, std::uint32_t h) {
                 const vc_complex_signal in = numbered(w, h);
-                const grid2d g = grid2d::checked(vc::math::vc_complex_view{in}, w,
-                                                 h, "08_spectrum_viz");
-                return std::pair{in, vc::math::fftshift2d(
-                                         vc::math::fftshift2d(in, g), g)};
+                const grid2d g = grid2d::checked(vc::math::vc_complex_view{in},
+                                                 w, h, "08_spectrum_viz");
+                return std::pair{
+                    in, vc::math::fftshift2d(vc::math::fftshift2d(in, g), g)};
             };
             const auto [even_in, even_out] = twice(4, 2);
             const auto [odd_in, odd_out] = twice(5, 3);
@@ -179,15 +179,15 @@ int main() {
             vc_complex_signal plane(static_cast<std::size_t>(w) * h);
             for (std::uint32_t y = 0; y < h; ++y) {
                 for (std::uint32_t x = 0; x < w; ++x) {
-                    const float v = std::cos(k_two_pi * static_cast<float>(kx) *
-                                             static_cast<float>(x) /
-                                             static_cast<float>(w));
+                    const float v =
+                        std::cos(k_two_pi * static_cast<float>(kx) *
+                                 static_cast<float>(x) / static_cast<float>(w));
                     plane[static_cast<std::size_t>(y) * w + x] =
                         vc_complex{v, 0.0F};
                 }
             }
-            const grid2d g = grid2d::checked(vc::math::vc_complex_view{plane}, w,
-                                             h, "08_spectrum_viz");
+            const grid2d g = grid2d::checked(vc::math::vc_complex_view{plane},
+                                             w, h, "08_spectrum_viz");
             const vc::debug::spectrum_dump dump =
                 vc::debug::spectrum_viz(vc::math::dft2d(plane, g), g);
 
@@ -195,8 +195,7 @@ int main() {
             const vc::image_dim cy = h / 2;
             const vc::vc_image& mag = dump.linear_magnitude;
 
-            expect(mag.width() == w && mag.height() == h &&
-                       mag.channels() == 1,
+            expect(mag.width() == w && mag.height() == h && mag.channels() == 1,
                    "spectrum_viz keeps the extent, one channel");
 
             // Both members of the pair are the maximum, so both read 1.0 after
@@ -214,7 +213,8 @@ int main() {
             bool elsewhere_dark = true;
             for (vc::image_dim y = 0; y < h && elsewhere_dark; ++y) {
                 for (vc::image_dim x = 0; x < w && elsewhere_dark; ++x) {
-                    const bool is_pair = (y == cy) && (x == cx + kx || x == cx - kx);
+                    const bool is_pair =
+                        (y == cy) && (x == cx + kx || x == cx - kx);
                     if (!is_pair) {
                         elsewhere_dark = px(mag, x, y) < 0.01F;
                     }
@@ -251,8 +251,8 @@ int main() {
             vc_complex_signal plane(w, vc_complex{0.0F, 0.0F});
             plane[1] = vc_complex{1.0F, 0.0F};
 
-            const grid2d g = grid2d::checked(vc::math::vc_complex_view{plane}, w,
-                                             h, "08_spectrum_viz");
+            const grid2d g = grid2d::checked(vc::math::vc_complex_view{plane},
+                                             w, h, "08_spectrum_viz");
             const vc::debug::spectrum_dump dump =
                 vc::debug::spectrum_viz(vc::math::dft2d(plane, g), g);
 
@@ -301,10 +301,9 @@ int main() {
             spec[0] = vc_complex{1000.0F, 0.0F};
             spec[1] = vc_complex{1.0F, 0.0F};
 
-            const grid2d g = grid2d::checked(vc::math::vc_complex_view{spec}, w, h,
-                                             "08_spectrum_viz");
-            const vc::debug::spectrum_dump d =
-                vc::debug::spectrum_viz(spec, g);
+            const grid2d g = grid2d::checked(vc::math::vc_complex_view{spec}, w,
+                                             h, "08_spectrum_viz");
+            const vc::debug::spectrum_dump d = vc::debug::spectrum_viz(spec, g);
 
             expect(px(d.linear_magnitude, 2, 0) > 0.99F &&
                        px(d.log_magnitude, 2, 0) > 0.99F,
@@ -339,9 +338,9 @@ int main() {
             constexpr std::uint32_t w = 4;
             constexpr std::uint32_t h = 2;
             const vc_complex_signal zeros(static_cast<std::size_t>(w) * h,
-                                       vc_complex{0.0F, 0.0F});
-            const grid2d g = grid2d::checked(vc::math::vc_complex_view{zeros}, w,
-                                             h, "08_spectrum_viz");
+                                          vc_complex{0.0F, 0.0F});
+            const grid2d g = grid2d::checked(vc::math::vc_complex_view{zeros},
+                                             w, h, "08_spectrum_viz");
             const vc::debug::spectrum_dump d =
                 vc::debug::spectrum_viz(zeros, g);
 
@@ -352,9 +351,10 @@ int main() {
                                 px(d.linear_magnitude, x, y) == 0.0F;
                 }
             }
-            expect(all_black, "all-zero spectrum returns black, does not throw");
-            expect(d.dc_to_median == 0.0F,
-                   "dc_to_median is 0 when the median is 0 (undefined, not small)");
+            expect(all_black,
+                   "all-zero spectrum returns black, does not throw");
+            expect(d.dc_to_median == 0.0F, "dc_to_median is 0 when the median "
+                                           "is 0 (undefined, not small)");
             expect(std::fabs(d.linear_zero_fraction - 1.0F) < 1e-5F,
                    "every bin is lost on a linear dump of nothing");
         }
@@ -373,17 +373,16 @@ int main() {
             const vc::vc_image src = reader.read(
                 input, vc::io::read_config{.dtype = vc::pixel_dtype::f32});
 
-            const vc::image_dim side =
-                std::min<vc::image_dim>(128, std::min(src.width(), src.height()));
+            const vc::image_dim side = std::min<vc::image_dim>(
+                128, std::min(src.width(), src.height()));
             const vc::image_dim x0 = (src.width() - side) / 2;
             const vc::image_dim y0 = (src.height() - side) / 2;
 
             vc_complex_signal plane(static_cast<std::size_t>(side) * side);
             for (vc::image_dim y = 0; y < side; ++y) {
                 for (vc::image_dim x = 0; x < side; ++x) {
-                    plane[static_cast<std::size_t>(y) * side + x] =
-                        vc_complex{src.at<vc::buf_f32>(x0 + x, y0 + y, 0),
-                                   0.0F};
+                    plane[static_cast<std::size_t>(y) * side + x] = vc_complex{
+                        src.at<vc::buf_f32>(x0 + x, y0 + y, 0), 0.0F};
                 }
             }
 
@@ -395,15 +394,14 @@ int main() {
             std::cout << "\n  " << side << " x " << side
                       << " centre crop, channel 0\n"
                       << "    DC magnitude          " << dump.dc_magnitude
-                      << "\n    median magnitude      "
-                      << dump.median_magnitude
+                      << "\n    median magnitude      " << dump.median_magnitude
                       << "\n    DC : median           " << dump.dc_to_median
                       << "\n    linear bins at grey 0 "
                       << (dump.linear_zero_fraction * 100.0F) << " %\n";
 
             const std::string out_dir = std::string(VC_EXAMPLES_OUTPUT_DIR);
-            const auto png = vc::io::write_config{
-                .format = vc::io::vc_image_format::png};
+            const auto png =
+                vc::io::write_config{.format = vc::io::vc_image_format::png};
             writer.write(out_dir + "/08_spectrum_log.png", dump.log_magnitude,
                          png);
             writer.write(out_dir + "/08_spectrum_linear.png",

@@ -406,6 +406,7 @@ using vc_real_view = std::span<const vc::float32>;
 // shift needs a rotation by ceil(N/2) instead, which this function does not
 // provide because nothing here needs to invert a display transform. Filter in
 // UNSHIFTED order and shift only on the way to a PNG.
-[[nodiscard]] vc_complex_signal fftshift2d(vc_complex_view plane, grid2d extent);
+[[nodiscard]] vc_complex_signal fftshift2d(vc_complex_view plane,
+                                           grid2d extent);
 
 } // namespace vc::math

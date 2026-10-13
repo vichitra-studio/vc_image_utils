@@ -140,17 +140,18 @@ void require_matching_extent(vc_complex_view plane,
                              grid2d extent,
                              const char* caller) {
     if (plane.size() != extent.count()) {
-        throw vc::vc_exception(
-            vc::vc_error_code::invalid_argument,
-            std::string(caller) + ": plane holds " +
-                std::to_string(plane.size()) + " samples but extent " +
-                std::to_string(extent.width()) + " x " +
-                std::to_string(extent.height()) + " needs " +
-                std::to_string(extent.count()));
+        throw vc::vc_exception(vc::vc_error_code::invalid_argument,
+                               std::string(caller) + ": plane holds " +
+                                   std::to_string(plane.size()) +
+                                   " samples but extent " +
+                                   std::to_string(extent.width()) + " x " +
+                                   std::to_string(extent.height()) + " needs " +
+                                   std::to_string(extent.count()));
     }
 }
 
-vc_complex_signal separable_passes(vc_complex_view in, grid2d extent, pass1d pass) {
+vc_complex_signal
+separable_passes(vc_complex_view in, grid2d extent, pass1d pass) {
     const std::size_t width = extent.width();
     const std::size_t height = extent.height();
 
@@ -211,7 +212,7 @@ vc_complex_signal fftshift2d(vc_complex_view plane, grid2d extent) {
     vc_complex_signal out(extent.count());
     const auto width = extent.width();
     const auto height = extent.height();
-    for(std::size_t y = 0; y < height; ++y) {
+    for (std::size_t y = 0; y < height; ++y) {
         for (std::size_t x = 0; x < width; ++x) {
             const std::size_t shifted_x = (x + (width / 2)) % width;
             const std::size_t shifted_y = (y + (height / 2)) % height;

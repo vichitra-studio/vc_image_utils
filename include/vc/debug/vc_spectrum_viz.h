@@ -4,8 +4,8 @@
 #pragma once
 
 #include "vc/core/vc_image.h"
-#include "vc/math/vc_dft.h"     // vc_complex_view
-#include "vc/math/vc_grid2d.h"  // grid2d -- dimensions that cannot be wrong
+#include "vc/math/vc_dft.h"    // vc_complex_view
+#include "vc/math/vc_grid2d.h" // grid2d -- dimensions that cannot be wrong
 
 namespace vc::debug {
 

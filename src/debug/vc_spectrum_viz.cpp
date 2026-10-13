@@ -76,8 +76,8 @@ spectrum_dump spectrum_viz(vc::math::vc_complex_view spectrum,
             // linear rescale: -pi -> 0, 0 -> 0.5, +pi -> 1. Without it every
             // negative phase would clamp to black and half the information
             // would be gone.
-            phase.at<buf_f32>(x, y, 0) = (std::atan2(z.imag(), z.real()) + k_pi) /
-                                         (2.0F * k_pi);
+            phase.at<buf_f32>(x, y, 0) =
+                (std::atan2(z.imag(), z.real()) + k_pi) / (2.0F * k_pi);
         }
     }
 
@@ -97,7 +97,8 @@ spectrum_dump spectrum_viz(vc::math::vc_complex_view spectrum,
     // for an even count, no averaging, all bins included. nth_element rather
     // than a full sort: it is linear, and only that one position is wanted.
     const std::size_t mid = mags.size() / 2;
-    std::nth_element(mags.begin(), mags.begin() + static_cast<std::ptrdiff_t>(mid),
+    std::nth_element(mags.begin(),
+                     mags.begin() + static_cast<std::ptrdiff_t>(mid),
                      mags.end());
     const float median_magnitude = mags[mid];
 

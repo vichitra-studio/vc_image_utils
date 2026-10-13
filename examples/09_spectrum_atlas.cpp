@@ -95,8 +95,8 @@ float fx(vc::image_dim v) {
 // it is a legal image rather than a signed field.
 std::function<float(vc::image_dim, vc::image_dim)> grating(float kx, float ky) {
     return [kx, ky](vc::image_dim x, vc::image_dim y) {
-        return 0.5F + 0.5F * std::cos(k_two_pi *
-                                      (kx * fx(x) + ky * fx(y)) / fx(k_n));
+        return 0.5F +
+               0.5F * std::cos(k_two_pi * (kx * fx(x) + ky * fx(y)) / fx(k_n));
     };
 }
 
@@ -124,10 +124,9 @@ int main() {
             vc::io::read_config{.dtype = vc::pixel_dtype::f32});
         const vc::image_dim x0 = (src.width() - k_n) / 2;
         const vc::image_dim y0 = (src.height() - k_n) / 2;
-        const vc::vc_image photo =
-            make([&](vc::image_dim x, vc::image_dim y) {
-                return src.at<vc::buf_f32>(x0 + x, y0 + y, 0);
-            });
+        const vc::vc_image photo = make([&](vc::image_dim x, vc::image_dim y) {
+            return src.at<vc::buf_f32>(x0 + x, y0 + y, 0);
+        });
         const vc::vc_image photo_blurred = vc::pixelops::convolve(
             photo, vc::pixelops::make_gaussian(3.0F, 3.0F),
             vc::pixelops::vc_edge_policy::clamp);
@@ -143,10 +142,10 @@ int main() {
         // transform before being written down, which is why the diagonal
         // entry says TWO dots and not four.
         std::vector<entry> atlas;
-        atlas.push_back({"01_flat",
-                         make([](vc::image_dim, vc::image_dim) { return 0.5F; }),
-                         "ONE dot dead centre, nothing else. All the energy is "
-                         "DC because there is no change anywhere."});
+        atlas.push_back(
+            {"01_flat", make([](vc::image_dim, vc::image_dim) { return 0.5F; }),
+             "ONE dot dead centre, nothing else. All the energy is "
+             "DC because there is no change anywhere."});
         atlas.push_back({"02_impulse_centre",
                          make([](vc::image_dim x, vc::image_dim y) {
                              return (x == c && y == c) ? 1.0F : 0.0F;
@@ -213,43 +212,38 @@ int main() {
                          "empty. One sharp edge needs every (odd) frequency in "
                          "the direction it changes. THIS is where the cross in "
                          "a natural photo's spectrum comes from."});
-        atlas.push_back({"11_rectangle",
-                         make([](vc::image_dim x, vc::image_dim y) {
-                             const int ix = static_cast<int>(x) -
-                                            static_cast<int>(c);
-                             const int iy = static_cast<int>(y) -
-                                            static_cast<int>(c);
-                             return (std::abs(ix) < 16 && std::abs(iy) < 8)
-                                        ? 1.0F
-                                        : 0.0F;
-                         }),
-                         "A GRID of ringing lobes filling the frame, "
-                         "brightest at the centre -- a sinc in each direction, "
-                         "multiplied. Not just a cross: the lobes tile the "
-                         "whole plane. The box is 32 wide and 16 tall, so its "
-                         "lobes repeat every 128/32 = 4 bins horizontally and "
-                         "every 128/16 = 8 vertically -- WIDER in space means "
-                         "lobes PACKED CLOSER in frequency. Compare 13: the "
-                         "ringing is what a hard-edged shape costs you."});
-        atlas.push_back({"12_disc",
-                         make([](vc::image_dim x, vc::image_dim y) {
-                             const float dx = fx(x) - fx(c);
-                             const float dy = fx(y) - fx(c);
-                             return (dx * dx + dy * dy) < 400.0F ? 1.0F : 0.0F;
-                         }),
-                         "CONCENTRIC RINGS. The round version of 11 -- no "
-                         "preferred direction, so the sinc lobes become rings."});
-        atlas.push_back({"13_gaussian_blob",
-                         make([](vc::image_dim x, vc::image_dim y) {
-                             const float dx = fx(x) - fx(c);
-                             const float dy = fx(y) - fx(c);
-                             return std::exp(-(dx * dx + dy * dy) /
-                                             (2.0F * 64.0F));
-                         }),
-                         "ANOTHER BLOB, concentrated at the centre, with NO "
-                         "rings. A Gaussian transforms to a Gaussian -- and "
-                         "the absence of ringing is exactly why a Gaussian "
-                         "blur does not halo where a box blur does."});
+        atlas.push_back(
+            {"11_rectangle", make([](vc::image_dim x, vc::image_dim y) {
+                 const int ix = static_cast<int>(x) - static_cast<int>(c);
+                 const int iy = static_cast<int>(y) - static_cast<int>(c);
+                 return (std::abs(ix) < 16 && std::abs(iy) < 8) ? 1.0F : 0.0F;
+             }),
+             "A GRID of ringing lobes filling the frame, "
+             "brightest at the centre -- a sinc in each direction, "
+             "multiplied. Not just a cross: the lobes tile the "
+             "whole plane. The box is 32 wide and 16 tall, so its "
+             "lobes repeat every 128/32 = 4 bins horizontally and "
+             "every 128/16 = 8 vertically -- WIDER in space means "
+             "lobes PACKED CLOSER in frequency. Compare 13: the "
+             "ringing is what a hard-edged shape costs you."});
+        atlas.push_back(
+            {"12_disc", make([](vc::image_dim x, vc::image_dim y) {
+                 const float dx = fx(x) - fx(c);
+                 const float dy = fx(y) - fx(c);
+                 return (dx * dx + dy * dy) < 400.0F ? 1.0F : 0.0F;
+             }),
+             "CONCENTRIC RINGS. The round version of 11 -- no "
+             "preferred direction, so the sinc lobes become rings."});
+        atlas.push_back(
+            {"13_gaussian_blob", make([](vc::image_dim x, vc::image_dim y) {
+                 const float dx = fx(x) - fx(c);
+                 const float dy = fx(y) - fx(c);
+                 return std::exp(-(dx * dx + dy * dy) / (2.0F * 64.0F));
+             }),
+             "ANOTHER BLOB, concentrated at the centre, with NO "
+             "rings. A Gaussian transforms to a Gaussian -- and "
+             "the absence of ringing is exactly why a Gaussian "
+             "blur does not halo where a box blur does."});
         atlas.push_back({"14_noise", noise,
                          "A UNIFORM HAZE with no structure at all. Every "
                          "frequency present in roughly equal amount, which is "
@@ -268,14 +262,15 @@ int main() {
                          "'fine detail' is 'far from centre'. A low-pass "
                          "filter, watched rather than described."});
 
-        std::cout << "\n  pattern                   DC:median   bins lost on a "
-                     "LINEAR dump\n"
-                  << "  ---------------------------------------------------------"
-                     "------\n";
+        std::cout
+            << "\n  pattern                   DC:median   bins lost on a "
+               "LINEAR dump\n"
+            << "  ---------------------------------------------------------"
+               "------\n";
 
         for (const entry& e : atlas) {
-            vc::math::vc_complex_signal plane(
-                static_cast<std::size_t>(k_n) * k_n);
+            vc::math::vc_complex_signal plane(static_cast<std::size_t>(k_n) *
+                                              k_n);
             for (vc::image_dim y = 0; y < k_n; ++y) {
                 for (vc::image_dim x = 0; x < k_n; ++x) {
                     plane[static_cast<std::size_t>(y) * k_n + x] =
@@ -283,8 +278,9 @@ int main() {
                                              0.0F};
                 }
             }
-            const vc::math::grid2d g = vc::math::grid2d::checked(
-                vc::math::vc_complex_view{plane}, k_n, k_n, "09_spectrum_atlas");
+            const vc::math::grid2d g =
+                vc::math::grid2d::checked(vc::math::vc_complex_view{plane}, k_n,
+                                          k_n, "09_spectrum_atlas");
             const vc::debug::spectrum_dump d =
                 vc::debug::spectrum_viz(vc::math::dft2d(plane, g), g);
 
@@ -310,8 +306,9 @@ int main() {
                    "every atlas entry dumps a full-size spectrum");
         }
 
-        std::cout << "\n  WHAT TO EXPECT, entry by entry — read BEFORE looking"
-                     "\n  ----------------------------------------------------\n";
+        std::cout
+            << "\n  WHAT TO EXPECT, entry by entry — read BEFORE looking"
+               "\n  ----------------------------------------------------\n";
         for (const entry& e : atlas) {
             std::cout << "\n  " << e.name << "\n      " << e.expect_to_see
                       << '\n';

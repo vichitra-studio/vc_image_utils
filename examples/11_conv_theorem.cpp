@@ -263,8 +263,8 @@ int main() {
 
         // ---- 2. the extent under wrap is the source extent ---------------
         {
-            const grid2d e = frequency_extent(row, box3x1,
-                                              vc_edge_policy::wrap);
+            const grid2d e =
+                frequency_extent(row, box3x1, vc_edge_policy::wrap);
             expect(e.width() == 4 && e.height() == 1,
                    "wrap extent == source extent (no padding)");
         }
@@ -279,14 +279,13 @@ int main() {
         //   9x9 on 4x4     -> 12x12 kernel WIDER than the image, which is
         //                           legal; the extent more than doubles.
         {
-            const grid2d e1 = frequency_extent(row, box3x1,
-                                               vc_edge_policy::zero);
+            const grid2d e1 =
+                frequency_extent(row, box3x1, vc_edge_policy::zero);
             expect(e1.width() == 6 && e1.height() == 1,
                    "zero extent: 4x1 with 3x1 kernel -> 6x1");
 
             const vc_kernel one{1, 1, {1.0F}};
-            const grid2d e2 = frequency_extent(row, one,
-                                               vc_edge_policy::zero);
+            const grid2d e2 = frequency_extent(row, one, vc_edge_policy::zero);
             expect(e2.width() == 4 && e2.height() == 1,
                    "zero extent: a 1-tap kernel needs NO padding");
 
@@ -361,10 +360,8 @@ int main() {
         // undetected behind a symmetric test kernel.
         {
             const vc::vc_image img = noise_image(32, 24, 1, 11U);
-            const vc_kernel asym{3, 3,
-                                 {0.0F, 0.1F, 0.2F,
-                                  0.3F, 0.4F, 0.0F,
-                                  0.0F, 0.0F, 0.5F}};
+            const vc_kernel asym{
+                3, 3, {0.0F, 0.1F, 0.2F, 0.3F, 0.4F, 0.0F, 0.0F, 0.0F, 0.5F}};
 
             const vc::vc_image spatial =
                 convolve(img, asym, vc_edge_policy::wrap);
@@ -390,12 +387,9 @@ int main() {
         // So the contamination is EXACTLY 1/3, by hand, and the assertion
         // pins that value rather than just "they differ".
         {
-            const vc::vc_image edge =
-                make_image(8, 1, 1,
-                           {0.0F, 0.0F, 0.0F, 0.0F,
-                            0.0F, 0.0F, 0.0F, 1.0F});
-            const vc_kernel box{3, 1,
-                                {1.0F / 3.0F, 1.0F / 3.0F, 1.0F / 3.0F}};
+            const vc::vc_image edge = make_image(
+                8, 1, 1, {0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F});
+            const vc_kernel box{3, 1, {1.0F / 3.0F, 1.0F / 3.0F, 1.0F / 3.0F}};
 
             const vc::vc_image w =
                 convolve_frequency(edge, box, vc_edge_policy::wrap);
@@ -418,10 +412,8 @@ int main() {
         // ---- 7. zero-padded agreement with convolve(zero) ----------------
         {
             const vc::vc_image img = noise_image(32, 24, 1, 23U);
-            const vc_kernel asym{3, 3,
-                                 {0.0F, 0.1F, 0.2F,
-                                  0.3F, 0.4F, 0.0F,
-                                  0.0F, 0.0F, 0.5F}};
+            const vc_kernel asym{
+                3, 3, {0.0F, 0.1F, 0.2F, 0.3F, 0.4F, 0.0F, 0.0F, 0.0F, 0.5F}};
 
             const vc::vc_image spatial =
                 convolve(img, asym, vc_edge_policy::zero);
@@ -465,16 +457,13 @@ int main() {
             const vc::vc_image img = noise_image(32, 32, 3, 31U);
             const float sigma = 1.4F;
 
-            const vc::vc_image sep =
-                convolve_separable(img, make_gaussian_1d_x(sigma),
-                                   make_gaussian_1d_y(sigma),
-                                   vc_edge_policy::wrap);
-            const vc::vc_image freq =
-                convolve_frequency(img, make_gaussian(sigma, sigma),
-                                   vc_edge_policy::wrap);
+            const vc::vc_image sep = convolve_separable(
+                img, make_gaussian_1d_x(sigma), make_gaussian_1d_y(sigma),
+                vc_edge_policy::wrap);
+            const vc::vc_image freq = convolve_frequency(
+                img, make_gaussian(sigma, sigma), vc_edge_policy::wrap);
 
-            expect(freq.channels() == 3,
-                   "channel count follows the source");
+            expect(freq.channels() == 3, "channel count follows the source");
             expect(rel_diff(freq, sep) <= 1e-5F,
                    "wrap: frequency == SEPARABLE spatial, 3 channels");
         }
@@ -562,15 +551,13 @@ int main() {
         // 3x3 kernel gives odd source dims AND odd padded dims (7x5).
         {
             const vc::vc_image img = noise_image(5, 3, 1, 61U);
-            const vc_kernel asym{3, 3,
-                                 {0.0F, 0.1F, 0.2F,
-                                  0.3F, 0.4F, 0.0F,
-                                  0.0F, 0.0F, 0.5F}};
+            const vc_kernel asym{
+                3, 3, {0.0F, 0.1F, 0.2F, 0.3F, 0.4F, 0.0F, 0.0F, 0.0F, 0.5F}};
 
             expect(frequency_extent(img, asym, vc_edge_policy::zero).width() ==
-                       7 &&
-                   frequency_extent(img, asym, vc_edge_policy::zero).height() ==
-                       5,
+                           7 &&
+                       frequency_extent(img, asym, vc_edge_policy::zero)
+                               .height() == 5,
                    "odd dims: 5x3 with 3x3 -> 7x5");
             expect(rel_diff(convolve_frequency(img, asym, vc_edge_policy::wrap),
                             convolve(img, asym, vc_edge_policy::wrap)) <= 1e-5F,
@@ -676,16 +663,14 @@ int main() {
                    "derivative on flat, wrap: zero everywhere, both paths");
 
             const vc::vc_image img = noise_image(16, 16, 1, 53U);
-            expect(rel_diff(convolve_frequency(img, deriv,
-                                               vc_edge_policy::wrap),
-                            convolve(img, deriv, vc_edge_policy::wrap)) <=
-                       1e-5F,
-                   "derivative on noise, wrap: matches convolve");
-            expect(rel_diff(convolve_frequency(img, deriv,
-                                               vc_edge_policy::zero),
-                            convolve(img, deriv, vc_edge_policy::zero)) <=
-                       1e-5F,
-                   "derivative on noise, zero: matches convolve");
+            expect(
+                rel_diff(convolve_frequency(img, deriv, vc_edge_policy::wrap),
+                         convolve(img, deriv, vc_edge_policy::wrap)) <= 1e-5F,
+                "derivative on noise, wrap: matches convolve");
+            expect(
+                rel_diff(convolve_frequency(img, deriv, vc_edge_policy::zero),
+                         convolve(img, deriv, vc_edge_policy::zero)) <= 1e-5F,
+                "derivative on noise, zero: matches convolve");
 
             // An all-zero kernel, which is sum-to-zero AND annihilates
             // everything. Both paths give exactly zero.
@@ -720,11 +705,10 @@ int main() {
         {
             const vc::vc_image small = noise_image(4, 4, 1, 59U);
             const vc_kernel k31{31, 31, std::vector<float>(961, 1.0F / 961.0F)};
-            expect(rel_diff(convolve_frequency(small, k31,
-                                               vc_edge_policy::wrap),
-                            convolve(small, k31, vc_edge_policy::wrap)) <=
-                       1e-5F,
-                   "31x31 on 4x4 wrap: ~60 taps summed per slot");
+            expect(
+                rel_diff(convolve_frequency(small, k31, vc_edge_policy::wrap),
+                         convolve(small, k31, vc_edge_policy::wrap)) <= 1e-5F,
+                "31x31 on 4x4 wrap: ~60 taps summed per slot");
 
             const vc::vc_image rgb = noise_image(5, 3, 3, 61U);
             const vc_kernel k7{7, 5, std::vector<float>(35, 1.0F / 35.0F)};
@@ -752,19 +736,16 @@ int main() {
         // This is the only group here that tests a sentence in the header
         // rather than a property of the output.
         {
-            const vc_kernel asym{3, 3,
-                                 {0.0F, 0.1F, 0.2F,
-                                  0.3F, 0.4F, 0.0F,
-                                  0.0F, 0.0F, 0.5F}};
+            const vc_kernel asym{
+                3, 3, {0.0F, 0.1F, 0.2F, 0.3F, 0.4F, 0.0F, 0.0F, 0.0F, 0.5F}};
             bool flat_across_scales = true;
             for (const float amp : {0.001F, 1.0F, 1000.0F, 100000.0F}) {
                 const vc::vc_image img = noise_image(32, 32, 1, 67U, amp);
                 flat_across_scales =
                     flat_across_scales &&
-                    rel_diff(convolve_frequency(img, asym,
-                                                vc_edge_policy::wrap),
-                             convolve(img, asym, vc_edge_policy::wrap)) <=
-                        1e-5F;
+                    rel_diff(
+                        convolve_frequency(img, asym, vc_edge_policy::wrap),
+                        convolve(img, asym, vc_edge_policy::wrap)) <= 1e-5F;
             }
             expect(flat_across_scales,
                    "relative error is SCALE INVARIANT over 1e-3 .. 1e5");
@@ -776,10 +757,8 @@ int main() {
         // cross-check is under `wrap`. And correlation has never gone through
         // this path at all, despite being how block matching will use it.
         {
-            const vc_kernel asym{3, 3,
-                                 {0.0F, 0.1F, 0.2F,
-                                  0.3F, 0.4F, 0.0F,
-                                  0.0F, 0.0F, 0.5F}};
+            const vc_kernel asym{
+                3, 3, {0.0F, 0.1F, 0.2F, 0.3F, 0.4F, 0.0F, 0.0F, 0.0F, 0.5F}};
             const vc::vc_image img = noise_image(24, 16, 1, 71U);
 
             // (a) CORRELATION, which is convolution with the kernel rotated
@@ -803,11 +782,11 @@ int main() {
             // x at 16, because kw-1 is 0 along x.
             const vc_kernel col{1, 5, {0.1F, 0.2F, 0.4F, 0.2F, 0.1F}};
             const vc::vc_image sq = noise_image(16, 16, 1, 73U);
-            expect(frequency_extent(sq, col, vc_edge_policy::zero).width() ==
-                           16 &&
-                       frequency_extent(sq, col, vc_edge_policy::zero)
-                               .height() == 20,
-                   "a 1x5 kernel pads Y only: 16x16 -> 16x20");
+            expect(
+                frequency_extent(sq, col, vc_edge_policy::zero).width() == 16 &&
+                    frequency_extent(sq, col, vc_edge_policy::zero).height() ==
+                        20,
+                "a 1x5 kernel pads Y only: 16x16 -> 16x20");
             expect(rel_diff(convolve_frequency(sq, col, vc_edge_policy::wrap),
                             convolve(sq, col, vc_edge_policy::wrap)) <= 1e-5F,
                    "column kernel, wrap");
@@ -816,17 +795,15 @@ int main() {
             // alone -- group 10 collides on X, group 13 on both.
             const vc_kernel tall{1, 9, std::vector<float>(9, 1.0F / 9.0F)};
             const vc::vc_image tiny = noise_image(4, 4, 1, 79U);
-            expect(rel_diff(convolve_frequency(tiny, tall,
-                                               vc_edge_policy::wrap),
-                            convolve(tiny, tall, vc_edge_policy::wrap)) <=
-                       1e-5F,
-                   "1x9 on 4x4 wrap: taps collide on Y only");
+            expect(
+                rel_diff(convolve_frequency(tiny, tall, vc_edge_policy::wrap),
+                         convolve(tiny, tall, vc_edge_policy::wrap)) <= 1e-5F,
+                "1x9 on 4x4 wrap: taps collide on Y only");
 
             // (c) separable agreement under ZERO. Group 9 checks only wrap, and
             // the zero path crops a padded result, which is different code.
             const vc::vc_image rgb = noise_image(32, 32, 3, 83U);
-            expect(rel_diff(convolve_frequency(rgb,
-                                               make_gaussian(1.4F, 1.4F),
+            expect(rel_diff(convolve_frequency(rgb, make_gaussian(1.4F, 1.4F),
                                                vc_edge_policy::zero),
                             convolve_separable(rgb, make_gaussian_1d_x(1.4F),
                                                make_gaussian_1d_y(1.4F),
@@ -838,15 +815,13 @@ int main() {
             // legitimately end up empty, and an implementation special-casing
             // "already written" rather than summing would differ here.
             const vc::vc_image signed_row = noise_image(4, 1, 1, 89U);
-            const vc_kernel signed_k{5, 1,
-                                     {1.0F, -2.0F, 0.5F, -2.0F, 1.0F}};
+            const vc_kernel signed_k{5, 1, {1.0F, -2.0F, 0.5F, -2.0F, 1.0F}};
             expect(rel_diff(convolve_frequency(signed_row, signed_k,
                                                vc_edge_policy::wrap),
                             convolve(signed_row, signed_k,
                                      vc_edge_policy::wrap)) <= 1e-5F,
                    "signed weights, colliding slots, wrap");
-            const vc_kernel cancel_k{5, 1,
-                                     {1.0F, -2.0F, 0.5F, -2.0F, -1.0F}};
+            const vc_kernel cancel_k{5, 1, {1.0F, -2.0F, 0.5F, -2.0F, -1.0F}};
             expect(rel_diff(convolve_frequency(signed_row, cancel_k,
                                                vc_edge_policy::wrap),
                             convolve(signed_row, cancel_k,

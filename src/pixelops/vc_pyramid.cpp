@@ -32,16 +32,18 @@ namespace {
 // [[maybe_unused]] only while the bodies below are stubs -- reduce() and
 // expand() are the two callers, and the attribute comes off with the stubs.
 [[maybe_unused]] const vc_kernel& burt_x() {
-    static const vc_kernel k{5, 1,
-                             {1.0F / 16.0F, 4.0F / 16.0F, 6.0F / 16.0F,
-                              4.0F / 16.0F, 1.0F / 16.0F}};
+    static const vc_kernel k{
+        5,
+        1,
+        {1.0F / 16.0F, 4.0F / 16.0F, 6.0F / 16.0F, 4.0F / 16.0F, 1.0F / 16.0F}};
     return k;
 }
 
 [[maybe_unused]] const vc_kernel& burt_y() {
-    static const vc_kernel k{1, 5,
-                             {1.0F / 16.0F, 4.0F / 16.0F, 6.0F / 16.0F,
-                              4.0F / 16.0F, 1.0F / 16.0F}};
+    static const vc_kernel k{
+        1,
+        5,
+        {1.0F / 16.0F, 4.0F / 16.0F, 6.0F / 16.0F, 4.0F / 16.0F, 1.0F / 16.0F}};
     return k;
 }
 
@@ -58,15 +60,16 @@ void validate_source(const vc::vc_image& src) {
 }
 
 void validate_levels(std::size_t levels, const vc::vc_image& src) {
-    if(levels == 0) {
+    if (levels == 0) {
         throw vc::vc_exception(vc::vc_error_code::invalid_argument,
                                "gaussian_pyramid: levels must be positive");
     }
 
     auto max_allowed_levels = max_pyramid_levels(src.width(), src.height());
     if (levels > max_allowed_levels) {
-        throw vc::vc_exception(vc::vc_error_code::invalid_argument,
-                               "gaussian_pyramid: requested levels exceed max allowed");
+        throw vc::vc_exception(
+            vc::vc_error_code::invalid_argument,
+            "gaussian_pyramid: requested levels exceed max allowed");
     }
 }
 
@@ -93,8 +96,7 @@ void validate_pyramid(const vc_laplacian_pyramid& pyramid) {
                 vc::vc_error_code::invalid_argument,
                 "collapse: band " + std::to_string(i) + " has " +
                     std::to_string(pyramid.bands[i].channels()) +
-                    " channels but the top has " +
-                    std::to_string(channels) +
+                    " channels but the top has " + std::to_string(channels) +
                     "; every level of one pyramid must agree");
         }
     }
@@ -103,12 +105,12 @@ void validate_pyramid(const vc_laplacian_pyramid& pyramid) {
     // from the level below it, i.e. 2n or 2n-1 per axis.
     for (std::size_t i = pyramid.bands.size(); i > 0; --i) {
         const vc::vc_image& finer = pyramid.bands[i - 1];
-        const vc::image_dim cw =
-            (i == pyramid.bands.size()) ? pyramid.top.width()
-                                        : pyramid.bands[i].width();
-        const vc::image_dim chh =
-            (i == pyramid.bands.size()) ? pyramid.top.height()
-                                        : pyramid.bands[i].height();
+        const vc::image_dim cw = (i == pyramid.bands.size())
+                                     ? pyramid.top.width()
+                                     : pyramid.bands[i].width();
+        const vc::image_dim chh = (i == pyramid.bands.size())
+                                      ? pyramid.top.height()
+                                      : pyramid.bands[i].height();
         const std::uint64_t dw = std::uint64_t{cw} * 2U;
         const std::uint64_t dh = std::uint64_t{chh} * 2U;
         if ((dw != finer.width() && dw - 1U != finer.width()) ||
@@ -155,19 +157,20 @@ void validate_pyramid(const vc_laplacian_pyramid& pyramid) {
 std::size_t max_pyramid_levels(vc::image_dim width, vc::image_dim height) {
     std::size_t levels = 1;
     while (width > 1 || height > 1) {
-        width  = (width  + 1) / 2;
+        width = (width + 1) / 2;
         height = (height + 1) / 2;
         ++levels;
     }
     return levels;
-}   
+}
 
 vc::vc_image reduce(const vc::vc_image& src, vc_edge_policy policy) {
     validate_source(src);
     const auto& kernel_x = burt_x();
     const auto& kernel_y = burt_y();
     vc::vc_image blurred = convolve_separable(src, kernel_x, kernel_y, policy);
-    vc::vc_image_writer reduced((src.width() + 1) / 2, (src.height() + 1) / 2, src.channels(), vc::buf_f32{0.0F});
+    vc::vc_image_writer reduced((src.width() + 1) / 2, (src.height() + 1) / 2,
+                                src.channels(), vc::buf_f32{0.0F});
     // ---- THE PIXEL-LOOP IDIOM USED THROUGHOUT THIS FILE ----
     //
     // with_pixels<T>() on both sides, with the row offset hoisted into a
@@ -207,8 +210,10 @@ vc::vc_image reduce(const vc::vc_image& src, vc_edge_policy policy) {
     return std::move(reduced).seal();
 }
 
-vc::vc_image expand(const vc::vc_image& src, vc::image_dim target_width,
-                    vc::image_dim target_height, vc_edge_policy policy) {
+vc::vc_image expand(const vc::vc_image& src,
+                    vc::image_dim target_width,
+                    vc::image_dim target_height,
+                    vc_edge_policy policy) {
     // Widened. src.width() is image_dim (uint32_t), so `* 2` was evaluated in
     // 32 bits and wraps for a width near 2^31 -- the same class as the index
     // arithmetic below, and the last site of it in this file.
@@ -218,13 +223,15 @@ vc::vc_image expand(const vc::vc_image& src, vc::image_dim target_width,
     if ((doubled_w != target_width && doubled_w - 1U != target_width) ||
         (doubled_h != target_height && doubled_h - 1U != target_height)) {
         throw vc::vc_exception(vc::vc_error_code::invalid_argument,
-                               "expand: target size must be double or double minus one of source size");
+                               "expand: target size must be double or double "
+                               "minus one of source size");
     }
 
     const auto& kernel_x = burt_x();
     const auto& kernel_y = burt_y();
 
-    vc_image_writer expanded(target_width, target_height, src.channels(), vc::buf_f32{0.0F});
+    vc_image_writer expanded(target_width, target_height, src.channels(),
+                             vc::buf_f32{0.0F});
     vc_image_writer mask(target_width, target_height, 1, vc::buf_f32{0.0F});
     // SCATTER AND MASK IN ONE LOOP. They mark the SAME positions, so separate
     // loops can disagree about which -- keeping them together makes that
@@ -239,25 +246,28 @@ vc::vc_image expand(const vc::vc_image& src, vc::image_dim target_width,
     const std::size_t sw = src.width();
     const vc::image_dim sh = src.height();
     src.with_pixels<vc::buf_f32>([&](std::span<const vc::buf_f32> in) {
-      expanded.with_pixels<vc::buf_f32>([&](std::span<vc::buf_f32> out) {
-        mask.with_pixels<vc::buf_f32>([&](std::span<vc::buf_f32> msk) {
-          for (vc::image_dim y = 0; y < sh; ++y) {
-            const std::size_t irow = static_cast<std::size_t>(y) * sw * nch;
-            const std::size_t orow =
-                static_cast<std::size_t>(y) * 2U * tw * nch;
-            const std::size_t mrow = static_cast<std::size_t>(y) * 2U * tw;
-            for (vc::image_dim x = 0; x < src.width(); ++x) {
-                const std::size_t i = irow + static_cast<std::size_t>(x) * nch;
-                const std::size_t o =
-                    orow + static_cast<std::size_t>(x) * 2U * nch;
-                msk[mrow + static_cast<std::size_t>(x) * 2U] = 1.0F;
-                for (std::size_t c = 0; c < nch; ++c) {
-                    out[o + c] = in[i + c];
+        expanded.with_pixels<vc::buf_f32>([&](std::span<vc::buf_f32> out) {
+            mask.with_pixels<vc::buf_f32>([&](std::span<vc::buf_f32> msk) {
+                for (vc::image_dim y = 0; y < sh; ++y) {
+                    const std::size_t irow =
+                        static_cast<std::size_t>(y) * sw * nch;
+                    const std::size_t orow =
+                        static_cast<std::size_t>(y) * 2U * tw * nch;
+                    const std::size_t mrow =
+                        static_cast<std::size_t>(y) * 2U * tw;
+                    for (vc::image_dim x = 0; x < src.width(); ++x) {
+                        const std::size_t i =
+                            irow + static_cast<std::size_t>(x) * nch;
+                        const std::size_t o =
+                            orow + static_cast<std::size_t>(x) * 2U * nch;
+                        msk[mrow + static_cast<std::size_t>(x) * 2U] = 1.0F;
+                        for (std::size_t c = 0; c < nch; ++c) {
+                            out[o + c] = in[i + c];
+                        }
+                    }
                 }
-            }
-          }
+            });
         });
-      });
     });
     // Five target-sized buffers are live here: samples, mask, both blurs, and
     // the result. The mask pair is the reducible part -- the blurred mask is an
@@ -265,47 +275,57 @@ vc::vc_image expand(const vc::vc_image& src, vc::image_dim target_width,
     // be W+H instead of W*H and cached per level shape. Not done; see the
     // header's cost note.
     auto const_expanded = std::move(expanded).seal();
-    auto blurred_expanded = convolve_separable(const_expanded, kernel_x, kernel_y, policy);
+    auto blurred_expanded =
+        convolve_separable(const_expanded, kernel_x, kernel_y, policy);
     auto const_mask = std::move(mask).seal();
-    auto blurred_mask = convolve_separable(const_mask, kernel_x, kernel_y, policy);
+    auto blurred_mask =
+        convolve_separable(const_mask, kernel_x, kernel_y, policy);
 
-    vc_image_writer final_expanded(target_width, target_height, src.channels(), vc::buf_f32{0.0F});
+    vc_image_writer final_expanded(target_width, target_height, src.channels(),
+                                   vc::buf_f32{0.0F});
     blurred_expanded.with_pixels<vc::buf_f32>(
         [&](std::span<const vc::buf_f32> num) {
-      blurred_mask.with_pixels<vc::buf_f32>(
-          [&](std::span<const vc::buf_f32> den) {
-        final_expanded.with_pixels<vc::buf_f32>(
-            [&](std::span<vc::buf_f32> out) {
-          for (vc::image_dim y = 0; y < target_height; ++y) {
-            const std::size_t row = static_cast<std::size_t>(y) * tw * nch;
-            const std::size_t mrow = static_cast<std::size_t>(y) * tw;
-            for (vc::image_dim x = 0; x < target_width; ++x) {
-                // The guard stays, epsilon-based, returning 0: no real sample
-                // influenced this pixel, so the numerator is zero too. Without
-                // the epsilon a denormal denominator would divide and amplify.
-                const float weight = den[mrow + static_cast<std::size_t>(x)];
-                const std::size_t o =
-                    row + static_cast<std::size_t>(x) * nch;
-                for (std::size_t c = 0; c < nch; ++c) {
-                    out[o + c] = weight > 1e-12F ? num[o + c] / weight : 0.0F;
-                }
-            }
-          }
+            blurred_mask.with_pixels<vc::buf_f32>(
+                [&](std::span<const vc::buf_f32> den) {
+                    final_expanded.with_pixels<vc::buf_f32>(
+                        [&](std::span<vc::buf_f32> out) {
+                            for (vc::image_dim y = 0; y < target_height; ++y) {
+                                const std::size_t row =
+                                    static_cast<std::size_t>(y) * tw * nch;
+                                const std::size_t mrow =
+                                    static_cast<std::size_t>(y) * tw;
+                                for (vc::image_dim x = 0; x < target_width;
+                                     ++x) {
+                                    // The guard stays, epsilon-based, returning 0: no real sample
+                                    // influenced this pixel, so the numerator is zero too. Without
+                                    // the epsilon a denormal denominator would divide and amplify.
+                                    const float weight =
+                                        den[mrow + static_cast<std::size_t>(x)];
+                                    const std::size_t o =
+                                        row + static_cast<std::size_t>(x) * nch;
+                                    for (std::size_t c = 0; c < nch; ++c) {
+                                        out[o + c] = weight > 1e-12F
+                                                         ? num[o + c] / weight
+                                                         : 0.0F;
+                                    }
+                                }
+                            }
+                        });
+                });
         });
-      });
-    });
 
     return std::move(final_expanded).seal();
 }
 
-vc_pyramid gaussian_pyramid(const vc::vc_image& src, std::size_t levels,
+vc_pyramid gaussian_pyramid(const vc::vc_image& src,
+                            std::size_t levels,
                             vc_edge_policy policy) {
     validate_source(src);
     validate_levels(levels, src);
-    
+
     vc_pyramid pyramid;
-    for(std::size_t i = 0; i < levels; ++i) {
-        if(i == 0) {
+    for (std::size_t i = 0; i < levels; ++i) {
+        if (i == 0) {
             pyramid.push_back(src);
         } else {
             vc::vc_image reduced_image = reduce(pyramid.back(), policy);
@@ -326,9 +346,11 @@ vc_laplacian_pyramid laplacian_pyramid(const vc::vc_image& src,
     // separately useful and gaussian_pyramid is already tested on its own.
     vc_pyramid gaussian = gaussian_pyramid(src, levels, policy);
     vc_pyramid bands;
-    for(std::size_t i = 0; i < levels - 1; ++i) {
-        vc::vc_image expanded = expand(gaussian[i + 1], gaussian[i].width(), gaussian[i].height(), policy);
-        vc_image_writer band(gaussian[i].width(), gaussian[i].height(), gaussian[i].channels(), vc::buf_f32{0.0F});
+    for (std::size_t i = 0; i < levels - 1; ++i) {
+        vc::vc_image expanded = expand(gaussian[i + 1], gaussian[i].width(),
+                                       gaussian[i].height(), policy);
+        vc_image_writer band(gaussian[i].width(), gaussian[i].height(),
+                             gaussian[i].channels(), vc::buf_f32{0.0F});
         // Same geometry on all three, so ONE offset serves all of them.
         const std::size_t nch = gaussian[i].channels();
         const std::size_t w = gaussian[i].width();
@@ -336,53 +358,63 @@ vc_laplacian_pyramid laplacian_pyramid(const vc::vc_image& src,
         const vc::image_dim gw = gaussian[i].width();
         gaussian[i].with_pixels<vc::buf_f32>(
             [&](std::span<const vc::buf_f32> g) {
-          expanded.with_pixels<vc::buf_f32>([&](std::span<const vc::buf_f32> e) {
-            band.with_pixels<vc::buf_f32>([&](std::span<vc::buf_f32> out) {
-              for (vc::image_dim y = 0; y < gh; ++y) {
-                const std::size_t row = static_cast<std::size_t>(y) * w * nch;
-                for (vc::image_dim x = 0; x < gw; ++x) {
-                    const std::size_t o =
-                        row + static_cast<std::size_t>(x) * nch;
-                    for (std::size_t c = 0; c < nch; ++c) {
-                        out[o + c] = g[o + c] - e[o + c];
-                    }
-                }
-              }
+                expanded.with_pixels<vc::buf_f32>(
+                    [&](std::span<const vc::buf_f32> e) {
+                        band.with_pixels<vc::buf_f32>(
+                            [&](std::span<vc::buf_f32> out) {
+                                for (vc::image_dim y = 0; y < gh; ++y) {
+                                    const std::size_t row =
+                                        static_cast<std::size_t>(y) * w * nch;
+                                    for (vc::image_dim x = 0; x < gw; ++x) {
+                                        const std::size_t o =
+                                            row +
+                                            static_cast<std::size_t>(x) * nch;
+                                        for (std::size_t c = 0; c < nch; ++c) {
+                                            out[o + c] = g[o + c] - e[o + c];
+                                        }
+                                    }
+                                }
+                            });
+                    });
             });
-          });
-        });
         bands.push_back(std::move(band).seal());
     }
-    return {.bands=std::move(bands), .top=std::move(gaussian.back())};
+    return {.bands = std::move(bands), .top = std::move(gaussian.back())};
 }
 
 vc::vc_image collapse(const vc_laplacian_pyramid& pyramid,
                       vc_edge_policy policy) {
     validate_pyramid(pyramid);
     vc_image current = pyramid.top;
-    for(std::size_t i = pyramid.bands.size(); i > 0; --i) {
-        vc::vc_image expanded = expand(current, pyramid.bands[i - 1].width(), pyramid.bands[i - 1].height(), policy);
-        vc_image_writer collapsed(pyramid.bands[i - 1].width(), pyramid.bands[i - 1].height(), pyramid.bands[i - 1].channels(), vc::buf_f32{0.0F});
+    for (std::size_t i = pyramid.bands.size(); i > 0; --i) {
+        vc::vc_image expanded = expand(current, pyramid.bands[i - 1].width(),
+                                       pyramid.bands[i - 1].height(), policy);
+        vc_image_writer collapsed(
+            pyramid.bands[i - 1].width(), pyramid.bands[i - 1].height(),
+            pyramid.bands[i - 1].channels(), vc::buf_f32{0.0F});
         const vc::vc_image& band = pyramid.bands[i - 1];
         const std::size_t nch = band.channels();
         const std::size_t w = band.width();
         const vc::image_dim bh = band.height();
         const vc::image_dim bw = band.width();
         band.with_pixels<vc::buf_f32>([&](std::span<const vc::buf_f32> b) {
-          expanded.with_pixels<vc::buf_f32>([&](std::span<const vc::buf_f32> e) {
-            collapsed.with_pixels<vc::buf_f32>([&](std::span<vc::buf_f32> out) {
-              for (vc::image_dim y = 0; y < bh; ++y) {
-                const std::size_t row = static_cast<std::size_t>(y) * w * nch;
-                for (vc::image_dim x = 0; x < bw; ++x) {
-                    const std::size_t o =
-                        row + static_cast<std::size_t>(x) * nch;
-                    for (std::size_t c = 0; c < nch; ++c) {
-                        out[o + c] = b[o + c] + e[o + c];
-                    }
-                }
-              }
-            });
-          });
+            expanded.with_pixels<vc::buf_f32>(
+                [&](std::span<const vc::buf_f32> e) {
+                    collapsed.with_pixels<vc::buf_f32>(
+                        [&](std::span<vc::buf_f32> out) {
+                            for (vc::image_dim y = 0; y < bh; ++y) {
+                                const std::size_t row =
+                                    static_cast<std::size_t>(y) * w * nch;
+                                for (vc::image_dim x = 0; x < bw; ++x) {
+                                    const std::size_t o =
+                                        row + static_cast<std::size_t>(x) * nch;
+                                    for (std::size_t c = 0; c < nch; ++c) {
+                                        out[o + c] = b[o + c] + e[o + c];
+                                    }
+                                }
+                            }
+                        });
+                });
         });
         // Move-assignment frees the previous buffer before taking the new
         // one, so each round holds two levels and not the whole chain.

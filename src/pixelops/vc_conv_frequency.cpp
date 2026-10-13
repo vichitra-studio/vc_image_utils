@@ -14,10 +14,10 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdio>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <limits>
 #include <string>
 #include <vector>
@@ -26,18 +26,16 @@ namespace vc::pixelops {
 
 namespace {
 
-vc::math::grid_dim padded_axis(vc::image_dim extent,
-                               vc::image_dim taps,
-                               const char* axis) {
-    const std::uint64_t sum =
-        std::uint64_t{extent} + std::uint64_t{taps} - 1U;
+vc::math::grid_dim
+padded_axis(vc::image_dim extent, vc::image_dim taps, const char* axis) {
+    const std::uint64_t sum = std::uint64_t{extent} + std::uint64_t{taps} - 1U;
 
     if (sum > std::numeric_limits<vc::math::grid_dim>::max()) {
-        throw vc::vc_exception(
-            vc::vc_error_code::invalid_argument,
-            std::string("frequency_extent: padded ") + axis + " extent " +
-                std::to_string(extent) + " + " + std::to_string(taps) +
-                " - 1 does not fit in a grid dimension");
+        throw vc::vc_exception(vc::vc_error_code::invalid_argument,
+                               std::string("frequency_extent: padded ") + axis +
+                                   " extent " + std::to_string(extent) + " + " +
+                                   std::to_string(taps) +
+                                   " - 1 does not fit in a grid dimension");
     }
     return static_cast<vc::math::grid_dim>(sum);
 }
@@ -133,7 +131,7 @@ vc::math::vc_complex_signal embed_channel(const vc::vc_image& src,
 
 // Elementwise product, in place into `spectrum`.
 void multiply_into(vc::math::vc_complex_signal& spectrum,
-                  vc::math::vc_complex_view by) {
+                   vc::math::vc_complex_view by) {
     if (spectrum.size() != by.size()) {
         throw vc::vc_exception(vc::vc_error_code::invalid_argument,
                                "multiply_into: spectra differ in length");
@@ -166,9 +164,9 @@ float real_rms(vc::math::vc_complex_view plane) {
 }
 
 vc::math::grid2d extent_of(vc::math::grid_dim w, vc::math::grid_dim h) {
-    return vc::math::grid2d::checked(
-        static_cast<vc::element_count>(w) * static_cast<vc::element_count>(h),
-        w, h, "frequency_extent");
+    return vc::math::grid2d::checked(static_cast<vc::element_count>(w) *
+                                         static_cast<vc::element_count>(h),
+                                     w, h, "frequency_extent");
 }
 
 } // namespace
@@ -240,9 +238,8 @@ vc::vc_image convolve_frequency(const vc::vc_image& src,
                                 const vc_kernel& kernel,
                                 vc_edge_policy policy) {
     if (src.pixels()->dtype() != vc::pixel_dtype::f32) {
-        throw vc::vc_exception(
-            vc::vc_error_code::invalid_argument,
-            "convolve_frequency: src must be f32");
+        throw vc::vc_exception(vc::vc_error_code::invalid_argument,
+                               "convolve_frequency: src must be f32");
     }
 
     // Throws for clamp and reflect before any work is done.
