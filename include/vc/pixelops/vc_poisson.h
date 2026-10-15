@@ -6,6 +6,9 @@
 #include "vc/core/vc_image.h"
 #include "vc/math/vc_grid2d.h" // grid2d, grid_dim
 
+#include <cstdint>
+#include <vector>
+
 namespace vc::pixelops {
 
 // Solving grad^2 phi = f for phi, by division in the frequency domain.
@@ -202,7 +205,15 @@ namespace vc::pixelops {
 //
 // When a pinned boundary IS needed -- the Block-7 masked-merge seam holds the
 // border at the destination's pixels, which is what makes the seam vanish --
-// that is poisson_iter's job (S8), not this one.
+// an ITERATIVE solver is what can express it, because "hold this pixel" is just
+// "skip it in the loop".
+//
+// BUT poisson_iter AS BUILT AT S8 DOES NOT DO THAT EITHER. It is wrap-only, the
+// same periodic problem as this function, on purpose: the two must solve the
+// IDENTICAL problem for the cross-validation to mean anything. The mask and the
+// pinned border arrive at Block-7. An earlier version of this line said pinned
+// boundaries were "poisson_iter's job (S8)", which promised a capability S8
+// does not ship.
 //
 // ---- WHAT THIS IS FOR ----
 //
@@ -218,6 +229,124 @@ namespace vc::pixelops {
 // Both MANUFACTURE an f that no image produced and ask for the nearest image
 // that could have. This is PREQ-4: built once here, reused at P9a (diffuse.c)
 // and at the Block-7 seam, never re-derived.
+
+// ======================================================================
+// THE SAME EQUATION, SOLVED BY SWEEPING INSTEAD
+// ======================================================================
+//
+// Reasoning in full: curriculum/notes/poisson.txt. Short version below.
+//
+// ---- WHY A SECOND SOLVER, HONESTLY ----
+//
+// Not because this one is too slow. Because poisson_fft CANNOT BE TOLD ANYTHING
+// ABOUT A BOUNDARY. Its waves wrap; there is no input for "hold this pixel at
+// this value", and gradient-domain compositing is exactly that -- the border
+// pinned to the destination's pixels, the interior solved. An iterative solver
+// expresses it in one line (`if fixed, continue`), because it touches one pixel
+// at a time.
+//
+// ** THAT IS NOT WHAT S8 BUILDS. ** poisson_iter is WRAP-ONLY, deliberately, and
+// solves the same periodic problem poisson_fft does. The point this week is that
+// two independent methods must agree; a solver aimed at a different problem
+// could not be cross-checked against anything. Masks arrive at Block-7, additive
+// to this signature.
+//
+// ---- THE UPDATE IS ONE REARRANGEMENT ----
+//
+//     phi(x+1,y) + phi(x-1,y) + phi(x,y+1) + phi(x,y-1) - 4.phi(x,y) = f(x,y)
+//
+//     ->   phi(x,y) = [ the four neighbours  -  f(x,y) ] / 4
+//
+// Circular -- phi defined by phi -- which is the whole idea: guess, apply it
+// everywhere, repeat. Each pass makes every pixel consistent with whatever its
+// neighbours currently say, and information crawls outward one pixel per sweep.
+//
+// JACOBI reads all four neighbours from the PREVIOUS sweep (two buffers, swap at
+// the end). GAUSS-SEIDEL reads and writes ONE buffer in place, so some
+// neighbours are already this sweep's values. That is the entire difference.
+//
+// ** THIS IS THE 2-D UPDATE AT EVERY GRID SIZE, INCLUDING ONE ROW. ** On a 4x1
+// image under wrap the up and down neighbours are the pixel itself, so the
+// update reads (L + R + 2.centre - f)/4 -- NOT the 1-D (L + R - f)/2. Both have
+// the SAME fixed point (set them equal and the centre terms cancel to
+// 2.phi = L + R - f), so the answer is unchanged, but the convergence RATE
+// differs and any hand-worked 1-D iteration sequence will not reproduce. An
+// earlier draft of P2's plan row derived the stall below from the 1-D update and
+// published hand numbers that this code does not produce.
+//
+// ---- HOW FAST, AND THE ONE MODE THAT NEVER MOVES ----
+//
+// Subtract the exact equation from the update. f appears in both and CANCELS,
+// leaving: the new error at a pixel is the AVERAGE OF ITS FOUR NEIGHBOURS'
+// ERRORS. The errors evolve on their own, with no reference to f at all.
+//
+// A wave's neighbours average to that wave times cos(w) -- the same fact that
+// gave laplacian_scale its cos above. So an error made of a single wave is
+// multiplied EVERY SWEEP by
+//
+//     factor(k,l) = [ cos(2.pi.k/width) + cos(2.pi.l/height) ] / 2
+//
+// which is strictly inside +-1 for every mode except two:
+//
+//     (0, 0)                  the flat mode          factor +1   never decays
+//     (width/2, height/2)     the full checkerboard  factor -1   flips forever
+//
+// THE JOINT MODE ONLY. (width/2, 0) has factor (-1 + 1)/2 = 0 and dies in a
+// SINGLE sweep, as does (0, height/2); and the joint mode exists only when both
+// dimensions are even. A one-row image has no height/2 bin, so it cannot stall.
+//
+// The flat mode is the DC indeterminacy this file already describes, and is
+// removed by subtracting the mean. THE CHECKERBOARD IS A GENUINE STALL and
+// 15_poisson_iter pins it exactly: on a pure checkerboard phi, Jacobi's relative
+// residual is 1.0 forever -- the iterate oscillates between 2.P and 0 while the
+// error holds magnitude |A| and the checkerboard's own scale is -8.
+//
+// NOTHING HERE IS ASSERTED ABOUT GAUSS-SEIDEL AND THE CHECKERBOARD. Its
+// iteration is not symmetric, the argument above does not transfer, and it has
+// not been verified. The tests assert the Jacobi plateau and stay silent on GS.
+//
+// ---- WHAT THAT COSTS IN SWEEPS ----
+//
+// Runtime is set by the SLOWEST-decaying useful mode, which is the one nearest
+// DC -- not by the stall:
+//
+//     width 64    mode (1,0)   factor 0.9976    ~4,800 sweeps to shrink 1e-5
+//     width 16    mode (1,0)   factor 0.9619    ~300 sweeps
+//
+// So cross-validation belongs on a SMALL grid. Two traps that read as solver
+// bugs and are not:
+//
+//   - A SMALL RESIDUAL IS NOT A SMALL ERROR. error ~ residual / |smallest
+//     scale|. At width 64 the smallest non-zero scale is about 0.0096, so a
+//     residual of 1e-5 permits a phi error near 1e-3.
+//   - f32 HAS A FLOOR of roughly eps x (largest scale / smallest scale), about
+//     830 x eps at width 64. Below it, more sweeps buy nothing. This is the same
+//     size-dependence poisson_fft's tolerance block measures, reached by a
+//     different route.
+//
+// ---- TWO THINGS THE ITERATION MUST DO THAT THE FORMULA DOES NOT SAY ----
+//
+// SUBTRACT THE MEAN AFTER EVERY SWEEP. Jacobi provably preserves it (summing the
+// update over all pixels gives sum(phi) - sum(f)/4, and sum(f) is zero by the
+// precondition), so for Jacobi this is a no-op. GAUSS-SEIDEL DRIFTS IN DC and
+// will converge to the right shape at the wrong level. Subtracting costs nothing
+// and changes nothing else, because the stencil is blind to constants.
+//
+// THE RESIDUAL IS BLIND TO A CONSTANT OFFSET, for the same reason:
+// r = f - laplacian(phi) is identical for phi and phi + c. SO A RUN CAN CONVERGE
+// PERFECTLY AND STILL SIT A CONSTANT AWAY from poisson_fft's answer. Any
+// comparison between the two solvers must zero-mean both sides first.
+//
+// ---- TRAVERSAL ORDER IS PART OF THE CONTRACT ----
+//
+// Gauss-Seidel's answer depends on the order pixels are visited, so the order is
+// FIXED HERE AND TESTED: in place, raster order, y outer and x inner, ascending.
+// Under wrap this means a pixel's LEFT and UP neighbours are this sweep's values
+// and its RIGHT and DOWN are the previous sweep's -- EXCEPT in the last column,
+// whose right neighbour wraps to column 0 and is therefore already fresh, and
+// the last row likewise. "Left and up are fresh" is the rule in the interior,
+// not the definition; the seam is where an implementation differs from a naive
+// reading, and 15_poisson_iter's hand case exercises it.
 
 // The number the 5-point stencil multiplies bin (k, l) by.
 //
@@ -254,5 +383,92 @@ namespace vc::pixelops {
 // Output geometry, channel count and dtype follow f. Each channel is solved
 // independently -- the equation does not couple them.
 [[nodiscard]] vc::vc_image poisson_fft(const vc::vc_image& f);
+
+// Which sweep poisson_iter runs. Both solve the same equation; they differ only
+// in which copy of the data they read.
+//
+// Switched over with NO `default` label, so that adding red_black at S8b makes
+// every switch a compiler warning instead of a silent fall-through -- the same
+// discipline frequency_extent uses for vc_edge_policy. red_black is NOT declared
+// yet for exactly that reason: an enumerator with no implementation is a stub
+// that throws, and a test asserting it throws passes vacuously.
+enum class poisson_sweep : std::uint8_t {
+    jacobi,       // read all four neighbours from the PREVIOUS sweep
+    gauss_seidel, // read and write one buffer in place, raster order
+};
+
+// A sweep count, named rather than a bare uint32_t so that a call site reading
+// poisson_iter(f, sweep, 500, 1e-6F) cannot silently swap the two trailing
+// arguments past the type system. docs/follow_up_p4.txt lists bare primitives
+// as a standing debt; this is one place not to add to it.
+using sweep_count = std::uint32_t;
+
+// What a run produced.
+//
+// NOT DEFAULT-CONSTRUCTIBLE, because vc_image is not. Accumulate the history in
+// a local vector and aggregate-initialise this once phi exists; writing
+// `poisson_iter_report out;` at the top of the function does not compile.
+struct poisson_iter_report {
+    // The solution, ZERO-MEAN PER CHANNEL. Geometry, channel count and dtype
+    // follow f.
+    vc::vc_image phi;
+
+    // The relative residual ||f - laplacian(phi, wrap)|| / ||f||, both as RMS,
+    // recorded once per sweep. This is the curve S8b plots.
+    //
+    // INDEXING: residual[0] is the INITIAL value, BEFORE any sweep; residual[i]
+    // is the value after sweep i. So size() == sweeps_actually_run + 1, which is
+    // max_sweeps + 1 if it never converged and less if it stopped early.
+    //
+    // residual[0] IS EXACTLY 1.0 and that is a free exact check: from a zero
+    // start, r = f - laplacian(0) = f, so the ratio is ||f||/||f||.
+    //
+    // THE ONE EXCEPTION IS AN ALL-ZERO f, where the clamped denominator makes it
+    // 0.0 rather than 1.0 -- correctly, since there is no residual to report and
+    // phi = 0 already solves it. 15_poisson_iter pins both.
+    //
+    // ONE NUMBER PER SWEEP, AND IT IS THE WORST CHANNEL, NOT THE COMBINED RMS.
+    // A single RMS over all channels hides a channel whose own f is small and
+    // whose answer is entirely wrong -- which is precisely the bug group 19 of
+    // 14_poisson exists to catch, in the mean check, one function over.
+    //
+    // THE DENOMINATOR IS CLAMPED by the same RMS floor poisson_fft uses, so an
+    // all-zero f gives 0 rather than 0/0, converges immediately, and returns
+    // phi = 0, which is the correct answer for it.
+    std::vector<float> residual;
+
+    // True only when EVERY channel's relative residual reached tolerance. A run
+    // that exhausted max_sweeps reports false; it does not throw, because
+    // "did not converge in this budget" is information the caller asked for by
+    // supplying a budget.
+    //
+    // ** A SMALL RESIDUAL IS NOT A SMALL ERROR. ** error ~ residual / |smallest
+    // scale|, and the header above tabulates how small that gets. Do not read
+    // converged == true as "phi is accurate to tolerance".
+    bool converged;
+};
+
+// Solve laplacian(phi) == f for phi by sweeping, with WRAP boundaries, returning
+// the ZERO-MEAN solution -- the same problem and the same answer as
+// poisson_fft, by an unrelated method, so the two cross-validate.
+//
+// f must be f32 and EVERY CHANNEL must have zero mean, checked exactly as
+// poisson_fft checks them and sharing its implementation so the two tolerances
+// cannot drift apart. Both throw vc_error_code::invalid_argument, and the
+// message names poisson_iter rather than poisson_fft.
+//
+// max_sweeps must be at least 1; zero throws rather than returning a zero image
+// that would quietly fail a gate. tolerance must be a finite value >= 0, tested
+// as !(tolerance >= 0) so that NaN is rejected rather than compared away. A
+// tolerance of exactly 0 is legal and simply never converges, which is a
+// reasonable way to ask for exactly max_sweeps sweeps.
+//
+// The initial guess is zero everywhere. Not a parameter: nothing this week needs
+// another, and adding one later is additive. The hand checks in 15_poisson_iter
+// depend on it, so changing it is a contract change.
+[[nodiscard]] poisson_iter_report poisson_iter(const vc::vc_image& f,
+                                               poisson_sweep sweep,
+                                               sweep_count max_sweeps,
+                                               float tolerance);
 
 } // namespace vc::pixelops

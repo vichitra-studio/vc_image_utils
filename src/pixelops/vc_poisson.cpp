@@ -128,6 +128,31 @@ constexpr float k_mean_rel_tol = 1e-5F;
 constexpr float k_imag_rel_tol = 1e-3F;
 constexpr float k_rms_floor = 1e-12F;
 
+// Shared by poisson_fft and poisson_iter so the two CANNOT DRIFT APART: one
+// tolerance, one scaling rule, one message shape, and only the caller's name
+// differs. 15_poisson_iter asserts the message names poisson_iter, so a
+// copy-paste that forgot to change the string fails rather than passing.
+//
+// Takes the accumulated sum and rms rather than the image, because both callers
+// already compute them for other purposes and a second pass would be waste.
+void require_zero_mean(double sum,
+                       double rms,
+                       double count,
+                       vc::channel_count ch,
+                       const char* caller) {
+    const double scale_floor = std::max(rms, static_cast<double>(k_rms_floor));
+    if (std::abs(sum / count) >
+        static_cast<double>(k_mean_rel_tol) * scale_floor) {
+        throw vc::vc_exception(
+            vc::vc_error_code::invalid_argument,
+            std::string{caller} +
+                ": f must have zero mean per channel, but channel " +
+                std::to_string(ch) + " has mean " +
+                std::to_string(sum / count) + " against RMS " +
+                std::to_string(rms));
+    }
+}
+
 } // namespace
 
 // The DISCRETE scale, which is the stencil's own transform -- never the
@@ -216,22 +241,12 @@ vc::vc_image poisson_fft(const vc::vc_image& f_input) {
                 return acc + (d * d);
             });
         const double rms = std::sqrt(ssq / count);
-        const double scale_floor =
-            std::max(rms, static_cast<double>(k_rms_floor));
 
         // NOT an equality against zero. f comes out of a float transform and
         // carries noise -- measured, sum(f) is around 2.4e-06 on an 8x4 field
         // where the exact answer is 0. A first version tested `sum != 0.0` and
         // rejected every real input.
-        if (std::abs(sum / count) >
-            static_cast<double>(k_mean_rel_tol) * scale_floor) {
-            throw vc::vc_exception(
-                vc::vc_error_code::invalid_argument,
-                "poisson_fft: f must have zero mean per channel, but channel " +
-                    std::to_string(ch) + " has mean " +
-                    std::to_string(sum / count) + " against RMS " +
-                    std::to_string(rms));
-        }
+        require_zero_mean(sum, rms, count, ch, "poisson_fft");
 
         vc::math::vc_complex_signal spectrum =
             vc::math::dft2d(vc::math::to_signal(buffer), extent);
@@ -306,6 +321,38 @@ vc::vc_image poisson_fft(const vc::vc_image& f_input) {
     }
 
     return std::move(out).seal();
+}
+
+// ---------------------------------------------------------------------------
+// S8a -- NOT IMPLEMENTED. The body is yours; the contract is in the header.
+//
+// What the header commits to, restated as a checklist so nothing is inferred:
+//
+//   1. reject non-f32 f, naming poisson_iter
+//   2. reject max_sweeps == 0, and reject !(tolerance >= 0) so NaN is caught
+//   3. reject a channel whose mean is not zero -- call require_zero_mean above,
+//      do not re-derive the tolerance
+//   4. start from phi = 0 everywhere
+//   5. apply (L + R + U + D - f) / 4 under WRAP at every size, including a
+//      one-row image, where up and down are the pixel itself
+//   6. jacobi reads the previous sweep; gauss_seidel reads and writes one
+//      buffer in place, raster order, y outer, x inner, ascending
+//   7. subtract each channel's mean AFTER every sweep
+//   8. record the relative residual once per sweep, worst channel, with
+//      residual[0] the value BEFORE any sweep (which is exactly 1.0)
+//   9. stop early when every channel is at or under tolerance, and report it
+//  10. switch over poisson_sweep with NO default label
+// ---------------------------------------------------------------------------
+poisson_iter_report poisson_iter(const vc::vc_image& f,
+                                 poisson_sweep sweep,
+                                 sweep_count max_sweeps,
+                                 float tolerance) {
+    (void)f;
+    (void)sweep;
+    (void)max_sweeps;
+    (void)tolerance;
+    throw vc::vc_exception(vc::vc_error_code::invalid_argument,
+                           "poisson_iter: not implemented");
 }
 
 } // namespace vc::pixelops

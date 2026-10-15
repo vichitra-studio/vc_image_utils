@@ -373,6 +373,7 @@ if(VC_BUILD_EXAMPLES)
         12_pyramid
         13_laplacian
         14_poisson
+        15_poisson_iter
     )
 
     foreach(example ${VC_EXAMPLE_TARGETS})
