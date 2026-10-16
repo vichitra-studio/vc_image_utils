@@ -235,13 +235,14 @@ namespace vc::pixelops {
 // THE SAME EQUATION, SOLVED BY SWEEPING INSTEAD
 // ======================================================================
 //
-// ** curriculum/notes/poisson.txt DOES NOT COVER THIS SECTION. ** Verified, not
-// assumed: "jacobi", "gauss-seidel" and "sweep" occur ZERO times in it, and its
-// headings stop at 7f. It was written for S7 -- the transform solve -- and an
-// earlier version of this line pointed at it anyway, which is the kind of
-// citation this project keeps catching. The iterative reasoning lives HERE
-// until an S8a notes section exists; when it does, this line should point at it
-// and shrink.
+// Reasoning in full: curriculum/notes/poisson.txt PART TWO, sections 12-20,
+// added 2026-10-17. Short version below.
+//
+// (An earlier version of this line pointed at that file BEFORE part two
+// existed, when "jacobi", "gauss-seidel" and "sweep" occurred zero times in it
+// and its headings stopped at 7f. A pointer that reads as checked and is not
+// is the exact failure this project keeps finding; it is recorded here rather
+// than quietly deleted.)
 //
 // ---- WHY A SECOND SOLVER, HONESTLY ----
 //
