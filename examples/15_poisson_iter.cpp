@@ -92,11 +92,35 @@
 //     symmetric and per-step monotonicity in this norm is unproven. It is only
 //     required to end far below where it started.
 //
-// 10  THREE CHANNELS, solved independently and agreeing with three separate
-//     one-channel solves -- and the residual history must be the WORST channel,
-//     not a combined RMS, which is checked by giving one channel a much smaller
-//     f. A combined RMS would let a badly-wrong small channel hide. This is
-//     14_poisson group 19's bug class, one function over.
+// 10a THREE CHANNELS, agreeing with three separate one-channel solves. Catches
+//     an interleaved/planar index swap -- invisible at one channel, the bug
+//     that survived every one-channel test in conv_theorem -- and a mean
+//     subtracted across the whole image rather than per channel.
+//
+// 10b THE RESIDUAL AGGREGATION RULE, pinned sweep by sweep against the
+//     per-sweep maximum of single-channel runs. The field is chosen so the
+//     channel with the TINY f is also the SLOWEST, which is what makes a
+//     combined RMS visibly wrong: at sweep 12 it reads 2.6e-04 where the worst
+//     channel reads 1.5e-01.
+//     AN EARLIER VERSION ASSERTED residual[0] == 1.0 AND CLAIMED THAT CAUGHT A
+//     COMBINED RMS. It does not -- a combined ratio is also 1.0 at sweep zero,
+//     so the check was satisfied by both and its comment was simply wrong.
+//
+// 10c converged reflects the WORST channel, not the first one to finish.
+//
+// 10d one bad channel out of three is rejected. The precondition is PER
+//     CHANNEL; a whole-buffer mean accepts channels of +5 and -5. 14_poisson
+//     group 19's bug class, one function over.
+//
+// 10e THE EQUATION ITSELF, asserted directly: laplacian(phi, wrap) == f. Every
+//     other convergence group compares phi against a known phi or against
+//     poisson_fft, so all of them inherit whatever those share. This one
+//     depends on neither, and in particular does not trust the reported
+//     residual to have been computed correctly.
+//
+// 10f A 1x1 IMAGE. Under wrap every neighbour is the pixel itself, so the
+//     stencil is identically zero, the only admissible f is zero, and the
+//     answer is zero. The size class 11_conv_theorem found bugs at.
 //
 // 11  non-f32 rejection. PAIRED.
 // 12  non-zero-mean rejection, with a hand-built f, since f = laplacian(phi)
@@ -122,6 +146,31 @@
 // 17  converged == false when the budget is exhausted, and the run returns
 //     normally rather than throwing. "Did not converge in the budget you set" is
 //     information the caller asked for.
+//
+// ---- MUTATION RESULTS, 2026-10-16 ----
+//
+// A green suite is not evidence that the suite bites. Six mutations were run
+// against a working implementation; each was caught, by the group that claims
+// to catch it:
+//
+//     residual as a COMBINED RMS               -> 10a, 10b, 10c
+//     gauss_seidel secretly running jacobi     -> 4a, 4b, 16a
+//     the 1-D update (L+R-f)/2 on one row      -> 1a, 3b, 4a, 6b
+//     no mean subtraction at all               -> 3b, 4a, 15, 16a  (GS only)
+//     ONE mean across all channels             -> 4a, 10a, 10b     (GS only)
+//     zero-mean checked on channel 0 only      -> 10d, AND NOTHING ELSE
+//
+// Two of those lines are worth reading twice.
+//
+// THE LAST ONE WAS CAUGHT BY A SINGLE CHECK, and 10d did not exist before this
+// review. Without it, a solver that validated only the first channel passed
+// every other check in the file.
+//
+// THE TWO "GS only" LINES ARE NOT A WEAKNESS. Jacobi provably preserves the
+// mean -- summing its update over all pixels gives sum(phi) - sum(f)/4, and
+// sum(f) is zero by the precondition -- so a missing or global mean subtraction
+// genuinely IS a no-op for it. The mutations confirm the header's reasoning
+// instead of contradicting it.
 
 #include "vc/core/vc_exception.h"
 #include "vc/core/vc_image.h"
@@ -669,67 +718,176 @@ int main() {
                 "it started (per-step monotonicity deliberately unasserted)");
         }
 
-        // ---- 10. three channels, independent, worst-channel residual --------
+        // ---- 10. three channels, and the residual AGGREGATION RULE --------
+        //
+        // THE FIELD IS CHOSEN TO DISCRIMINATE, which an earlier version of this
+        // group was not. Channel 1 carries a SMALL amplitude at the SLOWEST
+        // mode (1,0), factor 0.854; channels 0 and 2 carry a LARGE amplitude at
+        // a FAST mode (3,0), factor 0.146. So the channel with the tiny f is
+        // also the one that converges last, and a combined RMS -- dominated by
+        // the large channels -- reports progress the small channel has not made.
+        //
+        // Measured against a float reference on exactly this pairing, after 12
+        // sweeps: worst-channel 1.5e-01, combined RMS 2.6e-04. THREE ORDERS
+        // APART.
+        //
+        // The earlier version asserted residual[0] == 1.0 and claimed that
+        // caught a combined RMS. IT DOES NOT: at sweep zero a combined ratio is
+        // ||f_all||/||f_all|| = 1.0 as well, so the check was satisfied by both
+        // and the comment above it was wrong.
         {
-            const auto big = from_rule(8, 4, [](int x, int y) {
-                return std::cos(2.0F * k_pi * static_cast<float>(x) / 8.0F) +
-                       (0.5F *
-                        std::sin(2.0F * k_pi * static_cast<float>(y) / 4.0F));
+            const auto fast = from_rule(8, 4, [](int x, int /*y*/) {
+                return std::cos(2.0F * k_pi * 3.0F * static_cast<float>(x) /
+                                8.0F);
             });
-            const auto small = from_rule(8, 4, [](int x, int /*y*/) {
-                return 1e-3F * std::cos(2.0F * k_pi * 3.0F *
-                                        static_cast<float>(x) / 8.0F);
+            const auto slow = from_rule(8, 4, [](int x, int /*y*/) {
+                return 0.01F *
+                       std::cos(2.0F * k_pi * static_cast<float>(x) / 8.0F);
             });
-            const auto fb = laplacian(big, vc_edge_policy::wrap);
-            const auto fs = laplacian(small, vc_edge_policy::wrap);
+            const auto f_fast = laplacian(fast, vc_edge_policy::wrap);
+            const auto f_slow = laplacian(slow, vc_edge_policy::wrap);
 
             std::vector<float> interleaved;
             interleaved.reserve(8ULL * 4 * 3);
             for (vc::image_dim y = 0; y < 4; ++y) {
                 for (vc::image_dim x = 0; x < 8; ++x) {
-                    interleaved.push_back(pixel(fb, x, y));
-                    interleaved.push_back(pixel(fs, x, y));
-                    interleaved.push_back(pixel(fb, x, y));
+                    interleaved.push_back(pixel(f_fast, x, y));
+                    interleaved.push_back(pixel(f_slow, x, y));
+                    interleaved.push_back(pixel(f_fast, x, y));
                 }
             }
             const auto f3 = make_image(8, 4, 3, interleaved);
 
             for (const auto s : both) {
                 const auto got3 = poisson_iter(f3, s, 2000, k_res_tol);
-                const auto gb = poisson_iter(fb, s, 2000, k_res_tol);
-                const auto gs = poisson_iter(fs, s, 2000, k_res_tol);
+                const auto one_fast = poisson_iter(f_fast, s, 2000, k_res_tol);
+                const auto one_slow = poisson_iter(f_slow, s, 2000, k_res_tol);
+                const float scale_fast = rms_all_channels(one_fast.phi);
+                const float scale_slow = rms_all_channels(one_slow.phi);
 
                 bool agree = got3.phi.channels() == 3;
                 for (vc::image_dim y = 0; y < 4 && agree; ++y) {
                     for (vc::image_dim x = 0; x < 8 && agree; ++x) {
-                        const float sb = rms_all_channels(gb.phi);
-                        const float ss = rms_all_channels(gs.phi);
-                        agree =
-                            std::abs(pixel(got3.phi, x, y, 0) -
-                                     pixel(gb.phi, x, y)) <= k_phi_tol * sb &&
-                            std::abs(pixel(got3.phi, x, y, 1) -
-                                     pixel(gs.phi, x, y)) <= k_phi_tol * ss &&
-                            std::abs(pixel(got3.phi, x, y, 2) -
-                                     pixel(gb.phi, x, y)) <= k_phi_tol * sb;
+                        agree = agree &&
+                                std::abs(pixel(got3.phi, x, y, 0) -
+                                         pixel(one_fast.phi, x, y)) <=
+                                    k_phi_tol * scale_fast &&
+                                std::abs(pixel(got3.phi, x, y, 1) -
+                                         pixel(one_slow.phi, x, y)) <=
+                                    k_phi_tol * scale_slow &&
+                                std::abs(pixel(got3.phi, x, y, 2) -
+                                         pixel(one_fast.phi, x, y)) <=
+                                    k_phi_tol * scale_fast;
                     }
                 }
-                expect(
-                    agree,
-                    std::string("10a: ") + name(s) +
-                        ": three channels match three separate one-channel "
-                        "solves -- catches an interleaved/planar index swap, "
-                        "which one channel cannot see");
+                expect(agree,
+                       std::string("10a: ") + name(s) +
+                           ": three channels match three separate one-channel "
+                           "solves -- catches an interleaved/planar index swap "
+                           "(invisible at one channel) and a mean subtracted "
+                           "across the whole image rather than per channel");
 
-                // The residual must track the WORST channel. The small channel
-                // has an f three orders down; a combined RMS would be dominated
-                // by the large one and would report convergence while the small
-                // channel was still wrong.
-                expect(
-                    got3.residual[0] <= 1.0F + k_exact_tol &&
-                        got3.residual[0] >= 1.0F - k_exact_tol,
-                    std::string("10b: ") + name(s) +
-                        ": the 3-channel residual[0] is 1.0 -- a per-channel "
-                        "ratio, not a combined RMS dominated by one channel");
+                // THE AGGREGATION RULE ITSELF, pinned sweep by sweep. Tolerance
+                // zero so nothing stops early, a fixed budget so the histories
+                // line up, and the three-channel history must equal the
+                // per-sweep MAXIMUM of the single-channel ones. A combined RMS
+                // sits far below that maximum from sweep 2 onward.
+                const auto h3 = poisson_iter(f3, s, 12, 0.0F);
+                const auto hf = poisson_iter(f_fast, s, 12, 0.0F);
+                const auto hs = poisson_iter(f_slow, s, 12, 0.0F);
+                bool tracks = h3.residual.size() == 13 &&
+                              hf.residual.size() == 13 &&
+                              hs.residual.size() == 13;
+                for (std::size_t i = 0; i < 13 && tracks; ++i) {
+                    const float want = std::max(hf.residual[i], hs.residual[i]);
+                    tracks = tracks && std::abs(h3.residual[i] - want) <=
+                                           1e-5F * std::max(want, 1e-12F);
+                }
+                expect(tracks,
+                       std::string("10b: ") + name(s) +
+                           ": the 3-channel residual is the per-sweep WORST "
+                           "channel, not a combined RMS -- which at sweep 12 "
+                           "reads 2.6e-04 against the true 1.5e-01");
+
+                // And convergence is per channel too: the small-f channel is the
+                // slow one, so a combined rule would declare victory early.
+                expect(!h3.converged && h3.residual.back() > 1e-2F,
+                       std::string("10c: ") + name(s) +
+                           ": 12 sweeps is NOT enough for the slow small-f "
+                           "channel, and converged must reflect the worst one");
+            }
+        }
+
+        // ---- 10d. one bad channel out of three is still rejected -----------
+        //
+        // Mirrors 14_poisson group 19. A whole-buffer mean accepts a two-channel
+        // f whose channels are +5 and -5 and returns a quietly wrong answer for
+        // both; the precondition is PER CHANNEL.
+        {
+            std::vector<float> v;
+            v.reserve(4ULL * 1 * 3);
+            const std::vector<float> ok = {-10.0F, 4.0F, 2.0F, 4.0F};
+            const std::vector<float> bad = {-10.0F, 4.0F, 2.0F, 8.0F};
+            for (std::size_t i = 0; i < 4; ++i) {
+                v.push_back(ok[i]);
+                v.push_back(bad[i]); // only this channel violates
+                v.push_back(ok[i]);
+            }
+            const auto f3 = make_image(4, 1, 3, v);
+            expect(threw_naming(
+                       [&] {
+                           (void)poisson_iter(f3, poisson_sweep::jacobi, 10,
+                                              k_res_tol);
+                       },
+                       "poisson_iter"),
+                   "10d: a single non-zero-mean channel among three is "
+                   "rejected -- the precondition is per channel, and the three "
+                   "means here sum to a non-zero value only in that channel");
+        }
+
+        // ---- 10e. the equation itself, checked directly --------------------
+        //
+        // Every other convergence group compares phi against a known phi or
+        // against poisson_fft. THIS ONE ASSERTS THE EQUATION, which is what the
+        // function claims to solve, with no reference to how phi was reached and
+        // no reliance on the reported residual being computed correctly.
+        {
+            const auto phi = from_rule(8, 8, [](int x, int y) {
+                const auto fx = static_cast<float>(x);
+                const auto fy = static_cast<float>(y);
+                return std::cos(2.0F * k_pi * fx / 8.0F) +
+                       (0.4F * std::sin(2.0F * k_pi * 3.0F * fy / 8.0F)) +
+                       (0.7F * std::cos(2.0F * k_pi * 2.0F * fx / 8.0F));
+            });
+            const auto f = laplacian(phi, vc_edge_policy::wrap);
+            for (const auto s : both) {
+                const auto got = poisson_iter(f, s, 2000, k_res_tol);
+                expect(got.converged &&
+                           recovers(laplacian(got.phi, vc_edge_policy::wrap), f,
+                                    1e-4F),
+                       std::string("10e: ") + name(s) +
+                           ": laplacian(phi, wrap) really is f -- the equation "
+                           "asserted directly, independent of the reported "
+                           "residual");
+            }
+        }
+
+        // ---- 10f. a 1x1 image ----------------------------------------------
+        //
+        // Under wrap every neighbour of the only pixel is itself, so the stencil
+        // is 4c - 4c = 0 for any c: laplacian is identically zero, the only
+        // admissible f is zero, and the zero-mean answer is zero. Degenerate,
+        // reachable, and the kind of size 11_conv_theorem found bugs at.
+        {
+            const auto f = make_image(1, 1, 1, {0.0F});
+            for (const auto s : both) {
+                const auto got = poisson_iter(f, s, 5, k_res_tol);
+                expect(got.converged && got.phi.width() == 1 &&
+                           got.phi.height() == 1 && all_finite(got.phi) &&
+                           std::abs(pixel(got.phi, 0, 0)) <= k_exact_tol,
+                       std::string("10f: ") + name(s) +
+                           ": a 1x1 image solves to zero without dividing by "
+                           "anything degenerate");
             }
         }
 
@@ -860,8 +1018,12 @@ int main() {
 
             const auto good = poisson_iter(f_wrap, poisson_sweep::gauss_seidel,
                                            4000, k_res_tol);
+            // k_phi_tol, not the 1e-3 an earlier draft used without saying
+            // why. Measured against a float reference on this field: 4.1e-06,
+            // which is 12x under k_phi_tol. A loose unexplained constant on the
+            // GOOD half of a trap test is how the trap stops being a trap.
             expect(good.converged &&
-                       recovers(good.phi, zero_meaned(phi), 1e-3F),
+                       recovers(good.phi, zero_meaned(phi), k_phi_tol),
                    "16a: a wrap-built f recovers phi");
 
             const auto bad = poisson_iter(f_clamp, poisson_sweep::gauss_seidel,

@@ -332,6 +332,12 @@ namespace vc::pixelops {
 // will converge to the right shape at the wrong level. Subtracting costs nothing
 // and changes nothing else, because the stencil is blind to constants.
 //
+// TWO THINGS THE CONTRACT DELIBERATELY DOES NOT CONSTRAIN, so that an
+// implementer does not waste time deciding. Whether the residual is measured
+// before or after the mean subtraction within a sweep DOES NOT MATTER -- it is
+// blind to a constant either way. Nor does whether the channel loop sits inside
+// or outside the sweep loop, since the equation does not couple channels.
+//
 // THE RESIDUAL IS BLIND TO A CONSTANT OFFSET, for the same reason:
 // r = f - laplacian(phi) is identical for phi and phi + c. SO A RUN CAN CONVERGE
 // PERFECTLY AND STILL SIT A CONSTANT AWAY from poisson_fft's answer. Any
@@ -420,8 +426,11 @@ struct poisson_iter_report {
     // is the value after sweep i. So size() == sweeps_actually_run + 1, which is
     // max_sweeps + 1 if it never converged and less if it stopped early.
     //
-    // residual[0] IS EXACTLY 1.0 and that is a free exact check: from a zero
-    // start, r = f - laplacian(0) = f, so the ratio is ||f||/||f||.
+    // residual[0] IS 1.0 and that is a free check: from a zero start,
+    // r = f - laplacian(0) = f, so the ratio is ||f||/||f||. Exactly 1.0 in
+    // arithmetic, and to within an ulp in practice depending on whether the two
+    // norms are computed by the same code path -- 15_poisson_iter allows 1e-6
+    // rather than demanding bit equality.
     //
     // THE ONE EXCEPTION IS AN ALL-ZERO f, where the clamped denominator makes it
     // 0.0 rather than 1.0 -- correctly, since there is no residual to report and
