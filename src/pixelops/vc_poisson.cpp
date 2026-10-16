@@ -313,9 +313,9 @@ void subtract_mean(vc_image_writer& plane, vc::element_count count) {
 // continuous -(u^2 + v^2). That one is this one's small-angle approximation and
 // is 2.5x off at the highest frequency, exactly where edges live; the header
 // has the table. Real, with no rotation, because the stencil is symmetric.
-float laplacian_scale(vc::math::grid_dim k,
-                      vc::math::grid_dim l,
-                      const vc::math::grid2d& extent) {
+vc::float32 laplacian_scale(vc::math::grid_dim k,
+                            vc::math::grid_dim l,
+                            const vc::math::grid2d& extent) {
     // An out-of-range bin is a caller bug. Wrapping it silently would hide the
     // class of indexing error that cost a heap-buffer-overflow in dft2d.
     if (k >= extent.width() || l >= extent.height()) {
@@ -448,26 +448,6 @@ vc::vc_image poisson_fft(const vc::vc_image& f_input) {
     return std::move(out).seal();
 }
 
-// ---------------------------------------------------------------------------
-// S8a -- NOT IMPLEMENTED. The body is yours; the contract is in the header.
-//
-// What the header commits to, restated as a checklist so nothing is inferred:
-//
-//   1. reject non-f32 f, naming poisson_iter
-//   2. reject max_sweeps == 0, and reject !(tolerance >= 0) so NaN is caught
-//   3. reject a channel whose mean is not zero -- call require_zero_mean above,
-//      do not re-derive the tolerance
-//   4. start from phi = 0 everywhere
-//   5. apply (L + R + U + D - f) / 4 under WRAP at every size, including a
-//      one-row image, where up and down are the pixel itself
-//   6. jacobi reads the previous sweep; gauss_seidel reads and writes one
-//      buffer in place, raster order, y outer, x inner, ascending
-//   7. subtract each channel's mean AFTER every sweep
-//   8. record the relative residual once per sweep, worst channel, with
-//      residual[0] the value BEFORE any sweep (which is exactly 1.0)
-//   9. stop early when every channel is at or under tolerance, and report it
-//  10. switch over poisson_sweep with NO default label
-// ---------------------------------------------------------------------------
 poisson_iter_report poisson_iter(const vc::vc_image& f,
                                  poisson_sweep sweep,
                                  sweep_count max_sweeps,
@@ -480,9 +460,7 @@ poisson_iter_report poisson_iter(const vc::vc_image& f,
         throw vc::vc_exception(vc::vc_error_code::invalid_argument,
                                "poisson_iter: max_sweeps must be > 0");
     }
-    // !(tolerance >= 0), NOT tolerance < 0. `NaN < 0` is FALSE, so the naive
-    // form lets a NaN through, after which every convergence comparison is
-    // false and the run silently burns the whole budget. 15_poisson_iter 14b.
+
     if (!(tolerance >= 0.0F)) {
         throw vc::vc_exception(vc::vc_error_code::invalid_argument,
                                "poisson_iter: tolerance must be >= 0");
@@ -492,7 +470,7 @@ poisson_iter_report poisson_iter(const vc::vc_image& f,
     vc_image_writer result{f.width(), f.height(), f.channels(),
                            vc::buf_f32{0.0F}};
 
-    std::vector<std::vector<float>> history;
+    std::vector<std::vector<vc::float32>> history;
     history.reserve(f.channels());
     bool all_converged = true;
 
@@ -500,14 +478,9 @@ poisson_iter_report poisson_iter(const vc::vc_image& f,
         const vc_image& f_plane = planes[ch];
         require_zero_mean(f_plane, "poisson_iter");
 
-        // Hoisted: f does not change, and this is the residual's denominator
-        // for every one of possibly thousands of sweeps.
         const double f_rms = get_rms(f_plane);
         const auto count = f_plane.pixel_count();
 
-        // phi starts at zero everywhere. The second buffer exists ONLY for
-        // Jacobi, which must read a consistent previous iterate; Gauss-Seidel
-        // reads and writes one buffer by definition.
         vc_image_writer buf_a{f_plane.width(), f_plane.height(), 1,
                               vc::buf_f32{0.0F}};
         std::optional<vc_image_writer> buf_b;
@@ -516,19 +489,19 @@ poisson_iter_report poisson_iter(const vc::vc_image& f,
                           vc::buf_f32{0.0F});
         }
 
-        // `current` always points at the buffer holding the latest phi. An
-        // earlier version derived that from sweep parity and nothing recorded
-        // which buffer the answer had landed in.
         vc_image_writer* current = &buf_a;
 
-        std::vector<float> channel_history;
-        channel_history.reserve(static_cast<std::size_t>(max_sweeps) + 1);
+        std::vector<vc::float32> channel_history;
+        // Capped: max_sweeps is 32-bit, and reserving for a budget near its
+        // maximum would ask for gigabytes on a call that converges in 300
+        // sweeps. push_back grows past this if it ever needs to.
+        channel_history.reserve(std::min<std::size_t>(max_sweeps, 4096) + 1);
 
         // BEFORE any sweep: phi is zero, so r = f - laplacian(0) = f and the
         // ratio is exactly 1.0 -- except for an all-zero plane, where the
         // clamped denominator gives 0.0 rather than 0/0.
-        channel_history.push_back(
-            static_cast<float>(relative_residual(f_plane, *current, f_rms)));
+        channel_history.push_back(static_cast<vc::float32>(
+            relative_residual(f_plane, *current, f_rms)));
 
         bool converged = channel_history.back() <= tolerance;
 
@@ -541,14 +514,11 @@ poisson_iter_report poisson_iter(const vc::vc_image& f,
             current = destination;
 
             subtract_mean(*current, count);
-            channel_history.push_back(static_cast<float>(
+            channel_history.push_back(static_cast<vc::float32>(
                 relative_residual(f_plane, *current, f_rms)));
             converged = channel_history.back() <= tolerance;
         }
 
-        // Each channel stops on its own -- they are independent problems, and
-        // per-channel histories are exactly what makes that expressible without
-        // inventing values for the sweeps a finished channel did not run.
         all_converged = all_converged && converged;
         history.push_back(std::move(channel_history));
 
@@ -560,8 +530,9 @@ poisson_iter_report poisson_iter(const vc::vc_image& f,
         }
     }
 
-    return poisson_iter_report{std::move(result).seal(), std::move(history),
-                               all_converged};
+    return poisson_iter_report{.phi = std::move(result).seal(),
+                               .residual = std::move(history),
+                               .converged = all_converged};
 }
 
 } // namespace vc::pixelops

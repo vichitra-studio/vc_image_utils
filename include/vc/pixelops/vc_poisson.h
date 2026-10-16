@@ -4,6 +4,7 @@
 #pragma once
 
 #include "vc/core/vc_image.h"
+#include "vc/core/vc_scalar.h" // vc::float32 -- leaf header
 #include "vc/math/vc_grid2d.h" // grid2d, grid_dim
 
 #include <cstdint>
@@ -385,15 +386,15 @@ namespace vc::pixelops {
 // scale(2,0)=-4, scale(2,2)=-8), and S8 will want the same numbers to explain
 // why its iteration converges at the rate it does.
 //
-// Returns a float, not a complex: the stencil is symmetric, so there is no
+// Returns a real scalar, not a complex: the stencil is symmetric, so there is no
 // rotation to represent. If this ever needs to be complex, the kernel stopped
 // being symmetric and more than this function is wrong.
 //
 // extent gives the transform's dimensions; k and l are bin indices and must be
 // inside it.
-[[nodiscard]] float laplacian_scale(vc::math::grid_dim k,
-                                    vc::math::grid_dim l,
-                                    const vc::math::grid2d& extent);
+[[nodiscard]] vc::float32 laplacian_scale(vc::math::grid_dim k,
+                                          vc::math::grid_dim l,
+                                          const vc::math::grid2d& extent);
 
 // Solve laplacian(phi) == f for phi, with WRAP boundaries, returning the
 // ZERO-MEAN solution.
@@ -474,7 +475,41 @@ struct poisson_iter_report {
     //
     // THE DENOMINATOR IS CLAMPED by the same RMS floor poisson_fft uses, so an
     // all-zero f gives 0 rather than 0/0.
-    std::vector<std::vector<float>> residual;
+    //
+    // ---- COST, MEASURED, BECAUSE IT IS NOT FREE ----
+    //
+    // Computing this is a FULL STENCIL PASS -- the same work as a sweep. At
+    // 256x256, 2000 sweeps, minimum of five release runs:
+    //
+    //                      residual every sweep   every 10    once at end
+    //     jacobi                 442.8 ms          283.9 ms    267.2 ms
+    //     gauss_seidel           609.6 ms          447.0 ms    430.7 ms
+    //
+    // So it is 40% of Jacobi's runtime and 29% of Gauss-Seidel's, and a stride
+    // of 10 recovers about 90% of that.
+    //
+    // IT IS STILL NOT OPTIONAL, AND IT IS NOT DEBUG INSTRUMENTATION. It is the
+    // convergence criterion: without it `tolerance` cannot be implemented and
+    // `converged` is meaningless, so every call would run the full budget --
+    // at width 256 that is ~4,776 sweeps where ~300 suffices. It buys far more
+    // than it costs.
+    //
+    // ** IN PARTICULAR IT MUST NOT GO BEHIND NDEBUG. ** `tolerance` and
+    // `converged` are part of this function's contract. Compiling them out of
+    // release would make release silently burn the budget and always report
+    // converged == false -- a behaviour difference between build types, which
+    // is the hardest class of defect to find. 15_poisson_iter runs in both
+    // trees for exactly this reason.
+    //
+    // What IS separable is the STRIDE: the CHECK is needed in production but
+    // not every sweep, while the HISTORY is needed at stride 1 for S8b's
+    // residual plot and is diagnostic afterwards. A `check_every` parameter
+    // would split them. DELIBERATELY NOT ADDED YET -- S8b needs stride 1
+    // regardless, nothing here is latency-sensitive, and a default chosen now
+    // would be wrong for one of the two callers. The Block-7 seam will be the
+    // first caller with an opinion; the table above is so that decision is
+    // made on numbers rather than on a guess.
+    std::vector<std::vector<vc::float32>> residual;
 
     // True only when EVERY channel's relative residual reached tolerance. A run
     // that exhausted max_sweeps reports false; it does not throw, because
@@ -508,6 +543,6 @@ struct poisson_iter_report {
 [[nodiscard]] poisson_iter_report poisson_iter(const vc::vc_image& f,
                                                poisson_sweep sweep,
                                                sweep_count max_sweeps,
-                                               float tolerance);
+                                               vc::float32 tolerance);
 
 } // namespace vc::pixelops
