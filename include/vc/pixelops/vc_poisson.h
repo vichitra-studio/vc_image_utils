@@ -343,16 +343,27 @@ namespace vc::pixelops {
 // PERFECTLY AND STILL SIT A CONSTANT AWAY from poisson_fft's answer. Any
 // comparison between the two solvers must zero-mean both sides first.
 //
-// ---- TRAVERSAL ORDER IS PART OF THE CONTRACT ----
+// ---- TRAVERSAL DIRECTION IS PART OF THE CONTRACT; THE LOOP NESTING IS NOT ----
 //
-// Gauss-Seidel's answer depends on the order pixels are visited, so the order is
-// FIXED HERE AND TESTED: in place, raster order, y outer and x inner, ascending.
-// Under wrap this means a pixel's LEFT and UP neighbours are this sweep's values
-// and its RIGHT and DOWN are the previous sweep's -- EXCEPT in the last column,
-// whose right neighbour wraps to column 0 and is therefore already fresh, and
-// the last row likewise. "Left and up are fresh" is the rule in the interior,
-// not the definition; the seam is where an implementation differs from a naive
-// reading, and 15_poisson_iter's hand case exercises it.
+// Gauss-Seidel's answer depends on the order pixels are visited, so: in place,
+// ASCENDING IN BOTH AXES. Under wrap that means a pixel's LEFT and UP
+// neighbours are this sweep's values and its RIGHT and DOWN are the previous
+// sweep's -- EXCEPT in the last column, whose right neighbour wraps to column 0
+// and is therefore already fresh, and the last row likewise. "Left and up are
+// fresh" is the interior rule, not the definition; the seam is where an
+// implementation differs from a naive reading.
+//
+// ** WHICH AXIS IS OUTER DOES NOT MATTER, and an earlier version of this header
+// wrongly said it did, AND wrongly said it was tested. ** x-outer/y-inner and
+// y-outer/x-inner are BIT-IDENTICAL for a 5-point stencil: both are
+// lexicographic ascending and the stencil reaches only one pixel, so under
+// either nesting exactly the same neighbours have already been written. Swapping
+// the nesting is not a bug and no test fails, correctly.
+//
+// What IS testable, and now is, is the DIRECTION. 15_poisson_iter group 4a pins
+// it on 4x1 -- which is blind to the y axis, there being one row -- and group 4c
+// pins it on 4x4, where reversing the y scan moves the answer by 0.40 at its
+// worst pixel. Before 4c existed, a reversed y scan passed every check.
 
 // The number the 5-point stencil multiplies bin (k, l) by.
 //

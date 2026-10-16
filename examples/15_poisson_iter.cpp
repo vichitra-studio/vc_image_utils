@@ -41,7 +41,7 @@
 //     f = [-10,4,2,4] -- the same arithmetic 14_poisson group 4 uses -- and both
 //     sweeps must converge back to it.
 //
-// 4   JACOBI AND GAUSS-SEIDEL MUST DIFFER AFTER ONE SWEEP, with the
+// 4a/4b JACOBI AND GAUSS-SEIDEL MUST DIFFER AFTER ONE SWEEP, with the
 //     Gauss-Seidel values worked out by hand. This is the group that catches an
 //     implementation where `gauss_seidel` quietly runs Jacobi: EVERY CONVERGENCE
 //     TEST IN THIS FILE WOULD STILL PASS, because both converge to the same
@@ -49,6 +49,13 @@
 //     The x=3 value reads a freshly-written phi[0] through the WRAP SEAM, which
 //     is where a naive "left and up are stale at the border" reading diverges
 //     from the contract.
+//     BLIND TO THE y DIRECTION -- it is a 4x1 grid, one row, so ascending and
+//     descending y are the same scan. Hence 4c.
+//
+// 4c  THE SWEEP DIRECTION ON A GENUINELY 2-D GRID, 4x4, hand-worked. Reversing
+//     the y scan passed all 53 checks before this group existed. It does NOT
+//     constrain which axis is outer: both lexicographic-ascending nestings are
+//     bit-identical for a 5-point stencil, verified by mutation.
 //
 // 5   THE JACOBI STALL, AS AN EXACT EQUALITY RATHER THAN A VAGUE FAILURE.
 //     On a pure checkerboard phi at 4x4, f = -8.phi, and Jacobi oscillates
@@ -159,6 +166,37 @@
 //     no mean subtraction at all               -> 3b, 4a, 15, 16a  (GS only)
 //     ONE mean across all channels             -> 4a, 10a, 10b     (GS only)
 //     zero-mean checked on channel 0 only      -> 10d, AND NOTHING ELSE
+//
+// A SECOND ROUND, 2026-10-16, ran fifteen more. Fourteen were caught:
+//
+//     max_sweeps ignored, always one sweep     -> 2b, 3b, and 18 others
+//     no initial entry in the history          -> 2a, 2b
+//     converged never set                      -> 3b, 5c, 7b, ...
+//     converged always true                    -> 5b, 10c, 17
+//     non-f32 check deleted                    -> 11a ONLY
+//     max_sweeps == 0 check deleted            -> 13a ONLY
+//     `tol < 0` instead of `!(tol >= 0)`       -> 14b ONLY
+//     initial guess a non-zero CONSTANT        -> 2c, 10f
+//     initial guess non-constant               -> 1a, 1b, 2a
+//     residual with no denominator             -> 2a, 5b, 10c
+//     damped jacobi (would cure the stall)     -> 1a, 1b, 4a, 5b
+//     clamp instead of wrap in the update      -> 3b, 4a, 5b, and more
+//     x scanned DESCENDING                     -> 4a, 4c
+//     y scanned DESCENDING                     -> 4c ONLY
+//
+// FIVE OF THOSE ARE CAUGHT BY EXACTLY ONE CHECK. Deleting 10d, 11a, 13a, 14b or
+// 4c does not weaken the suite, it blinds it to one defect each.
+//
+// THE FIFTEENTH WAS NOT CAUGHT, AND SHOULD NOT BE: swapping the loop nesting to
+// x-outer/y-inner passes everything, because for a 5-point stencil it is
+// BIT-IDENTICAL to y-outer/x-inner. Both are lexicographic ascending and the
+// stencil reaches one pixel, so the same neighbours are already written under
+// either. That survivor is the reason the header no longer claims the nesting
+// is part of the contract -- it was asserting a constraint that does not exist,
+// and claiming it was tested when nothing could have tested it.
+//
+// y-DESCENDING SURVIVED THE FIRST ROUND ENTIRELY. 4a is a 4x1 grid, one row, so
+// it cannot see the y direction at all; 4c exists because of that mutation.
 //
 // Two of those lines are worth reading twice.
 //
@@ -542,6 +580,56 @@ int main() {
             expect(max_abs_diff(j.phi, g.phi) > 0.1F,
                    "4b: jacobi and gauss_seidel take different paths -- they "
                    "must NOT agree after one sweep");
+        }
+
+        // ---- 4c. the sweep DIRECTION, on a genuinely 2-D grid --------------
+        //
+        // 4a CANNOT SEE THE y DIRECTION: it runs on 4x1, where there is one row
+        // and descending y is the same as ascending y. A mutation that reversed
+        // the y scan passed all 53 checks before this group existed.
+        //
+        // 4x4 under wrap, f zero except f(0,0) = 4 and f(0,2) = -4 (zero mean),
+        // one Gauss-Seidel sweep from zero, ascending in both axes. Worked by
+        // hand; every value is dyadic, so the expected array is exact in f32
+        // before the mean subtraction, and the mean itself is -0.05084228515625.
+        //
+        //     (0,0)  (0 + 0 + 0 + 0 - 4)/4                = -1
+        //     (1,0)  (0 + -1 + 0 + 0 - 0)/4               = -0.25
+        //     (2,0)  (0 + -0.25 + 0 + 0)/4                = -0.0625
+        //     (3,0)  (-1 + -0.0625 + 0 + 0)/4             = -0.265625
+        //     ... and so on down the rows, the last row reading the FIRST row
+        //     through the wrap seam in y.
+        //
+        // Reversing the y scan moves the answer by 0.40 at its worst pixel, so
+        // this is not a marginal discriminator.
+        //
+        // ** WHAT IS NOT CONSTRAINED: WHICH AXIS IS OUTER. ** x-outer/y-inner
+        // and y-outer/x-inner give BIT-IDENTICAL results for a 5-point stencil,
+        // because both are lexicographic ascending and the stencil reaches only
+        // one pixel: under either order a pixel's LEFT and UP neighbours have
+        // been written and its RIGHT and DOWN have not, wrap included. Verified
+        // by mutation -- swapping the loop nesting changes nothing and no check
+        // fails, correctly. An earlier version of the header called the nesting
+        // "part of the contract"; it is not, and there is nothing to test.
+        {
+            std::vector<float> fv(16, 0.0F);
+            fv[0] = 4.0F;  // (x=0, y=0)
+            fv[8] = -4.0F; // (x=0, y=2)
+            const auto f = make_image(4, 4, 1, fv);
+            const auto want = make_image(
+                4, 4, 1,
+                {-0.94915771484375F, -0.19915771484375F, -0.01165771484375F,
+                 -0.21478271484375F, -0.19915771484375F, -0.07415771484375F,
+                 0.00396728515625F, -0.08978271484375F, 0.98834228515625F,
+                 0.25396728515625F, 0.08990478515625F, 0.25982666015625F,
+                 0.03521728515625F, 0.03521728515625F, 0.04107666015625F,
+                 0.03033447265625F});
+            const auto got =
+                poisson_iter(f, poisson_sweep::gauss_seidel, 1, 0.0F);
+            expect(recovers(got.phi, want, k_exact_tol),
+                   "4c: one gauss_seidel sweep on a 4x4 matches the hand "
+                   "arithmetic -- pins ASCENDING in BOTH axes, which the 4x1 "
+                   "case in 4a cannot see");
         }
 
         // ---- 5. the Jacobi stall, exactly ----------------------------------
