@@ -104,16 +104,20 @@
 //     that survived every one-channel test in conv_theorem -- and a mean
 //     subtracted across the whole image rather than per channel.
 //
-// 10b THE RESIDUAL AGGREGATION RULE, pinned sweep by sweep against the
-//     per-sweep maximum of single-channel runs. The field is chosen so the
-//     channel with the TINY f is also the SLOWEST, which is what makes a
-//     combined RMS visibly wrong: at sweep 12 it reads 2.6e-04 where the worst
-//     channel reads 1.5e-01.
-//     AN EARLIER VERSION ASSERTED residual[0] == 1.0 AND CLAIMED THAT CAUGHT A
-//     COMBINED RMS. It does not -- a combined ratio is also 1.0 at sweep zero,
-//     so the check was satisfied by both and its comment was simply wrong.
+// 10b EVERY CHANNEL'S HISTORY EQUALS THAT CHANNEL SOLVED ALONE, sweep by
+//     sweep. The field is chosen so the channel with the TINY f is also the
+//     SLOWEST, which is what makes any blending visible.
+//     TWO EARLIER VERSIONS OF THIS GROUP WERE WEAKER. The first asserted
+//     residual[0] == 1.0 and claimed that caught a residual aggregated as one
+//     RMS -- it does not, since a combined ratio is also 1.0 at sweep zero.
+//     The second checked the per-sweep MAXIMUM of single-channel runs, which a
+//     wrong channel could hide under as long as another was worse. Per-channel
+//     histories make the exact claim available, so it is made.
 //
-// 10c converged reflects the WORST channel, not the first one to finish.
+// 10c converged reflects the WORST channel, and the lag is VISIBLE: after a
+//     fixed budget the slow small-f channel is an order or more behind the
+//     fast ones. A single aggregated number cannot express this, which is the
+//     reason the report keeps a history per channel.
 //
 // 10d one bad channel out of three is rejected. The precondition is PER
 //     CHANNEL; a whole-buffer mean accepts channels of +5 and -5. 14_poisson
@@ -523,13 +527,13 @@ int main() {
             const auto f = make_image(4, 1, 1, {-10.0F, 4.0F, 2.0F, 4.0F});
             for (const auto s : both) {
                 const auto got = poisson_iter(f, s, 3, 0.0F);
-                expect(!got.residual.empty() &&
-                           std::abs(got.residual[0] - 1.0F) <= k_exact_tol,
+                expect(got.residual.size() == 1 && !got.residual[0].empty() &&
+                           std::abs(got.residual[0][0] - 1.0F) <= k_exact_tol,
                        std::string("2a: ") + name(s) +
                            ": residual[0] is exactly 1.0 -- it is the value "
                            "BEFORE any sweep, from a zero start");
                 expect(
-                    got.residual.size() == 4,
+                    got.residual[0].size() == 4,
                     std::string("2b: ") + name(s) +
                         ": residual has max_sweeps + 1 entries when it never "
                         "converges");
@@ -542,8 +546,10 @@ int main() {
             const auto f = make_image(4, 2, 1, std::vector<float>(8, 0.0F));
             for (const auto s : both) {
                 const auto got = poisson_iter(f, s, 5, 1e-6F);
-                expect(!got.residual.empty() && got.residual[0] == 0.0F &&
-                           got.converged && all_finite(got.phi) &&
+                expect(got.residual.size() == 1 &&
+                           got.residual[0].size() == 1 &&
+                           got.residual[0][0] == 0.0F && got.converged &&
+                           all_finite(got.phi) &&
                            rms_all_channels(got.phi) == 0.0F,
                        std::string("2c: ") + name(s) +
                            ": an all-zero f gives residual 0 (not NaN), "
@@ -677,8 +683,8 @@ int main() {
                    "5a: laplacian of a checkerboard is -8 times it");
 
             const auto got = poisson_iter(f, poisson_sweep::jacobi, 12, 1e-6F);
-            bool flat = !got.residual.empty();
-            for (const float r : got.residual) {
+            bool flat = got.residual.size() == 1 && !got.residual[0].empty();
+            for (const float r : got.residual[0]) {
                 flat = flat && std::abs(r - 1.0F) <= k_exact_tol;
             }
             expect(flat && !got.converged,
@@ -805,10 +811,11 @@ int main() {
 
             const auto j = poisson_iter(f, poisson_sweep::jacobi, 300, 0.0F);
             bool nonrising = true;
-            for (std::size_t i = 1; i < j.residual.size(); ++i) {
-                if (j.residual[i - 1] > 1e-6F) {
-                    nonrising = nonrising &&
-                                j.residual[i] <= j.residual[i - 1] * 1.000'01F;
+            for (std::size_t i = 1; i < j.residual[0].size(); ++i) {
+                if (j.residual[0][i - 1] > 1e-6F) {
+                    nonrising =
+                        nonrising &&
+                        j.residual[0][i] <= j.residual[0][i - 1] * 1.000'01F;
                 }
             }
             expect(
@@ -824,7 +831,7 @@ int main() {
             const auto g =
                 poisson_iter(f, poisson_sweep::gauss_seidel, 300, 0.0F);
             expect(
-                g.residual.back() < g.residual.front() * 1e-4F,
+                g.residual[0].back() < g.residual[0].front() * 1e-4F,
                 "9b: gauss_seidel's residual ends at least 1e-4 below where "
                 "it started (per-step monotonicity deliberately unasserted)");
         }
@@ -898,34 +905,57 @@ int main() {
                            "(invisible at one channel) and a mean subtracted "
                            "across the whole image rather than per channel");
 
-                // THE AGGREGATION RULE ITSELF, pinned sweep by sweep. Tolerance
-                // zero so nothing stops early, a fixed budget so the histories
-                // line up, and the three-channel history must equal the
-                // per-sweep MAXIMUM of the single-channel ones. A combined RMS
-                // sits far below that maximum from sweep 2 onward.
+                // EACH CHANNEL'S HISTORY IS ITS OWN, pinned sweep by sweep
+                // against that channel solved alone. Tolerance zero so nothing
+                // stops early and a fixed budget so the histories line up.
+                //
+                // This is a STRONGER claim than the one a single aggregated
+                // history could make. An earlier version of this group had one
+                // history per run and could only check the per-sweep maximum;
+                // a wrong channel could hide under the max as long as another
+                // channel was worse. Here every channel must match its own run
+                // exactly, so nothing can hide behind anything.
                 const auto h3 = poisson_iter(f3, s, 12, 0.0F);
                 const auto hf = poisson_iter(f_fast, s, 12, 0.0F);
                 const auto hs = poisson_iter(f_slow, s, 12, 0.0F);
-                bool tracks = h3.residual.size() == 13 &&
-                              hf.residual.size() == 13 &&
-                              hs.residual.size() == 13;
+                bool tracks =
+                    h3.residual.size() == 3 && h3.residual[0].size() == 13 &&
+                    h3.residual[1].size() == 13 &&
+                    h3.residual[2].size() == 13 &&
+                    hf.residual[0].size() == 13 && hs.residual[0].size() == 13;
                 for (std::size_t i = 0; i < 13 && tracks; ++i) {
-                    const float want = std::max(hf.residual[i], hs.residual[i]);
-                    tracks = tracks && std::abs(h3.residual[i] - want) <=
-                                           1e-5F * std::max(want, 1e-12F);
+                    // Channels 0 and 2 carry the fast field, channel 1 the
+                    // slow one. Each must match its OWN single-channel run --
+                    // not a blend, not the other channel's, not a maximum.
+                    const float want_fast = hf.residual[0][i];
+                    const float want_slow = hs.residual[0][i];
+                    tracks = tracks &&
+                             std::abs(h3.residual[0][i] - want_fast) <=
+                                 1e-5F * std::max(want_fast, 1e-12F) &&
+                             std::abs(h3.residual[1][i] - want_slow) <=
+                                 1e-5F * std::max(want_slow, 1e-12F) &&
+                             std::abs(h3.residual[2][i] - want_fast) <=
+                                 1e-5F * std::max(want_fast, 1e-12F);
                 }
                 expect(tracks,
                        std::string("10b: ") + name(s) +
-                           ": the 3-channel residual is the per-sweep WORST "
-                           "channel, not a combined RMS -- which at sweep 12 "
-                           "reads 2.6e-04 against the true 1.5e-01");
+                           ": every channel's history equals that channel "
+                           "solved alone -- not a blend, not a maximum, and "
+                           "nothing hiding behind a worse channel");
 
-                // And convergence is per channel too: the small-f channel is the
-                // slow one, so a combined rule would declare victory early.
-                expect(!h3.converged && h3.residual.back() > 1e-2F,
+                // And the per-channel split is VISIBLE, which is the reason to
+                // keep histories per channel at all. The small-f channel is
+                // also the slow one, so after a fixed budget it must still be
+                // at least an order behind -- measured, 1.5e-01 against 7e-09
+                // for Jacobi and 4.0e-02 against 1.6e-03 for Gauss-Seidel.
+                // A single aggregated number cannot express this at all.
+                expect(!h3.converged && h3.residual[1].back() >
+                                            h3.residual[0].back() * 10.0F,
                        std::string("10c: ") + name(s) +
-                           ": 12 sweeps is NOT enough for the slow small-f "
-                           "channel, and converged must reflect the worst one");
+                           ": 12 sweeps leaves the slow small-f channel an "
+                           "order or more behind the fast ones, and converged "
+                           "reflects the worst channel rather than the first "
+                           "to finish");
             }
         }
 
@@ -1183,7 +1213,7 @@ int main() {
 
             const auto j =
                 poisson_iter(f, poisson_sweep::jacobi, 400, k_res_tol);
-            expect(!j.converged && j.residual.back() > 1e-3F,
+            expect(!j.converged && j.residual[0].back() > 1e-3F,
                    "16c: jacobi STALLS on the ordinary ramp field of group 16, "
                    "because under wrap it is discontinuous and so carries the "
                    "joint-Nyquist mode -- the stall is not confined to fields "
@@ -1191,7 +1221,7 @@ int main() {
 
             const auto g =
                 poisson_iter(f, poisson_sweep::gauss_seidel, 400, k_res_tol);
-            expect(g.converged && g.residual.back() <= k_res_tol,
+            expect(g.converged && g.residual[0].back() <= k_res_tol,
                    "16d: gauss_seidel converges on that SAME field -- observed "
                    "on a second field, still not proved, and the only claim "
                    "this file makes about GS and the checkerboard");
@@ -1205,7 +1235,7 @@ int main() {
             const auto f = laplacian(phi, vc_edge_policy::wrap);
             const auto got = poisson_iter(f, poisson_sweep::jacobi, 3, 1e-12F);
             expect(
-                !got.converged && got.residual.size() == 4 &&
+                !got.converged && got.residual[0].size() == 4 &&
                     all_finite(got.phi),
                 "17: a budget too small reports converged == false and "
                 "returns normally -- the caller asked by supplying a budget");

@@ -6,6 +6,8 @@
 #include "vc/core/vc_error_code.h"
 #include "vc/core/vc_exception.h"
 #include "vc/core/vc_image_writer.h"
+#include "vc/core/vc_pixel_buffer.h"
+#include "vc/core/vc_scalar.h"
 #include "vc/core/vc_types.h"
 #include "vc/math/vc_dft.h"
 #include "vc/math/vc_grid2d.h"
@@ -15,6 +17,7 @@
 #include <cstddef>
 #include <numbers>
 #include <numeric>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -128,6 +131,26 @@ constexpr float k_mean_rel_tol = 1e-5F;
 constexpr float k_imag_rel_tol = 1e-3F;
 constexpr float k_rms_floor = 1e-12F;
 
+//TODO: Should be part of vc_image?
+double get_rms(const vc_image& plane) {
+    const auto buffer = plane.pixels()->as<vc::buf_f32>();
+    const auto count = static_cast<double>(plane.pixel_count());
+    const double ssq = std::accumulate(
+        buffer.begin(), buffer.end(), 0.0, [](double acc, vc::buf_f32 v) {
+            const auto d = static_cast<double>(v);
+            return acc + (d * d);
+        });
+    return std::sqrt(ssq / count);
+}
+
+//TODO: Should be part of vc_image?
+double get_mean(const vc_image& plane) {
+    const auto buffer = plane.pixels()->as<vc::buf_f32>();
+    const auto count = static_cast<double>(plane.pixel_count());
+    const double sum = std::accumulate(buffer.begin(), buffer.end(), 0.0);
+    return sum / count;
+}
+
 // Shared by poisson_fft and poisson_iter so the two CANNOT DRIFT APART: one
 // tolerance, one scaling rule, one message shape, and only the caller's name
 // differs. 15_poisson_iter asserts the message names poisson_iter, so a
@@ -135,22 +158,153 @@ constexpr float k_rms_floor = 1e-12F;
 //
 // Takes the accumulated sum and rms rather than the image, because both callers
 // already compute them for other purposes and a second pass would be waste.
-void require_zero_mean(double sum,
-                       double rms,
-                       double count,
-                       vc::channel_count ch,
-                       const char* caller) {
+void require_zero_mean(const vc_image& plane, const char* caller) {
+    const double mean = get_mean(plane);
+    const double rms = get_rms(plane);
     const double scale_floor = std::max(rms, static_cast<double>(k_rms_floor));
-    if (std::abs(sum / count) >
-        static_cast<double>(k_mean_rel_tol) * scale_floor) {
+    if (std::abs(mean) > static_cast<double>(k_mean_rel_tol) * scale_floor) {
         throw vc::vc_exception(
             vc::vc_error_code::invalid_argument,
             std::string{caller} +
-                ": f must have zero mean per channel, but channel " +
-                std::to_string(ch) + " has mean " +
-                std::to_string(sum / count) + " against RMS " +
-                std::to_string(rms));
+                ": f must have zero mean per channel, but channel has mean " +
+                std::to_string(mean) + " against RMS " + std::to_string(rms));
     }
+}
+
+// TODO: Should be part of vc_image?
+std::vector<vc_image> get_image_planes(const vc_image& f_input) {
+    // One contiguous f32 plane per channel. The equation does not couple
+    // channels, so each is solved on its own from here down.
+    std::vector<vc_image> channels;
+    channels.reserve(f_input.channels());
+    for (vc::channel_count ch = 0; ch < f_input.channels(); ++ch) {
+        vc_image_writer channel{f_input.width(), f_input.height(), 1,
+                                vc::buf_f32{0.0F}};
+        for (vc::image_dim y = 0; y < f_input.height(); ++y) {
+            for (vc::image_dim x = 0; x < f_input.width(); ++x) {
+                channel.at<vc::buf_f32>(x, y, 0) =
+                    f_input.at<vc::buf_f32>(x, y, ch);
+            }
+        }
+        channels.emplace_back(std::move(channel).seal());
+    }
+    return channels;
+}
+
+template <typename T>
+concept vc_poisson_sweep_req =
+    std::same_as<T, vc_image> || std::same_as<T, vc_image_writer>;
+
+// One sweep of phi(x,y) = [ four neighbours - f(x,y) ] / 4, under wrap.
+//
+// src AND dst MAY BE THE SAME WRITER, and that aliasing is the ENTIRE
+// difference between the two methods -- which is why there is one loop body
+// here and not two:
+//
+//     jacobi         distinct buffers  -> every read is the previous sweep's
+//     gauss_seidel   the same buffer   -> left and up are already this sweep's
+//
+// f_plane is a SINGLE-CHANNEL plane, so its channel index is 0. An earlier
+// version passed the outer loop's `ch` here, which throws for ch > 0 because
+// the plane has one channel -- invisible at one channel, which is the bug class
+// conv_theorem shipped.
+// src is taken by NON-const reference although nothing is written through it:
+// vc_image_writer::at() has no const overload, so a const reference cannot read
+// a pixel. Adding one is a library change and is logged in
+// docs/follow_up_p4.txt rather than made here.
+void do_poisson_sweep(const vc_image& f_plane,
+                      vc_image_writer& src,
+                      vc_image_writer& dst) {
+    const auto w = f_plane.width();
+    const auto h = f_plane.height();
+    for (vc::image_dim y = 0; y < h; ++y) {
+        for (vc::image_dim x = 0; x < w; ++x) {
+            // TODO(perf): the four `%` per pixel dominate at high sweep counts.
+            // Interior pixels never wrap -- split into an interior fast path
+            // plus a border pass, or precompute index tables once per call.
+            // TODO(perf): at<>() bounds-checks three dimensions on every call,
+            // six calls per pixel per sweep. Hoist pixels()->as<buf_f32>() and
+            // index the span directly. Measure first; the suite is the net.
+            const auto neighbour_sum =
+                src.at<vc::buf_f32>((x + 1) % w, y, 0) +
+                src.at<vc::buf_f32>((x - 1 + w) % w, y, 0) +
+                src.at<vc::buf_f32>(x, (y + 1) % h, 0) +
+                src.at<vc::buf_f32>(x, (y - 1 + h) % h, 0);
+            dst.at<vc::buf_f32>(x, y, 0) =
+                (neighbour_sum - f_plane.at<vc::buf_f32>(x, y, 0)) / 4.0F;
+        }
+    }
+}
+
+// The relative residual of ONE channel: how badly the current phi fails the
+// equation, as an RMS, scaled by f's own RMS so the number is dimensionless.
+//
+// f_rms is passed in rather than recomputed because it never changes, and this
+// runs once per sweep -- thousands of times.
+//
+// Accumulated in double for the same reason require_zero_mean is: an f32 sum
+// over many samples loses precision exactly where this needs it.
+double
+relative_residual(const vc_image& f_plane,
+                  vc_image_writer& phi, // non-const: see do_poisson_sweep
+                  double f_rms) {
+    const auto w = f_plane.width();
+    const auto h = f_plane.height();
+    double ssq = 0.0;
+    for (vc::image_dim y = 0; y < h; ++y) {
+        for (vc::image_dim x = 0; x < w; ++x) {
+            const auto neighbour_sum =
+                phi.at<vc::buf_f32>((x + 1) % w, y, 0) +
+                phi.at<vc::buf_f32>((x - 1 + w) % w, y, 0) +
+                phi.at<vc::buf_f32>(x, (y + 1) % h, 0) +
+                phi.at<vc::buf_f32>(x, (y - 1 + h) % h, 0);
+            const auto lap =
+                neighbour_sum - (4.0F * phi.at<vc::buf_f32>(x, y, 0));
+            const auto d =
+                static_cast<double>(f_plane.at<vc::buf_f32>(x, y, 0) - lap);
+            ssq += d * d;
+        }
+    }
+    const auto count = static_cast<double>(f_plane.pixel_count());
+    return std::sqrt(ssq / count) /
+           std::max(f_rms, static_cast<double>(k_rms_floor));
+}
+
+// Subtract this plane's own mean, in place.
+//
+// WHY EVERY SWEEP, FOR BOTH METHODS. The periodic problem fixes phi only up to
+// an added constant -- phi and phi + c give an identical f, because the
+// stencil's weights sum to zero -- so the iteration has a free parameter and
+// something must pin it. The convention is the zero-mean solution, and this is
+// how it is picked.
+//
+// Jacobi provably preserves the mean: summing its update over every pixel
+// counts each pixel as a neighbour exactly four times, giving
+// sum(phi_new) = sum(phi) - sum(f)/4, and sum(f) is zero by the precondition.
+// Gauss-Seidel does NOT -- it writes as it goes, so that accounting mixes old
+// and new values and the total drifts. Measured on f = [-10,4,2,4] from zero,
+// the Gauss-Seidel mean runs 0.252, 0.347, 0.386, 0.404, ... while Jacobi's
+// stays exactly 0.
+//
+// ** DONE FOR BOTH ANYWAY, DELIBERATELY. ** The Jacobi proof assumes sum(f) is
+// EXACTLY zero, and the precondition only guarantees it to k_mean_rel_tol times
+// the RMS. A residual mean compounds at sum(f)/4 per sweep, and S8b runs
+// thousands. One extra pass removes the assumption.
+void subtract_mean(vc_image_writer& plane, vc::element_count count) {
+    double sum = 0.0;
+    plane.with_pixels<vc::buf_f32>([&](std::span<vc::buf_f32> pixels) {
+        sum = std::accumulate(pixels.begin(), pixels.end(), 0.0,
+                              [](double acc, vc::buf_f32 v) {
+                                  return acc + static_cast<double>(v);
+                              });
+    });
+    const auto mean =
+        static_cast<vc::buf_f32>(sum / static_cast<double>(count));
+    plane.with_pixels<vc::buf_f32>([mean](std::span<vc::buf_f32> pixels) {
+        for (auto& v : pixels) {
+            v -= mean;
+        }
+    });
 }
 
 } // namespace
@@ -192,21 +346,7 @@ vc::vc_image poisson_fft(const vc::vc_image& f_input) {
                                "poisson_fft: f must be of type buf_f32");
     }
 
-    // One contiguous f32 plane per channel. The equation does not couple
-    // channels, so each is solved on its own from here down.
-    std::vector<vc_image> channels;
-    channels.reserve(f_input.channels());
-    for (vc::channel_count ch = 0; ch < f_input.channels(); ++ch) {
-        vc_image_writer channel{f_input.width(), f_input.height(), 1,
-                                vc::buf_f32{0.0F}};
-        for (vc::image_dim y = 0; y < f_input.height(); ++y) {
-            for (vc::image_dim x = 0; x < f_input.width(); ++x) {
-                channel.at<vc::buf_f32>(x, y, 0) =
-                    f_input.at<vc::buf_f32>(x, y, ch);
-            }
-        }
-        channels.emplace_back(std::move(channel).seal());
-    }
+    auto channels = get_image_planes(f_input);
 
     vc_image_writer out{f_input.width(), f_input.height(), f_input.channels(),
                         vc::buf_f32{0.0F}};
@@ -228,25 +368,11 @@ vc::vc_image poisson_fft(const vc::vc_image& f_input) {
         const auto buffer = plane.pixels()->as<vc::buf_f32>();
         const auto count = static_cast<double>(plane.pixel_count());
 
-        // Accumulated in double on purpose: a float sum over 65k samples loses
-        // precision exactly where this check needs it. -Wdouble-promotion is on,
-        // so every f32 read is cast explicitly rather than promoted implicitly.
-        const double sum = std::accumulate(
-            buffer.begin(), buffer.end(), 0.0, [](double acc, vc::buf_f32 v) {
-                return acc + static_cast<double>(v);
-            });
-        const double ssq = std::accumulate(
-            buffer.begin(), buffer.end(), 0.0, [](double acc, vc::buf_f32 v) {
-                const auto d = static_cast<double>(v);
-                return acc + (d * d);
-            });
-        const double rms = std::sqrt(ssq / count);
-
         // NOT an equality against zero. f comes out of a float transform and
         // carries noise -- measured, sum(f) is around 2.4e-06 on an 8x4 field
         // where the exact answer is 0. A first version tested `sum != 0.0` and
         // rejected every real input.
-        require_zero_mean(sum, rms, count, ch, "poisson_fft");
+        require_zero_mean(plane, "poisson_fft");
 
         vc::math::vc_complex_signal spectrum =
             vc::math::dft2d(vc::math::to_signal(buffer), extent);
@@ -269,6 +395,7 @@ vc::vc_image poisson_fft(const vc::vc_image& f_input) {
         const vc::math::vc_complex_signal result =
             vc::math::idft2d(spectrum, extent);
 
+        // TODO: create a common utility function for rms? Should work for vc_image and signal?
         double out_ssq = 0.0;
         for (const auto& bin : result) {
             const auto re = static_cast<double>(bin.real());
@@ -304,9 +431,7 @@ vc::vc_image poisson_fft(const vc::vc_image& f_input) {
                 vc::vc_error_code::invalid_argument,
                 "poisson_fft: the inverse transform is not real -- max|imag| " +
                     std::to_string(worst_imag) + " against a scale of " +
-                    std::to_string(imag_scale) + " (input RMS " +
-                    std::to_string(rms) + ", output RMS " +
-                    std::to_string(out_rms) +
+                    std::to_string(imag_scale) +
                     "), which means the spectrum was not twin-symmetric");
         }
 
@@ -346,13 +471,97 @@ vc::vc_image poisson_fft(const vc::vc_image& f_input) {
 poisson_iter_report poisson_iter(const vc::vc_image& f,
                                  poisson_sweep sweep,
                                  sweep_count max_sweeps,
-                                 float tolerance) {
-    (void)f;
-    (void)sweep;
-    (void)max_sweeps;
-    (void)tolerance;
-    throw vc::vc_exception(vc::vc_error_code::invalid_argument,
-                           "poisson_iter: not implemented");
+                                 vc::float32 tolerance) {
+    if (f.pixels()->dtype() != vc::pixel_dtype::f32) {
+        throw vc::vc_exception(vc::vc_error_code::invalid_argument,
+                               "poisson_iter: f must be of type buf_f32");
+    }
+    if (max_sweeps == 0) {
+        throw vc::vc_exception(vc::vc_error_code::invalid_argument,
+                               "poisson_iter: max_sweeps must be > 0");
+    }
+    // !(tolerance >= 0), NOT tolerance < 0. `NaN < 0` is FALSE, so the naive
+    // form lets a NaN through, after which every convergence comparison is
+    // false and the run silently burns the whole budget. 15_poisson_iter 14b.
+    if (!(tolerance >= 0.0F)) {
+        throw vc::vc_exception(vc::vc_error_code::invalid_argument,
+                               "poisson_iter: tolerance must be >= 0");
+    }
+
+    const auto planes = get_image_planes(f);
+    vc_image_writer result{f.width(), f.height(), f.channels(),
+                           vc::buf_f32{0.0F}};
+
+    std::vector<std::vector<float>> history;
+    history.reserve(f.channels());
+    bool all_converged = true;
+
+    for (vc::channel_count ch = 0; ch < f.channels(); ++ch) {
+        const vc_image& f_plane = planes[ch];
+        require_zero_mean(f_plane, "poisson_iter");
+
+        // Hoisted: f does not change, and this is the residual's denominator
+        // for every one of possibly thousands of sweeps.
+        const double f_rms = get_rms(f_plane);
+        const auto count = f_plane.pixel_count();
+
+        // phi starts at zero everywhere. The second buffer exists ONLY for
+        // Jacobi, which must read a consistent previous iterate; Gauss-Seidel
+        // reads and writes one buffer by definition.
+        vc_image_writer buf_a{f_plane.width(), f_plane.height(), 1,
+                              vc::buf_f32{0.0F}};
+        std::optional<vc_image_writer> buf_b;
+        if (sweep == poisson_sweep::jacobi) {
+            buf_b.emplace(f_plane.width(), f_plane.height(), 1,
+                          vc::buf_f32{0.0F});
+        }
+
+        // `current` always points at the buffer holding the latest phi. An
+        // earlier version derived that from sweep parity and nothing recorded
+        // which buffer the answer had landed in.
+        vc_image_writer* current = &buf_a;
+
+        std::vector<float> channel_history;
+        channel_history.reserve(static_cast<std::size_t>(max_sweeps) + 1);
+
+        // BEFORE any sweep: phi is zero, so r = f - laplacian(0) = f and the
+        // ratio is exactly 1.0 -- except for an all-zero plane, where the
+        // clamped denominator gives 0.0 rather than 0/0.
+        channel_history.push_back(
+            static_cast<float>(relative_residual(f_plane, *current, f_rms)));
+
+        bool converged = channel_history.back() <= tolerance;
+
+        for (sweep_count s = 0; s < max_sweeps && !converged; ++s) {
+            vc_image_writer* destination = current;
+            if (sweep == poisson_sweep::jacobi) {
+                destination = (current == &buf_a) ? &buf_b.value() : &buf_a;
+            }
+            do_poisson_sweep(f_plane, *current, *destination);
+            current = destination;
+
+            subtract_mean(*current, count);
+            channel_history.push_back(static_cast<float>(
+                relative_residual(f_plane, *current, f_rms)));
+            converged = channel_history.back() <= tolerance;
+        }
+
+        // Each channel stops on its own -- they are independent problems, and
+        // per-channel histories are exactly what makes that expressible without
+        // inventing values for the sweeps a finished channel did not run.
+        all_converged = all_converged && converged;
+        history.push_back(std::move(channel_history));
+
+        for (vc::image_dim y = 0; y < f_plane.height(); ++y) {
+            for (vc::image_dim x = 0; x < f_plane.width(); ++x) {
+                result.at<vc::buf_f32>(x, y, ch) =
+                    current->at<vc::buf_f32>(x, y, 0);
+            }
+        }
+    }
+
+    return poisson_iter_report{std::move(result).seal(), std::move(history),
+                               all_converged};
 }
 
 } // namespace vc::pixelops

@@ -444,31 +444,37 @@ struct poisson_iter_report {
     vc::vc_image phi;
 
     // The relative residual ||f - laplacian(phi, wrap)|| / ||f||, both as RMS,
-    // recorded once per sweep. This is the curve S8b plots.
+    // recorded once per sweep, PER CHANNEL: residual[channel][sweep]. This is
+    // the curve S8b plots, one line per channel.
     //
-    // INDEXING: residual[0] is the INITIAL value, BEFORE any sweep; residual[i]
-    // is the value after sweep i. So size() == sweeps_actually_run + 1, which is
-    // max_sweeps + 1 if it never converged and less if it stopped early.
+    // PER CHANNEL RATHER THAN ONE AGGREGATED NUMBER, and the argument is
+    // one-directional: the worst-channel figure is derivable from these, and
+    // these are not derivable from it. A single RMS over all channels also
+    // hides a channel whose own f is small and whose answer is entirely wrong
+    // -- 14_poisson group 19's bug class, one function over.
     //
-    // residual[0] IS 1.0 and that is a free check: from a zero start,
+    // It also removes a question that one shared history forces. Channels are
+    // independent problems and finish at different sweeps; with one history the
+    // finished ones need values invented for the sweeps they did not run. Per
+    // channel, each history simply ENDS where that channel ended, and
+    // residual[c].size() is that channel's sweep count plus one.
+    //
+    // INDEXING: residual[c][0] is the INITIAL value, BEFORE any sweep;
+    // residual[c][i] is the value after sweep i of channel c.
+    //
+    // residual[c][0] IS 1.0 and that is a free check: from a zero start,
     // r = f - laplacian(0) = f, so the ratio is ||f||/||f||. Exactly 1.0 in
     // arithmetic, and to within an ulp in practice depending on whether the two
     // norms are computed by the same code path -- 15_poisson_iter allows 1e-6
     // rather than demanding bit equality.
     //
-    // THE ONE EXCEPTION IS AN ALL-ZERO f, where the clamped denominator makes it
-    // 0.0 rather than 1.0 -- correctly, since there is no residual to report and
-    // phi = 0 already solves it. 15_poisson_iter pins both.
-    //
-    // ONE NUMBER PER SWEEP, AND IT IS THE WORST CHANNEL, NOT THE COMBINED RMS.
-    // A single RMS over all channels hides a channel whose own f is small and
-    // whose answer is entirely wrong -- which is precisely the bug group 19 of
-    // 14_poisson exists to catch, in the mean check, one function over.
+    // THE ONE EXCEPTION IS AN ALL-ZERO CHANNEL, where the clamped denominator
+    // makes it 0.0 rather than 1.0 -- correctly, since there is no residual to
+    // report and phi = 0 already solves it. 15_poisson_iter pins both.
     //
     // THE DENOMINATOR IS CLAMPED by the same RMS floor poisson_fft uses, so an
-    // all-zero f gives 0 rather than 0/0, converges immediately, and returns
-    // phi = 0, which is the correct answer for it.
-    std::vector<float> residual;
+    // all-zero f gives 0 rather than 0/0.
+    std::vector<std::vector<float>> residual;
 
     // True only when EVERY channel's relative residual reached tolerance. A run
     // that exhausted max_sweeps reports false; it does not throw, because

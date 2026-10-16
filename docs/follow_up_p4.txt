@@ -1,5 +1,6 @@
 template <vc_pixel_element_req T, typename F> void with_pixels(F&& f)
 > Add the iterator inside this function and pass the actual function?
+	- a lot of with_pixel implementation use at accessor for different image
 
 - Optimise multiplication/division by using bitwise ops
 
@@ -22,6 +23,17 @@ template <vc_pixel_element_req T, typename F> void with_pixels(F&& f)
 	- extracting planes/channels into vector
 	- Sum, mean, rms etc of elements
 	- getting the buffer as complex signal
+	- cast image writer to vc_image for read ops (poisson)
+	- These ops need to run for vc_image and writer
+	- CONCRETELY: vc_image_writer::at() has NO const overload, so a
+	  `const vc_image_writer&` cannot READ a pixel. poisson_iter's
+	  do_poisson_sweep and relative_residual both take their source by
+	  NON-const reference purely for that reason, which misstates their
+	  intent -- neither writes through it. Adding
+	      const T& at(x, y, ch) const
+	  to vc_image_writer fixes it everywhere and is a two-line change.
+
+- looping for cpu/gpu optimised manner? memory Layout?
 
 - complex signal
 	- check for imaginary max
