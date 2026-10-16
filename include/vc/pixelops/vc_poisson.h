@@ -301,9 +301,22 @@ namespace vc::pixelops {
 // residual is 1.0 forever -- the iterate oscillates between 2.P and 0 while the
 // error holds magnitude |A| and the checkerboard's own scale is -8.
 //
-// NOTHING HERE IS ASSERTED ABOUT GAUSS-SEIDEL AND THE CHECKERBOARD. Its
-// iteration is not symmetric, the argument above does not transfer, and it has
-// not been verified. The tests assert the Jacobi plateau and stay silent on GS.
+// ** A FIELD DOES NOT HAVE TO LOOK LIKE A CHECKERBOARD TO CARRY ONE. ** Any
+// field that is not periodic is DISCONTINUOUS at the wrap seam, and a
+// discontinuity has spectral content everywhere -- including the joint-Nyquist
+// bin. Measured on the plain ramp 1.5x - 0.75y + 0.25xy at 8x4, which looks
+// nothing like a checkerboard: its bin (4,2) is non-zero, and Jacobi plateaus
+// there at about 6e-02. So "use a field with no Nyquist component" is a
+// constraint on how the field is BUILT, not something a glance can confirm --
+// a sum of a few chosen modes satisfies it, a sampled image or a ramp does not.
+//
+// GAUSS-SEIDEL AND THE CHECKERBOARD IS AN OBSERVATION, NOT A RESULT. On both
+// fields measured it converges where Jacobi stalls -- 4e-08 against 6e-02 on
+// that ramp. The standard Dirichlet result, that Gauss-Seidel's factor is the
+// square of Jacobi's, would predict a stall here and does not happen, so it
+// does not transfer to the periodic problem and no derivation is offered.
+// 15_poisson_iter group 16d asserts the observed behaviour so that a change in
+// it is visible; nothing else in the tests depends on it.
 //
 // ---- WHAT THAT COSTS IN SWEEPS ----
 //

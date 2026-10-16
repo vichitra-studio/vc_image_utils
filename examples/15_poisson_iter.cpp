@@ -144,6 +144,14 @@
 //     height is invisible -- the blindness 07_dft2d and 14_poisson group 1 both
 //     record.
 //
+// 16c/16d THE STALL ON A FIELD NOBODY DESIGNED TO STALL. Group 16's ramp is
+//     discontinuous under wrap, so its spectrum reaches the joint-Nyquist bin
+//     and Jacobi stalls on it -- which is why group 16 uses gauss_seidel, a
+//     choice that was load-bearing and undocumented until this was added.
+//     16d is the ONLY claim in this file about Gauss-Seidel and the
+//     checkerboard, and it is explicitly an observation on a second field, not
+//     a proof.
+//
 // 16  THE f-BUILT-WITH-CLAMP TRAP, inherited from 14_poisson group 16 and
 //     re-pinned here because it is a property of the PROBLEM, not of either
 //     solver. A clamp-built f passes the zero-mean check, is solved, and is
@@ -197,6 +205,21 @@
 //
 // y-DESCENDING SURVIVED THE FIRST ROUND ENTIRELY. 4a is a 4x1 grid, one row, so
 // it cannot see the y direction at all; 4c exists because of that mutation.
+//
+// ---- A THIRD ROUND, 2026-10-16, FOUND NO NEW MUTATION SURVIVORS ----
+//
+// It found two other things instead, neither reachable by mutating the solver.
+//
+// THE SUITE PASSES UNDER AddressSanitizer + UBSan (including float-div-by-zero)
+// AND IN A RELEASE BUILD, 56/56 in both. The release run matters because every
+// exact expectation in groups 1, 4, 4c, 5 and 6 is a specific float value, and
+// optimisation reassociating them would have broken those and nothing else.
+//
+// GROUP 16's CHOICE OF gauss_seidel WAS LOAD-BEARING AND UNDOCUMENTED. Its ramp
+// field is discontinuous under wrap, so it carries the joint-Nyquist mode and
+// Jacobi stalls on it; running that group with `both` would have failed and
+// read as a bug in the clamp trap. Now asserted as 16c/16d rather than relied
+// on silently.
 //
 // Two of those lines are worth reading twice.
 //
@@ -1120,11 +1143,58 @@ int main() {
                        (void)poisson_iter(f_clamp, poisson_sweep::gauss_seidel,
                                           10, k_res_tol);
                    }) &&
-                       all_finite(bad.phi) &&
+                       all_finite(bad.phi) && bad.converged &&
                        !recovers(bad.phi, zero_meaned(phi), 1e-2F),
-                   "16b: a CLAMP-built f is accepted, solved and returned "
-                   "WRONG -- no throw, no NaN. Build f with wrap; nothing "
-                   "inside the solver can defend this");
+                   "16b: a CLAMP-built f is accepted, CONVERGES CLEANLY, and "
+                   "is returned WRONG -- no throw, no NaN, converged == true. "
+                   "Build f with wrap; nothing in the solver can defend this");
+        }
+
+        // ---- 16c. the stall again, on a field nobody designed to stall -----
+        //
+        // ** GROUP 16 USES gauss_seidel, AND THAT CHOICE IS LOAD-BEARING. ** The
+        // ramp field above is not a sum of a few modes -- under wrap it is
+        // discontinuous at the seams, so its spectrum has content EVERYWHERE,
+        // including the joint-Nyquist bin (4,2) at 8x4. Jacobi therefore stalls
+        // on it. Running group 16 with `both` would fail, and would read as a
+        // bug in the clamp trap rather than as the method doing what section
+        // 5b's factor of -1 says it must.
+        //
+        // Rather than leave that as an undocumented accident, it is asserted:
+        // an ordinary-looking ramp is a SECOND, independently arrived-at
+        // instance of the stall, and unlike 5b nobody constructed it to stall.
+        //
+        // AND IT IS THE ONLY PLACE THIS FILE SAYS ANYTHING ABOUT GAUSS-SEIDEL
+        // AND THE CHECKERBOARD. Measured here: Jacobi plateaus around 6e-02
+        // while Gauss-Seidel reaches 4e-08, six orders apart, on a field whose
+        // Nyquist content neither method was told about. That is OBSERVED, on a
+        // second field, NOT PROVED -- the Dirichlet result that Gauss-Seidel's
+        // factor is the square of Jacobi's would predict a stall here, and it
+        // does not happen, so that result does not transfer to the periodic
+        // problem. If this check ever flips, the observation was the thing that
+        // was wrong, not the solver.
+        {
+            const auto phi = from_rule(8, 4, [](int x, int y) {
+                return (static_cast<float>(x) * 1.5F) -
+                       (static_cast<float>(y) * 0.75F) +
+                       (static_cast<float>(x * y) * 0.25F);
+            });
+            const auto f = laplacian(phi, vc_edge_policy::wrap);
+
+            const auto j =
+                poisson_iter(f, poisson_sweep::jacobi, 400, k_res_tol);
+            expect(!j.converged && j.residual.back() > 1e-3F,
+                   "16c: jacobi STALLS on the ordinary ramp field of group 16, "
+                   "because under wrap it is discontinuous and so carries the "
+                   "joint-Nyquist mode -- the stall is not confined to fields "
+                   "built out of checkerboards");
+
+            const auto g =
+                poisson_iter(f, poisson_sweep::gauss_seidel, 400, k_res_tol);
+            expect(g.converged && g.residual.back() <= k_res_tol,
+                   "16d: gauss_seidel converges on that SAME field -- observed "
+                   "on a second field, still not proved, and the only claim "
+                   "this file makes about GS and the checkerboard");
         }
 
         // ---- 17. exhausting the budget reports, it does not throw ----------
