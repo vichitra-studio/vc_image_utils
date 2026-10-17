@@ -105,6 +105,7 @@ set(VC_LIB_SOURCES
     src/utils/vc_log.cpp
     src/utils/vc_perf.cpp
     src/debug/vc_image_dumper.cpp
+    src/debug/vc_residual_plot.cpp
     src/debug/vc_spectrum_viz.cpp
     src/pixelops/vc_conv_frequency.cpp
     src/pixelops/vc_pyramid.cpp

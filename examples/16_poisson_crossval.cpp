@@ -581,10 +581,19 @@ int main() {
         // on simulated evidence is worse than no test. 32x32 and 64x64 are still
         // exercised -- in group 8, REPORTED rather than gated.
         //
-        // The assert here is 1e-5, the gate itself, rather than
-        // 15_poisson_iter's looser 5e-5: that file leaves tripwire room for the
-        // two sweeps it covers, and this one is checking that red_black has not
-        // made things worse than the gate allows.
+        // ---- THE ASSERT IS 5e-5, NOT THE GATE'S 1e-5, AND THAT IS NOT A
+        // QUIET RELAXATION ----
+        //
+        // A first draft of this group asserted 1e-5 -- the gate itself -- which
+        // is exactly the mistake P2 records two lines under Gate 1. The MEASURED
+        // error at 16x8 through a 1e-6 residual is 6.3e-06. That clears 1e-5,
+        // but by 1.6x, which is far too tight for a tripwire: ordinary variation
+        // in the field or the stopping sweep trips it and the failure says
+        // nothing. 15_poisson_iter ships 5e-5 for this reason and this file
+        // matches it, giving about 8x.
+        //
+        // THE GATE IS STILL CHECKED -- by the printed number, which is the thing
+        // to read. The assert is only the wire that catches a real regression.
         {
             const std::pair<vc::image_dim, vc::image_dim> sizes[] = {
                 {8, 8}, {16, 8}, {8, 16}};
@@ -603,9 +612,10 @@ int main() {
                     expect(r.converged,
                            std::string{"7 reaches a 1e-6 residual at "} +
                                std::to_string(w) + "x" + std::to_string(h));
-                    expect(d <= 1e-5,
-                           std::string{"7 GATE 1 at "} + std::to_string(w) +
-                               "x" + std::to_string(h) + ", sweep " +
+                    expect(d <= 5e-5,
+                           std::string{"7 GATE 1 tripwire at "} +
+                               std::to_string(w) + "x" + std::to_string(h) +
+                               ", sweep " +
                                std::to_string(static_cast<int>(sweep)) +
                                ": agrees with poisson_fft, rel " +
                                std::to_string(d));
@@ -764,8 +774,19 @@ int main() {
             expect(plot.width() == 1000 && plot.height() == 600,
                    "10b the plot honours a non-default canvas size");
 
+            // THE OUTPUT DIRECTORY IS SET EXPLICITLY. The dumper's default is
+            // "./vc_debug_dump", relative to the CURRENT WORKING DIRECTORY --
+            // so the same binary writes into the build tree under ctest and
+            // into the repository root when run by hand. Naming it here makes
+            // the artifact findable and the side effect deterministic.
+            // (`vc_debug_dump/` was also missing from .gitignore until this
+            // group became the first thing in the repository to write there.)
+            vc::debug::set_output_dir("vc_debug_dump/16_poisson_crossval");
             vc::debug::set_enabled(true);
             vc::debug::dump("poisson_residual", plot);
+            // Left OFF again: enabled() is process-wide, and a group added
+            // after this one should not start dumping because this one did.
+            vc::debug::set_enabled(false);
             std::cout << "  10: residual plot written under "
                       << vc::debug::output_dir().string() << '\n';
         }

@@ -466,6 +466,50 @@ poisson_iter_report poisson_iter(const vc::vc_image& f,
                                "poisson_iter: tolerance must be >= 0");
     }
 
+    // ---- SWEEP-DEPENDENT PRECONDITIONS ----
+    //
+    // A SWITCH WITH NO `default`, DELIBERATELY. The two branches further down
+    // test `sweep == poisson_sweep::jacobi`, so a newly added enumerator
+    // compiles silently and falls into the gauss_seidel path -- which is a
+    // WORKING SOLVER, so it returns a correct answer by the wrong method and
+    // every end-state check passes. That is exactly what happened when
+    // red_black was added: zero warnings. This switch is what the header
+    // promised and the `==` tests did not provide; S8b should convert those two
+    // as well, and then this block can fold into them.
+    switch (sweep) {
+    case poisson_sweep::jacobi:
+    case poisson_sweep::gauss_seidel:
+        break;
+    case poisson_sweep::red_black:
+        // Under wrap, column w-1 neighbours column 0 and their parities differ
+        // by w-1, so an ODD axis joins two same-coloured pixels and the
+        // independence that is this method's whole purpose does not hold. The
+        // answer would still be correct sequentially; the guarantee would not.
+        if (f.width() % 2 != 0) {
+            throw vc::vc_exception(vc::vc_error_code::invalid_argument,
+                                   "poisson_iter: red_black requires an even "
+                                   "width, but width is " +
+                                       std::to_string(f.width()));
+        }
+        if (f.height() % 2 != 0) {
+            throw vc::vc_exception(
+                vc::vc_error_code::invalid_argument,
+                "poisson_iter: red_black requires an even height, but height "
+                "is " +
+                    std::to_string(f.height()));
+        }
+        // ** S8b: REMOVE THIS THROW AND IMPLEMENT THE TWO PARITY PASSES. **
+        // It is here so the unimplemented enumerator fails LOUDLY instead of
+        // silently running gauss_seidel and reporting a right answer by the
+        // wrong route -- 16_poisson_crossval group 3 would be the only check to
+        // notice, and only once it is green enough to reach.
+        throw vc::vc_exception(
+            vc::vc_error_code::invalid_argument,
+            "poisson_iter: poisson_sweep::red_black is not implemented yet "
+            "(S8b). Scaffolded in include/vc/pixelops/vc_poisson.h; checks in "
+            "examples/16_poisson_crossval.cpp");
+    }
+
     const auto planes = get_image_planes(f);
     vc_image_writer result{f.width(), f.height(), f.channels(),
                            vc::buf_f32{0.0F}};

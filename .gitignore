@@ -46,3 +46,6 @@ local.properties
 /dumps/
 /scratch/
 build/release/
+
+# vc::debug::dump default output directory (relative to CWD)
+vc_debug_dump/
