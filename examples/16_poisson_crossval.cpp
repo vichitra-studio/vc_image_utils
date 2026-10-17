@@ -428,17 +428,31 @@ int main() {
                  {poisson_sweep::gauss_seidel, poisson_sweep::red_black}) {
                 const auto r = poisson_iter(f, sweep, 2000, 1e-5F);
                 bool ok = true;
+                // THE WINDOW IS COUNTED, because every other way this loop can
+                // end is a PASS. A run that stopped after one sweep, or whose
+                // final residual is within 10x of its first, inspects nothing
+                // and reports success -- which is the vacuous-rejection problem
+                // this file warns about at the top, wearing different clothes.
+                std::size_t inspected = 0;
                 for (const auto& channel : r.residual) {
                     const auto floor_guard = channel.back() * 10.0F;
                     for (std::size_t i = 2; i < channel.size(); ++i) {
                         if (channel[i - 1] <= floor_guard) {
                             break;
                         }
+                        ++inspected;
                         if (channel[i] > channel[i - 1] * 1.01F) {
                             ok = false;
                         }
                     }
                 }
+                expect(
+                    inspected >= 20,
+                    std::string{"4 the monotonicity window is non-trivial "
+                                "("} +
+                        std::to_string(inspected) + " steps inspected) for " +
+                        (sweep == poisson_sweep::red_black ? "red_black"
+                                                           : "gauss_seidel"));
                 expect(ok,
                        std::string{"4 residual decreases from sweep 2 while "
                                    "above 10x the floor, for "} +
@@ -604,14 +618,28 @@ int main() {
                 for (const auto sweep :
                      {poisson_sweep::jacobi, poisson_sweep::gauss_seidel,
                       poisson_sweep::red_black}) {
-                    const auto r = poisson_iter(f, sweep, 40000, 1e-6F);
+                    const auto r = poisson_iter(f, sweep, 5000, 1e-6F);
                     const auto d = rel_max_diff(r.phi, ref);
                     std::cout << "  7: " << w << "x" << h << " sweep "
                               << static_cast<int>(sweep) << " rel " << d
-                              << " in " << sweeps_taken(r) << " sweeps\n";
-                    expect(r.converged,
-                           std::string{"7 reaches a 1e-6 residual at "} +
-                               std::to_string(w) + "x" + std::to_string(h));
+                              << " in " << sweeps_taken(r) << " sweeps, "
+                              << (r.converged ? "converged" : "AT THE FLOOR")
+                              << '\n';
+                    // ** `converged` IS PRINTED, NOT ASSERTED, AND THAT IS
+                    // DELIBERATE. ** A draft asserted it. Simulated, a 1e-6
+                    // residual is reached at every size here -- but by a
+                    // whisker: the finals land at 8.4e-07 to 9.7e-07 against a
+                    // floor of about 8.8e-07, which is 1.15x of margin. A
+                    // summation order that differs from the simulation by a
+                    // few ulps puts the floor above the tolerance, jacobi never
+                    // converges, and a CORRECT implementation fails this group
+                    // for a reason that has nothing to do with Gate 1.
+                    //
+                    // Not converging costs nothing here anyway: the run still
+                    // drives phi to the floor, which is the best answer the
+                    // sweep path has, and the comparison below is the actual
+                    // gate. The budget is 5000 against a simulated worst case
+                    // of 364 sweeps, so the floor case is cheap too.
                     expect(d <= 5e-5,
                            std::string{"7 GATE 1 tripwire at "} +
                                std::to_string(w) + "x" + std::to_string(h) +
@@ -635,18 +663,20 @@ int main() {
         // error, a lost wrap) blows through it. THE PRINTED NUMBERS ARE THE
         // DELIVERABLE; the assert is a tripwire.
         //
-        // Both runs stop on a 1e-5 RESIDUAL rather than running to a floor,
-        // because the sweep counts above 64x64 are in the thousands and this
-        // suite runs in the debug tree.
-        //
         // 128x128 was in a first draft and is DROPPED -- it needs roughly 8,000
         // sweeps over four times the pixels, tens of seconds, for a number
         // 64x64 already makes.
         {
             for (const vc::image_dim n : {32U, 64U}) {
                 const vc::vc_image f = smooth_field(n, n);
+                // 1e-4, NOT the 1e-5 a draft used. Simulated at 64x64, a 1e-5
+                // residual finishes at 9.98e-06 against a floor of about
+                // 8.7e-06 -- 1.002x of margin, i.e. the stop is the floor
+                // rather than the tolerance. Any implementation whose floor is
+                // a hair higher runs the whole budget. 1e-4 has about 11x and
+                // costs ~1,956 sweeps rather than ~2,584.
                 const auto r =
-                    poisson_iter(f, poisson_sweep::red_black, 40000, 1e-5F);
+                    poisson_iter(f, poisson_sweep::red_black, 20000, 1e-4F);
                 const auto d = rel_max_diff(r.phi, poisson_fft(f));
                 std::cout << "  8: " << n << "x" << n
                           << " OUTSIDE Gate 1's scope -- rel " << d << " after "

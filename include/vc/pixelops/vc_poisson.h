@@ -471,10 +471,17 @@ enum class poisson_sweep : std::uint8_t {
     // read the values pass 1 just wrote; that is the whole reason it converges
     // at gauss_seidel's rate rather than jacobi's.
     //
-    // ** USING TWO BUFFERS HERE REPRODUCES JACOBI. ** It will still converge, to
-    // the same answer, so no correctness check catches it -- only the residual
-    // curve does. That is what makes 16_poisson_crossval's rate comparison a
-    // real gate rather than decoration.
+    // ** THE OBVIOUS TWO-BUFFER VERSION IS EXACTLY JACOBI. ** Read everything
+    // from buffer A and write both passes into buffer B, and B ends the sweep
+    // holding evens-from-old and odds-from-old -- which is one jacobi sweep,
+    // not a reordered gauss_seidel. (A scheme where pass 2 reads what pass 1
+    // wrote is correct whatever the buffers are called; the hazard is the naive
+    // one, and it is the easy mistake to make.)
+    //
+    // It still converges, to the same answer, so NO CORRECTNESS CHECK CATCHES
+    // IT -- only the residual curve does. That is what makes
+    // 16_poisson_crossval group 3's rate comparison a real gate rather than
+    // decoration, and why group 1 asserts sixteen values from a single sweep.
     //
     // ---- IT REQUIRES EVEN WIDTH AND EVEN HEIGHT, AND THIS IS NOT OBVIOUS ----
     //
