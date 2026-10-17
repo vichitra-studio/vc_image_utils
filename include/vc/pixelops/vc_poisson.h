@@ -425,14 +425,76 @@ namespace vc::pixelops {
 // Which sweep poisson_iter runs. Both solve the same equation; they differ only
 // in which copy of the data they read.
 //
-// Switched over with NO `default` label, so that adding red_black at S8b makes
-// every switch a compiler warning instead of a silent fall-through -- the same
-// discipline frequency_extent uses for vc_edge_policy. red_black is NOT declared
-// yet for exactly that reason: an enumerator with no implementation is a stub
-// that throws, and a test asserting it throws passes vacuously.
+// ** THE CLAIM THIS COMMENT USED TO MAKE WAS FALSE, AND ADDING red_black PROVED
+// IT. ** It read: "Switched over with NO `default` label, so that adding an
+// enumerator makes every switch a compiler warning instead of a silent
+// fall-through." There is no switch. vc_poisson.cpp branches on
+// `if (sweep == poisson_sweep::jacobi)` in two places, so a new enumerator
+// compiles silently and falls into the gauss_seidel path -- which is a working
+// solver, so it returns a correct answer by the wrong method and every
+// end-state check passes.
+//
+// Adding red_black produced ZERO warnings against that code. The protection the
+// comment promised did not exist at the moment it was needed, which is the only
+// moment it mattered.
+//
+// S8b MUST convert both branches to a switch over this enum with no `default`
+// label -- the discipline frequency_extent actually uses for vc_edge_policy --
+// so that the next enumerator is a compiler error rather than a silent
+// substitution.
 enum class poisson_sweep : std::uint8_t {
     jacobi,       // read all four neighbours from the PREVIOUS sweep
     gauss_seidel, // read and write one buffer in place, raster order
+
+    // Gauss-Seidel's convergence with Jacobi's independence inside a pass.
+    //
+    // ---- WHAT IT IS ----
+    //
+    // Colour the grid like a checkerboard by the parity of (x + y). Moving one
+    // step in any direction flips that parity, so EVERY NEIGHBOUR OF AN EVEN
+    // PIXEL IS ODD. Then sweep twice with the identical update rule:
+    //
+    //     pass 1   every pixel where (x + y) is EVEN
+    //     pass 2   every pixel where (x + y) is ODD
+    //
+    // During pass 1 every value read is odd, and no odd pixel is written during
+    // pass 1. So NOTHING IN A PASS DEPENDS ON ANYTHING ELSE IN THAT PASS --
+    // visit them in any order, or all at once, and the result is identical.
+    //
+    // That is the entire point, and it is what gauss_seidel cannot offer: there,
+    // pixel (x,y) genuinely needs (x-1,y) from this same sweep, so the order is
+    // forced and nothing can be parallelised or vectorised.
+    //
+    // ---- IT IS IN-PLACE, LIKE gauss_seidel ----
+    //
+    // ONE buffer, read and written, exactly as gauss_seidel does. Pass 2 must
+    // read the values pass 1 just wrote; that is the whole reason it converges
+    // at gauss_seidel's rate rather than jacobi's.
+    //
+    // ** USING TWO BUFFERS HERE REPRODUCES JACOBI. ** It will still converge, to
+    // the same answer, so no correctness check catches it -- only the residual
+    // curve does. That is what makes 16_poisson_crossval's rate comparison a
+    // real gate rather than decoration.
+    //
+    // ---- IT REQUIRES EVEN WIDTH AND EVEN HEIGHT, AND THIS IS NOT OBVIOUS ----
+    //
+    // Under wrap, column w-1 and column 0 are neighbours. Their parities differ
+    // by (w-1), so if w is ODD they have the SAME parity and TWO SAME-COLOURED
+    // PIXELS ARE ADJACENT. The checkerboard does not close up. At w = 5, row 0
+    // colours as R B R B R and the wrap joins the last R to the first.
+    //
+    //     w = 4   R B R B | R ...   column 3 is B, column 0 is R   ok
+    //     w = 5   R B R B R | R ... column 4 is R, column 0 is R   BROKEN
+    //
+    // What breaks is the INDEPENDENCE CLAIM, not the answer: the fixed point is
+    // unchanged, so a sequential run still converges correctly. But "update every
+    // red at once" becomes false, and a parallel or vectorised implementation
+    // would race. Since that guarantee is the only reason this enumerator exists,
+    // poisson_iter REJECTS an odd width or height for red_black rather than
+    // returning an answer whose central property silently does not hold.
+    //
+    // jacobi and gauss_seidel are unaffected and accept any size.
+    red_black,
 };
 
 // A sweep count, named rather than a bare uint32_t so that a call site reading
@@ -547,6 +609,15 @@ struct poisson_iter_report {
 // The initial guess is zero everywhere. Not a parameter: nothing this week needs
 // another, and adding one later is additive. The hand checks in 15_poisson_iter
 // depend on it, so changing it is a contract change.
+//
+// ** poisson_sweep::red_black ADDITIONALLY REQUIRES EVEN WIDTH AND EVEN HEIGHT **
+// and throws vc_error_code::invalid_argument otherwise, naming poisson_iter and
+// the offending dimension. See the enumerator's comment for why: under wrap an
+// odd axis joins two same-coloured pixels, which destroys the independence that
+// is the method's entire reason for existing. jacobi and gauss_seidel accept any
+// size, so this is the first precondition that depends on WHICH sweep was asked
+// for -- check it after the sweep argument is known, not with the f32 and
+// zero-mean checks that apply to every call.
 [[nodiscard]] poisson_iter_report poisson_iter(const vc::vc_image& f,
                                                poisson_sweep sweep,
                                                sweep_count max_sweeps,

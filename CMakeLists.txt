@@ -374,6 +374,7 @@ if(VC_BUILD_EXAMPLES)
         13_laplacian
         14_poisson
         15_poisson_iter
+        16_poisson_crossval
     )
 
     foreach(example ${VC_EXAMPLE_TARGETS})
