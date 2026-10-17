@@ -191,6 +191,29 @@ std::vector<vc_image> get_image_planes(const vc_image& f_input) {
     return channels;
 }
 
+// The four wrapped neighbours of one pixel, in a SINGLE-CHANNEL plane.
+//
+// ONE COPY, CALLED BY ALL THREE LOOPS -- do_poisson_sweep, red_black_iteration
+// and relative_residual. It was written out in each of them until S8b, which
+// meant the perf work below would have had to be applied three times -- and
+// applying it to two of the three would leave the residual measuring a
+// different operator than the one being swept, with the suite still green.
+//
+// BOUNDS COME FROM `p`, NOT FROM w/h PARAMETERS, ON PURPOSE. Every index bug
+// this library has shipped came from a dimension that COULD be passed wrongly:
+// conv_theorem's planar index on an interleaved buffer, the outer loop's `ch`
+// handed to a one-channel plane. A function that derives its own extent cannot
+// have that class of bug at all. The four width()/height() calls are member
+// reads the optimiser can hoist, and no measurement has shown them to matter.
+//
+// TODO(perf): THE FOUR `%` PER PIXEL LIVE HERE and dominate at high sweep
+// counts. Interior pixels never wrap, so (x+1) and (x-1) are plain arithmetic
+// except at two columns, and (y+/-1) is loop-invariant within a row. Split into
+// an interior fast path plus a border pass, or hoist the two row indices into
+// the callers' y loops. FIXING IT HERE FIXES ALL THREE CALLERS.
+// TODO(perf): at<>() bounds-checks three dimensions on every call -- four here
+// plus the caller's own. Hoist pixels()->as<buf_f32>() and index the span
+// directly. Measure first; the suite is the net.
 [[nodiscard]] vc::buf_f32
 neighbour_sum(vc_image_writer& p, image_dim x, image_dim y) {
     return p.at<vc::buf_f32>((x + 1) % p.width(), y, 0) +
@@ -202,11 +225,15 @@ neighbour_sum(vc_image_writer& p, image_dim x, image_dim y) {
 // One sweep of phi(x,y) = [ four neighbours - f(x,y) ] / 4, under wrap.
 //
 // src AND dst MAY BE THE SAME WRITER, and that aliasing is the ENTIRE
-// difference between the two methods -- which is why there is one loop body
-// here and not two:
+// difference between the two methods THIS FUNCTION SERVES:
 //
 //     jacobi         distinct buffers  -> every read is the previous sweep's
 //     gauss_seidel   the same buffer   -> left and up are already this sweep's
+//
+// red_black DOES NOT COME THROUGH HERE. It needs a parity-filtered pixel set
+// rather than a full raster pass, so it has its own loop below -- and it takes
+// ONE writer, not two, because the obvious two-buffer version of red-black is
+// exactly jacobi. The shared part is neighbour_sum above, not this loop.
 //
 // f_plane is a SINGLE-CHANNEL plane, so its channel index is 0. An earlier
 // version passed the outer loop's `ch` here, which throws for ch > 0 because
@@ -223,12 +250,6 @@ void do_poisson_sweep(const vc_image& f_plane,
     const auto h = f_plane.height();
     for (vc::image_dim y = 0; y < h; ++y) {
         for (vc::image_dim x = 0; x < w; ++x) {
-            // TODO(perf): the four `%` per pixel dominate at high sweep counts.
-            // Interior pixels never wrap -- split into an interior fast path
-            // plus a border pass, or precompute index tables once per call.
-            // TODO(perf): at<>() bounds-checks three dimensions on every call,
-            // six calls per pixel per sweep. Hoist pixels()->as<buf_f32>() and
-            // index the span directly. Measure first; the suite is the net.
             const auto n_sum = neighbour_sum(src, x, y);
             dst.at<vc::buf_f32>(x, y, 0) =
                 (n_sum - f_plane.at<vc::buf_f32>(x, y, 0)) / 4.0F;

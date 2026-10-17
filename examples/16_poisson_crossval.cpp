@@ -762,6 +762,44 @@ int main() {
                    "9h series of DIFFERENT LENGTHS are accepted -- channels "
                    "converge at different sweeps and red_black on a "
                    "checkerboard finishes in one, so group 10 produces this");
+
+            // ---- 9i: THE LINEAR AXIS, WHICH NOTHING EXERCISED ----
+            //
+            // residual_plot_config::log_scale is documented as being there "so
+            // the choice is testable rather than asserted". Nothing tested it,
+            // and the first implementation drew gridlines and y labels ONLY
+            // under log_scale -- so the mode whose entire purpose is to be
+            // compared against the other rendered with a completely unlabelled
+            // y axis, and no check noticed.
+            //
+            // A flag a header justifies on testability grounds, with no test,
+            // is the same shape as a rejection check that passes vacuously.
+            bool linear_ok = true;
+            try {
+                const vc::vc_image lin = residual_plot(
+                    good, {.width = 400, .height = 200, .log_scale = false});
+                linear_ok = lin.width() == 400 && lin.height() == 200 &&
+                            lin.channels() == 3;
+            } catch (const std::exception&) {
+                linear_ok = false;
+            }
+            expect(linear_ok,
+                   "9i log_scale = false renders at the requested size -- the "
+                   "flag the header justifies on testability grounds");
+
+            // floor <= 0 is rejected only under a LOG axis; on a linear one
+            // there is no logarithm to blow up, so it must be accepted. 9e
+            // asserts the rejection, and without this pair that rejection
+            // cannot distinguish "checks the mode" from "always throws".
+            bool linear_zero_floor_ok = true;
+            try {
+                (void)residual_plot(good, {.floor = 0.0F, .log_scale = false});
+            } catch (const std::exception&) {
+                linear_zero_floor_ok = false;
+            }
+            expect(linear_zero_floor_ok,
+                   "9j floor = 0 is ACCEPTED on a linear axis -- 9e's "
+                   "rejection is about the logarithm, not about the value");
         }
 
         // ---- GROUP 10 -- THE PLOT IS DUMPED. THE ARTIFACT S8b OWES ----
@@ -813,7 +851,20 @@ int main() {
             // group became the first thing in the repository to write there.)
             vc::debug::set_output_dir("vc_debug_dump/16_poisson_crossval");
             vc::debug::set_enabled(true);
-            vc::debug::dump("poisson_residual", plot);
+            vc::debug::dump("poisson_residual_log", plot);
+
+            // THE LINEAR TWIN, DUMPED BESIDE IT, because that comparison is the
+            // only honest use for log_scale = false and it belongs in the
+            // build-log rather than in a sentence. On a linear axis everything
+            // below about 0.01 is the bottom row of pixels, so five of the six
+            // curves collapse onto the floor and the jacobi stall at 1.0 is the
+            // only thing still visible -- which is precisely the argument for
+            // the log axis, made by the picture instead of by the header.
+            const vc::vc_image linear_plot = residual_plot(
+                series, {.width = 1000, .height = 600, .log_scale = false});
+            expect(linear_plot.width() == 1000 && linear_plot.height() == 600,
+                   "10c the linear twin renders at the same size");
+            vc::debug::dump("poisson_residual_linear", linear_plot);
             // Left OFF again: enabled() is process-wide, and a group added
             // after this one should not start dumping because this one did.
             vc::debug::set_enabled(false);

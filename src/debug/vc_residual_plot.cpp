@@ -9,9 +9,11 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <string>
 
 namespace vc::debug {
@@ -233,6 +235,25 @@ std::string decade_label(int exponent) {
     return "1E" + std::to_string(exponent);
 }
 
+// A linear axis tick. std::to_string on a float gives "0.750000", which is
+// eleven glyphs where the left margin fits ten, so the ticks would overlap each
+// other down the axis.
+//
+// Two decimals inside [0.01, 1000) and E-notation outside it. The documented
+// linear use is a relative residual running 0..1, where two decimals is exactly
+// right; the fallback is so a caller plotting something else gets a label
+// rather than "0.00" six times.
+std::string linear_label(double v) {
+    std::array<char, 24> buf{};
+    const double a = std::abs(v);
+    if (a != 0.0 && (a < 0.01 || a >= 1000.0)) {
+        (void)std::snprintf(buf.data(), buf.size(), "%.0E", v);
+    } else {
+        (void)std::snprintf(buf.data(), buf.size(), "%.2f", v);
+    }
+    return std::string{buf.data()};
+}
+
 } // namespace
 
 vc::vc_image residual_plot(std::span<const residual_series> series,
@@ -336,6 +357,14 @@ vc::vc_image residual_plot(std::span<const residual_series> series,
     canvas c{config.width, config.height};
     c.fill(k_background);
 
+    // ---- Y GRIDLINES AND LABELS, IN BOTH MODES ----
+    //
+    // ** A FIRST VERSION DREW THESE ONLY UNDER log_scale, SO A LINEAR PLOT CAME
+    // OUT WITH AN ENTIRELY UNLABELLED Y AXIS. ** Nothing failed: the flag is
+    // documented in the header as being there "so the choice is testable rather
+    // than asserted", and no check exercised it, so the one mode whose whole
+    // purpose is to be compared against the other rendered without a scale to
+    // compare on.
     if (config.log_scale) {
         const int first = static_cast<int>(std::floor(lo));
         const int last = static_cast<int>(std::ceil(hi));
@@ -347,6 +376,20 @@ vc::vc_image residual_plot(std::span<const residual_series> series,
             const int y = to_y(v);
             c.hline(left, right, y, k_grid);
             c.text(4, y - (k_glyph_h / 2), decade_label(e), k_text);
+        }
+    } else {
+        // Five evenly spaced ticks. Not a "nice number" algorithm: the range is
+        // whatever the data spans, and inventing rounded bounds would move the
+        // top of the axis away from the 1.0 that a run from zero actually
+        // starts at.
+        constexpr int k_linear_ticks = 5;
+        for (int t = 0; t <= k_linear_ticks; ++t) {
+            const double frac =
+                static_cast<double>(t) / static_cast<double>(k_linear_ticks);
+            const double v = lo + (frac * (hi - lo));
+            const int y = to_y(static_cast<float>(v));
+            c.hline(left, right, y, k_grid);
+            c.text(4, y - (k_glyph_h / 2), linear_label(v), k_text);
         }
     }
 
