@@ -59,3 +59,5 @@ template <vc_pixel_element_req T, typename F> void with_pixels(F&& f)
 The real formula, vc_image_info.h:113:
 
 return (static_cast<std::size_t>(y) * width_ + x) * channels_ + ch;
+
+- unnecessary examples/debug files should not be compiled and linked in release?

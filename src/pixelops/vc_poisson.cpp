@@ -191,9 +191,13 @@ std::vector<vc_image> get_image_planes(const vc_image& f_input) {
     return channels;
 }
 
-template <typename T>
-concept vc_poisson_sweep_req =
-    std::same_as<T, vc_image> || std::same_as<T, vc_image_writer>;
+[[nodiscard]] vc::buf_f32
+neighbour_sum(vc_image_writer& p, image_dim x, image_dim y) {
+    return p.at<vc::buf_f32>((x + 1) % p.width(), y, 0) +
+           p.at<vc::buf_f32>((x - 1 + p.width()) % p.width(), y, 0) +
+           p.at<vc::buf_f32>(x, (y + 1) % p.height(), 0) +
+           p.at<vc::buf_f32>(x, (y - 1 + p.height()) % p.height(), 0);
+}
 
 // One sweep of phi(x,y) = [ four neighbours - f(x,y) ] / 4, under wrap.
 //
@@ -225,15 +229,32 @@ void do_poisson_sweep(const vc_image& f_plane,
             // TODO(perf): at<>() bounds-checks three dimensions on every call,
             // six calls per pixel per sweep. Hoist pixels()->as<buf_f32>() and
             // index the span directly. Measure first; the suite is the net.
-            const auto neighbour_sum =
-                src.at<vc::buf_f32>((x + 1) % w, y, 0) +
-                src.at<vc::buf_f32>((x - 1 + w) % w, y, 0) +
-                src.at<vc::buf_f32>(x, (y + 1) % h, 0) +
-                src.at<vc::buf_f32>(x, (y - 1 + h) % h, 0);
+            const auto n_sum = neighbour_sum(src, x, y);
             dst.at<vc::buf_f32>(x, y, 0) =
-                (neighbour_sum - f_plane.at<vc::buf_f32>(x, y, 0)) / 4.0F;
+                (n_sum - f_plane.at<vc::buf_f32>(x, y, 0)) / 4.0F;
         }
     }
+}
+
+void red_black_iteration(image_dim parity,
+                         const vc_image& f_plane,
+                         vc_image_writer& src) {
+    // TODO: Is there a better way to organise/implement this?
+    const auto w = f_plane.width();
+    const auto h = f_plane.height();
+    for (image_dim y = 0; y < h; y++) {
+        const auto offset = (y + parity) & 1U;
+        for (image_dim x = offset; x < w; x += 2) {
+            const auto n_sum = neighbour_sum(src, x, y);
+            src.at<vc::buf_f32>(x, y, 0) =
+                (n_sum - f_plane.at<vc::buf_f32>(x, y, 0)) / 4.0F;
+        }
+    }
+}
+
+void do_red_black_sweep(const vc_image& f_plane, vc_image_writer& src) {
+    red_black_iteration(0, f_plane, src);
+    red_black_iteration(1, f_plane, src);
 }
 
 // The relative residual of ONE channel: how badly the current phi fails the
@@ -253,13 +274,8 @@ relative_residual(const vc_image& f_plane,
     double ssq = 0.0;
     for (vc::image_dim y = 0; y < h; ++y) {
         for (vc::image_dim x = 0; x < w; ++x) {
-            const auto neighbour_sum =
-                phi.at<vc::buf_f32>((x + 1) % w, y, 0) +
-                phi.at<vc::buf_f32>((x - 1 + w) % w, y, 0) +
-                phi.at<vc::buf_f32>(x, (y + 1) % h, 0) +
-                phi.at<vc::buf_f32>(x, (y - 1 + h) % h, 0);
-            const auto lap =
-                neighbour_sum - (4.0F * phi.at<vc::buf_f32>(x, y, 0));
+            const auto n_sum = neighbour_sum(phi, x, y);
+            const auto lap = n_sum - (4.0F * phi.at<vc::buf_f32>(x, y, 0));
             const auto d =
                 static_cast<double>(f_plane.at<vc::buf_f32>(x, y, 0) - lap);
             ssq += d * d;
@@ -466,48 +482,11 @@ poisson_iter_report poisson_iter(const vc::vc_image& f,
                                "poisson_iter: tolerance must be >= 0");
     }
 
-    // ---- SWEEP-DEPENDENT PRECONDITIONS ----
-    //
-    // A SWITCH WITH NO `default`, DELIBERATELY. The two branches further down
-    // test `sweep == poisson_sweep::jacobi`, so a newly added enumerator
-    // compiles silently and falls into the gauss_seidel path -- which is a
-    // WORKING SOLVER, so it returns a correct answer by the wrong method and
-    // every end-state check passes. That is exactly what happened when
-    // red_black was added: zero warnings. This switch is what the header
-    // promised and the `==` tests did not provide; S8b should convert those two
-    // as well, and then this block can fold into them.
-    switch (sweep) {
-    case poisson_sweep::jacobi:
-    case poisson_sweep::gauss_seidel:
-        break;
-    case poisson_sweep::red_black:
-        // Under wrap, column w-1 neighbours column 0 and their parities differ
-        // by w-1, so an ODD axis joins two same-coloured pixels and the
-        // independence that is this method's whole purpose does not hold. The
-        // answer would still be correct sequentially; the guarantee would not.
-        if (f.width() % 2 != 0) {
-            throw vc::vc_exception(vc::vc_error_code::invalid_argument,
-                                   "poisson_iter: red_black requires an even "
-                                   "width, but width is " +
-                                       std::to_string(f.width()));
-        }
-        if (f.height() % 2 != 0) {
-            throw vc::vc_exception(
-                vc::vc_error_code::invalid_argument,
-                "poisson_iter: red_black requires an even height, but height "
-                "is " +
-                    std::to_string(f.height()));
-        }
-        // ** S8b: REMOVE THIS THROW AND IMPLEMENT THE TWO PARITY PASSES. **
-        // It is here so the unimplemented enumerator fails LOUDLY instead of
-        // silently running gauss_seidel and reporting a right answer by the
-        // wrong route -- 16_poisson_crossval group 3 would be the only check to
-        // notice, and only once it is green enough to reach.
+    if (sweep == poisson_sweep::red_black &&
+        (f.width() % 2 != 0 || f.height() % 2 != 0)) {
         throw vc::vc_exception(
             vc::vc_error_code::invalid_argument,
-            "poisson_iter: poisson_sweep::red_black is not implemented yet "
-            "(S8b). Scaffolded in include/vc/pixelops/vc_poisson.h; checks in "
-            "examples/16_poisson_crossval.cpp");
+            "poisson_iter: red_black requires even width and height");
     }
 
     const auto planes = get_image_planes(f);
@@ -554,8 +533,17 @@ poisson_iter_report poisson_iter(const vc::vc_image& f,
             if (sweep == poisson_sweep::jacobi) {
                 destination = (current == &buf_a) ? &buf_b.value() : &buf_a;
             }
-            do_poisson_sweep(f_plane, *current, *destination);
-            current = destination;
+
+            switch (sweep) {
+            case poisson_sweep::jacobi:
+            case poisson_sweep::gauss_seidel:
+                do_poisson_sweep(f_plane, *current, *destination);
+                current = destination;
+                break;
+            case poisson_sweep::red_black:
+                do_red_black_sweep(f_plane, *current);
+                break;
+            }
 
             subtract_mean(*current, count);
             channel_history.push_back(static_cast<vc::float32>(
