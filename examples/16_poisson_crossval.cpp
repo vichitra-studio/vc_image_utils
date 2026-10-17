@@ -44,8 +44,13 @@
 //    only check in this file that catches the double-buffering mistake, because
 //    that mistake produces the right answer slowly.
 //
-// 4  THE RESIDUAL IS MONOTONE for gauss_seidel and red_black. A curve that rises
-//    means the sweep is diverging, which no end-state comparison detects.
+// 4  THE RESIDUAL DECREASES -- but NOT monotonically from sweep 0, and P2's
+//    Gate 2 wording ("the residual curve is monotone decreasing") is WRONG as
+//    stated. Two legitimate exceptions, both confirmed by simulation before
+//    this check was written: the FIRST sweep from zero RAISES it (1.0 -> ~1.27
+//    at 16x16), because the opening step is large and overshoots some modes;
+//    and near the f32 floor it JITTERS by a few percent. So the assertion skips
+//    sweep 1 and only applies while the residual is above 10x its final value.
 //
 // 5  ODD DIMENSIONS ARE REJECTED FOR red_black AND ACCEPTED FOR THE OTHER TWO.
 //    Under wrap, an odd axis joins two same-coloured pixels and the independence
@@ -55,18 +60,59 @@
 //    leaves jacobi's residual flat while the other two fall. This is
 //    notes/poisson.txt section 17c as a test rather than an argument.
 //
-// 7  CROSS-VALIDATION AGAINST poisson_fft -- GATE 1. All three sweeps against
-//    the transform solver, wrap on both sides, at 64x64 and below. Two routes
-//    sharing almost no code: one divides a spectrum, one sweeps pixels.
-//    BLIND TO: anything both get wrong, which is why group 1 exists.
+// 7  CROSS-VALIDATION AGAINST poisson_fft -- GATE 1, at 16x8 AND BELOW, which
+//    is where P2 scoped it FROM A REAL RUN on 2026-10-16. Two routes sharing
+//    almost no code: one divides a spectrum, one sweeps pixels. BLIND TO:
+//    anything both get wrong, which is why group 1 exists.
 //
-// 8  THE GATE'S SIZE SCOPE IS REAL. 1e-5 is asserted at 64x64 and NOT at 256x256,
-//    because vc_poisson.cpp measured 2.0e-04 there with a correct solver. Pins
-//    the corrected criterion so a later tightening fails loudly.
+// 8  32x32 AND 64x64, REPORTED AND NOT GATED. Outside Gate 1's scope on
+//    purpose. The printed numbers are the deliverable; the 1e-3 assert is a
+//    tripwire for a real regression, not a competing gate.
 //
 // 9  residual_plot REJECTIONS AND ACCEPTANCE: empty span, empty series, tiny
 //    canvas, non-finite value, non-positive floor under log -- each paired with
 //    a call that must succeed.
+//
+// ---- WHERE THE CONSTANTS IN THIS FILE CAME FROM, AND THE HEALTH WARNING ----
+//
+// ** THE TOLERANCES AND BUDGETS BELOW WERE SET FROM A SIMULATION OF THE SAME
+// ARITHMETIC IN f32, NOT FROM THIS LIBRARY. ** The bodies did not exist when
+// this file was written. They are chosen with margin and every one of them
+// PRINTS what it actually achieved, so the first green run calibrates them.
+// If a bound here is wrong, it is wrong in the direction of being too loose.
+//
+// What that simulation established, and why it forced four rewrites of this
+// file before it was first compiled:
+//
+//   THE RELATIVE RESIDUAL HAS A HARD f32 FLOOR THAT SCALES WITH THE GRID. It is
+//   not slow convergence -- at 16x16 it pins at ~5e-7 from sweep 500 and does
+//   not move through sweep 6000. Roughly 5e-7 (16^2), 2e-6 (32^2), 9e-6 (64^2),
+//   about 4x per doubling.
+//
+//   SO A TOLERANCE OF 1e-7 OR 1e-9 IS UNREACHABLE AT EVERY SIZE HERE. A first
+//   draft of this file asked for 1e-9 with a 200000-sweep budget in three
+//   groups. Every one would have burned the entire budget, failed its
+//   `converged` assertion, and taken minutes to do it.
+//
+//   AND THE ERROR AGAINST poisson_fft TRACKS THAT FLOOR, roughly 1.3x it.
+//
+// ** THE ONE PLACE THAT SIMULATION WAS OVERRULED, AND IT IS THE IMPORTANT ONE.
+// ** It suggested 1e-5 agreement would hold at 32x32, and an earlier draft of
+// this file widened Gate 1 to match. P2 had already scoped Gate 1 to 16x8 on
+// 2026-10-16 FROM A RUN OF THIS LIBRARY -- at width 64 the near-DC mode decays
+// by 0.9976 per sweep, ~4,776 sweeps per 1e-5 reduction against ~297 at width
+// 16, plus an f32 floor of about eps x 831. The simulated figure lost. A test
+// that widens a gate on evidence weaker than the gate's own is worse than no
+// test, and group 8 reports the larger sizes instead of gating them.
+//
+//   JACOBI TAKES ABOUT TWICE GAUSS-SEIDEL'S SWEEPS, consistently: 58/33 at 8^2,
+//   234/123 at 16^2, 941/477 at 32^2, 3815/1897 at 64^2. Group 3 asserts the
+//   ratio rather than just the ordering, because the ordering alone is satisfied
+//   by a one-sweep difference.
+//
+//   RED-BLACK LANDS WITHIN A FEW PERCENT OF GAUSS-SEIDEL: 31/33, 122/123,
+//   488/477, 1956/1897. Group 3's 2x allowance is deliberately far looser than
+//   that, so a different-but-correct ordering is not failed.
 //
 // 10 THE PLOT IS DUMPED. Produces the PNG S8b owes. Not an assertion about
 //    pixels; the artifact is for a human, and the checks around it only confirm
@@ -82,6 +128,7 @@
 #include "vc/pixelops/vc_laplacian.h"
 #include "vc/pixelops/vc_poisson.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <functional>
@@ -215,29 +262,30 @@ int main() {
         //
         //     phi(0,0) = -4/4 = -1,  every other even pixel = 0
         //
-        // PASS 2, the odd pixels, reading the evens PASS 1 JUST WROTE. Four of
-        // them touch (0,0); under wrap those are (1,0), (3,0), (0,1) and (0,3):
+        // PASS 2, the odd pixels, reading the evens PASS 1 JUST WROTE. Exactly
+        // four odd pixels touch (0,0) under wrap -- (1,0), (3,0), (0,1), (0,3):
         //
-        //     (1,0)  nbrs 0 + (-1) + 0 + 0 = -1,  f = -4  ->  (-1 + 4)/4 =  0.75
-        //     (3,0)  nbrs -1 (x+1 wraps to 0)             ->  (-1 - 0)/4 = -0.25
-        //     (0,1)  nbrs -1 (y-1 ... no: x-1 wraps)      ->             = -0.25
-        //     (0,3)  nbrs -1 (y+1 wraps to 0)             ->             = -0.25
-        //     the other four odd pixels see no -1          ->             =  0
+        //     (1,0)  neighbour sum -1,  f = -4  ->  (-1 + 4)/4 =  0.75
+        //     (3,0)  neighbour sum -1,  f =  0  ->  (-1 - 0)/4 = -0.25
+        //     (0,1)  neighbour sum -1,  f =  0  ->             = -0.25
+        //     (0,3)  neighbour sum -1,  f =  0  ->             = -0.25
+        //     the other four odd pixels see no -1               =  0
         //
         // Sum = -1 + 0.75 - 0.25 - 0.25 - 0.25 = -1.0, so the mean is -0.0625
-        // and subtract_mean adds 0.0625 to every pixel. Final, all sixteen:
+        // and subtract_mean adds 0.0625 everywhere. Final, all sixteen:
         //
         //     -0.9375   0.8125   0.0625  -0.1875
         //     -0.1875   0.0625   0.0625   0.0625
         //      0.0625   0.0625   0.0625   0.0625
         //     -0.1875   0.0625   0.0625   0.0625
         //
-        // THIS GROUP IS THE ONLY ONE HERE NOT ANCHORED TO OTHER CODE IN THIS
-        // REPOSITORY. It pins, in one shot: that pass 1 is EVEN and pass 2 is
-        // ODD (swap them and (1,0) reads a zero instead of a -1); that pass 2
-        // reads IN PLACE (double-buffer it and every odd pixel sees 0); that the
-        // parity is (x+y) and not x or y alone; that the wrap is present; and
-        // that the mean is subtracted once per SWEEP and not once per PASS.
+        // THE ONLY CHECK HERE NOT ANCHORED TO OTHER CODE IN THIS REPOSITORY. It
+        // pins, in one shot: that pass 1 is EVEN and pass 2 is ODD (swap them
+        // and (1,0) reads a zero rather than a -1); that pass 2 reads IN PLACE
+        // (double-buffer it and every odd pixel sees 0); that the parity is
+        // (x+y) and not x or y alone; that the wrap is present; and that the
+        // mean is subtracted once per SWEEP, not once per PASS (per pass, the
+        // -1 that pass 2 reads becomes -0.9375 and every number below changes).
         {
             const vc::vc_image f = from_rule(4, 4, [](int x, int y) {
                 if (x == 0 && y == 0) {
@@ -283,85 +331,117 @@ int main() {
         // order. The fixed point does not depend on the order, so the answers
         // must agree -- to solver tolerance, not to the bit.
         //
-        // ** THIS GROUP IS BLIND TO THE RATE. ** A red_black written with two
-        // buffers is really jacobi, converges to this same phi, and passes here
-        // without a murmur. Group 3 is what catches that.
+        // ** BLIND TO THE RATE. ** A red_black written with two buffers is
+        // really jacobi, converges to this same phi, and passes here without a
+        // murmur. Group 3 is what catches that.
+        //
+        // Tolerance 1e-5, not the 1e-7 a first draft asked for: the f32 floor at
+        // 32x32 is around 2e-6, so 1e-7 never arrives and `converged` is false
+        // for both after the full budget.
         {
             const vc::vc_image f = smooth_field(32, 32);
             const auto rb =
-                poisson_iter(f, poisson_sweep::red_black, 20000, 1e-7F);
+                poisson_iter(f, poisson_sweep::red_black, 5000, 1e-5F);
             const auto gs =
-                poisson_iter(f, poisson_sweep::gauss_seidel, 20000, 1e-7F);
+                poisson_iter(f, poisson_sweep::gauss_seidel, 5000, 1e-5F);
 
             expect(rb.converged, "2a red_black converges inside the budget");
             expect(gs.converged, "2b gauss_seidel converges inside the budget");
-            expect(rel_max_diff(rb.phi, gs.phi) <= 1e-4,
-                   "2c red_black and gauss_seidel agree on phi");
+            const auto d = rel_max_diff(rb.phi, gs.phi);
+            std::cout << "  2: red_black vs gauss_seidel, rel " << d << '\n';
+            expect(d <= 1e-4, "2c red_black and gauss_seidel agree on phi");
         }
 
         // ---- GROUP 3 -- THE RATE. THIS IS GATE 2 ----
         //
-        // red_black must track gauss_seidel, NOT jacobi. The factor of 2 is
-        // deliberate slack: the two orderings are not required to be identical,
-        // only comparable, and the gap to jacobi on this field is far larger
-        // than 2x. If red_black lands near jacobi's count, the colouring is
-        // wrong -- in practice either two buffers instead of one, or a parity
-        // computed on x alone.
+        // red_black must track gauss_seidel, NOT jacobi.
         //
-        // The sweep COUNTS are printed, not just compared, because the ratio is
-        // the number S8b's write-up reports and a bare pass/fail hides it.
+        // 3b asserts the RATIO and not merely the ordering. "gauss_seidel took
+        // fewer sweeps" is satisfied by a difference of one, which a broken
+        // implementation can produce by accident; the simulated ratio is close
+        // to 2 at every size, so 1.5 is a real floor with margin beneath it.
+        //
+        // 3c's 2x allowance is deliberately loose -- red_black and gauss_seidel
+        // came within a few percent of each other in simulation, so this will
+        // not fail a correct-but-differently-ordered implementation.
+        //
+        // 3d is THE ONE CHECK IN THIS FILE THAT CATCHES DOUBLE BUFFERING, which
+        // produces the right answer at the wrong rate and passes every other
+        // group here.
+        //
+        // Tolerance 1e-4: reachable at 32x32 for all three (1e-6 is below the
+        // floor and none of them would converge).
         {
             const vc::vc_image f = smooth_field(32, 32);
             const auto jac =
-                poisson_iter(f, poisson_sweep::jacobi, 20000, 1e-6F);
+                poisson_iter(f, poisson_sweep::jacobi, 20000, 1e-4F);
             const auto gs =
-                poisson_iter(f, poisson_sweep::gauss_seidel, 20000, 1e-6F);
+                poisson_iter(f, poisson_sweep::gauss_seidel, 20000, 1e-4F);
             const auto rb =
-                poisson_iter(f, poisson_sweep::red_black, 20000, 1e-6F);
+                poisson_iter(f, poisson_sweep::red_black, 20000, 1e-4F);
 
-            std::cout << "  sweeps to 1e-6 at 32x32:  jacobi "
-                      << sweeps_taken(jac) << "  gauss_seidel "
-                      << sweeps_taken(gs) << "  red_black " << sweeps_taken(rb)
-                      << '\n';
+            const auto nj = sweeps_taken(jac);
+            const auto ng = sweeps_taken(gs);
+            const auto nr = sweeps_taken(rb);
+            std::cout << "  3: sweeps to 1e-4 at 32x32 -- jacobi " << nj
+                      << "  gauss_seidel " << ng << "  red_black " << nr
+                      << "  (jac/gs " << (double(nj) / double(ng)) << ", rb/gs "
+                      << (double(nr) / double(ng)) << ")\n";
 
-            expect(
-                jac.converged && gs.converged && rb.converged,
-                "3a all three converge on a field with no Nyquist component");
-            expect(sweeps_taken(gs) < sweeps_taken(jac),
-                   "3b gauss_seidel beats jacobi, as 14b predicts");
-            expect(sweeps_taken(rb) <= 2 * sweeps_taken(gs),
+            expect(jac.converged && gs.converged && rb.converged,
+                   "3a all three converge on a field with no Nyquist "
+                   "component");
+            expect(double(nj) >= 1.5 * double(ng),
+                   "3b jacobi needs at least 1.5x gauss_seidel's sweeps -- the "
+                   "RATIO, not just the ordering");
+            expect(double(nr) <= 2.0 * double(ng),
                    "3c GATE 2: red_black tracks gauss_seidel's rate");
-            expect(sweeps_taken(rb) < sweeps_taken(jac),
+            expect(nr < nj,
                    "3d GATE 2: red_black is NOT running at jacobi's rate -- "
                    "this is the check a double-buffered red_black fails");
         }
 
-        // ---- GROUP 4 -- THE RESIDUAL IS MONOTONE ----
+        // ---- GROUP 4 -- THE RESIDUAL DECREASES ----
         //
-        // A rising residual means the sweep is diverging. No comparison of end
-        // states detects it, because a diverging run that happens to be stopped
-        // at a budget still produces an image.
+        // ** P2's GATE 2 SAYS "the residual curve is monotone decreasing" AND
+        // THAT IS NOT TRUE OF A CORRECT SOLVER. ** Two legitimate exceptions,
+        // both found by simulating this before asserting it:
         //
-        // jacobi is NOT asserted monotone here: its error mode factors are
-        // cos-based and NEGATIVE for half the spectrum, so the residual may
-        // oscillate while shrinking in magnitude. That is its documented
-        // behaviour, not a defect, and asserting monotonicity on it would be
-        // asserting something untrue.
+        //   SWEEP 1 RAISES IT. From a zero start the opening step is large and
+        //   overshoots several modes; 16x16 goes 1.0 -> about 1.27 and only then
+        //   begins to fall. Asserting monotonicity from sweep 0 fails every
+        //   correct implementation.
+        //
+        //   NEAR THE FLOOR IT JITTERS. Once the residual reaches the f32 floor
+        //   it stops being a convergence measurement and becomes roundoff; in
+        //   simulation it wobbled by a few percent across the last decade.
+        //
+        // So: skip sweep 1, and assert only while the residual is above 10x its
+        // final value. That window is where the curve carries information, and
+        // a genuinely diverging sweep fails inside it immediately.
+        //
+        // jacobi is excluded entirely -- its mode factors are negative for half
+        // the spectrum, so its residual legitimately oscillates while shrinking.
         {
             const vc::vc_image f = smooth_field(16, 16);
             for (const auto sweep :
                  {poisson_sweep::gauss_seidel, poisson_sweep::red_black}) {
-                const auto r = poisson_iter(f, sweep, 500, 1e-6F);
-                bool monotone = true;
+                const auto r = poisson_iter(f, sweep, 2000, 1e-5F);
+                bool ok = true;
                 for (const auto& channel : r.residual) {
-                    for (std::size_t i = 1; i < channel.size(); ++i) {
-                        if (channel[i] > channel[i - 1] * 1.000001F) {
-                            monotone = false;
+                    const auto floor_guard = channel.back() * 10.0F;
+                    for (std::size_t i = 2; i < channel.size(); ++i) {
+                        if (channel[i - 1] <= floor_guard) {
+                            break;
+                        }
+                        if (channel[i] > channel[i - 1] * 1.01F) {
+                            ok = false;
                         }
                     }
                 }
-                expect(monotone,
-                       std::string{"4 residual decreases every sweep for "} +
+                expect(ok,
+                       std::string{"4 residual decreases from sweep 2 while "
+                                   "above 10x the floor, for "} +
                            (sweep == poisson_sweep::red_black
                                 ? "red_black"
                                 : "gauss_seidel"));
@@ -374,9 +454,9 @@ int main() {
         // by w-1. An odd w makes them equal, so two same-coloured pixels are
         // adjacent and "update every red at once" stops being true.
         //
-        // ** THE ACCEPTANCE HALVES ARE LOAD-BEARING. ** Checks 5a-5c pass
-        // against any stub that throws unconditionally; 5d-5f are what prove the
-        // rejection is selective rather than a blanket failure.
+        // ** THE ACCEPTANCE HALVES ARE LOAD-BEARING. ** 5a-5c pass against any
+        // stub that throws unconditionally; 5d-5f prove the rejection is
+        // selective rather than a blanket failure.
         {
             const auto rejects = [](vc::image_dim w, vc::image_dim h) {
                 try {
@@ -391,7 +471,6 @@ int main() {
             expect(rejects(5, 4), "5a red_black rejects an odd WIDTH");
             expect(rejects(4, 5), "5b red_black rejects an odd HEIGHT");
             expect(rejects(5, 5), "5c red_black rejects both odd");
-
             expect(!rejects(4, 4), "5d red_black ACCEPTS even x even");
 
             const vc::vc_image odd = smooth_field(5, 5);
@@ -415,25 +494,28 @@ int main() {
         //
         // notes/poisson.txt section 17c, made executable.
         //
-        // Take phi_known = the pure checkerboard, +1 on even pixels and -1 on
-        // odd. Every neighbour is its negative, so
+        // phi_known = the pure checkerboard, +1 on even pixels and -1 on odd.
+        // Every neighbour is its negative, so
         //
         //     laplacian(cb) = 4(-v) - 4v = -8v,   i.e.  f = -8 . cb
         //
-        // which is zero-mean by construction. Now run jacobi from zero, by hand:
+        // zero-mean by construction. Jacobi from zero, by hand:
         //
         //     sweep 1   phi = (0 - f)/4 = 2.cb,  laplacian = -16.cb,
         //               r = f - that = 8.cb,  ||r||/||f|| = 8/8 = 1
-        //     sweep 2   neighbours sum to -8.cb_value, f is the same,
-        //               phi = 0 again
+        //     sweep 2   neighbours sum to -8.cb_value against the same f,
+        //               so phi returns to 0
         //
         // It oscillates between 0 and 2.cb and the relative residual is EXACTLY
-        // 1.0 forever. Not slow -- stationary.
+        // 1.0 forever. Not slow -- stationary. 6b asserts that rather than
+        // merely asserting non-convergence, because "did not converge" is also
+        // what a budget that is simply too small looks like.
         //
-        // red_black on the same field is exact in ONE sweep: pass 1 sets every
+        // red_black on the same field is EXACT IN ONE SWEEP: pass 1 sets every
         // even to 2, pass 2 sees neighbours summing to 8 against f = +8 and
         // leaves every odd at 0, and subtracting the mean of 1 gives +1/-1,
-        // which IS phi_known.
+        // which IS phi_known. Every value here is representable in f32, so 6e
+        // is an equality in all but name.
         //
         // That contrast is the single clearest thing S8b produces, and it is why
         // P2 section D's "cut jacobi first" was overridden.
@@ -474,29 +556,56 @@ int main() {
 
         // ---- GROUP 7 -- CROSS-VALIDATION AGAINST poisson_fft. GATE 1 ----
         //
-        // Two solvers that share almost no code: one divides a spectrum bin by
-        // bin, one sweeps pixels. wrap on both sides -- poisson_fft solves the
+        // Two solvers sharing almost no code: one divides a spectrum bin by bin,
+        // one sweeps pixels. wrap on both sides -- poisson_fft solves the
         // PERIODIC problem and nothing else, so a sweep with any other boundary
         // would be a different problem and the disagreement would read as a
         // convergence bug.
         //
         // Both return the ZERO-MEAN solution, which is what makes a direct
         // comparison meaningful: the periodic problem fixes phi only up to an
-        // added constant, and without that normalisation the two could be right
-        // and differ everywhere by the same amount.
+        // added constant, and without that normalisation the two could both be
+        // right and differ everywhere by the same amount.
+        //
+        // ---- WHY 16x8 AND BELOW, AND WHY THIS FILE DOES NOT ARGUE WITH IT ----
+        //
+        // P2 scoped Gate 1 to 16x8 on 2026-10-16 FROM A REAL RUN: at width 64
+        // the near-DC mode decays by 0.9976 per sweep, so a single 1e-5
+        // reduction costs ~4,776 sweeps against ~297 at width 16, and there is
+        // an f32 floor of roughly eps x 831 on top.
+        //
+        // A SIMULATION WRITTEN WHILE SCAFFOLDING THIS FILE SUGGESTED 32x32 WOULD
+        // ALSO CLEAR 1e-5, AND THAT SUGGESTION WAS DISCARDED. It was numpy, not
+        // this library; the 16x8 figure came from this library. Where the two
+        // disagree the measured one wins, and a test that quietly widens a gate
+        // on simulated evidence is worse than no test. 32x32 and 64x64 are still
+        // exercised -- in group 8, REPORTED rather than gated.
+        //
+        // The assert here is 1e-5, the gate itself, rather than
+        // 15_poisson_iter's looser 5e-5: that file leaves tripwire room for the
+        // two sweeps it covers, and this one is checking that red_black has not
+        // made things worse than the gate allows.
         {
-            for (const vc::image_dim n : {8U, 16U, 32U, 64U}) {
-                const vc::vc_image f = smooth_field(n, n);
+            const std::pair<vc::image_dim, vc::image_dim> sizes[] = {
+                {8, 8}, {16, 8}, {8, 16}};
+            for (const auto& [w, h] : sizes) {
+                const vc::vc_image f = smooth_field(w, h);
                 const vc::vc_image ref = poisson_fft(f);
 
                 for (const auto sweep :
                      {poisson_sweep::jacobi, poisson_sweep::gauss_seidel,
                       poisson_sweep::red_black}) {
-                    const auto r = poisson_iter(f, sweep, 200000, 1e-9F);
+                    const auto r = poisson_iter(f, sweep, 40000, 1e-6F);
                     const auto d = rel_max_diff(r.phi, ref);
+                    std::cout << "  7: " << w << "x" << h << " sweep "
+                              << static_cast<int>(sweep) << " rel " << d
+                              << " in " << sweeps_taken(r) << " sweeps\n";
+                    expect(r.converged,
+                           std::string{"7 reaches a 1e-6 residual at "} +
+                               std::to_string(w) + "x" + std::to_string(h));
                     expect(d <= 1e-5,
-                           std::string{"7 GATE 1 at "} + std::to_string(n) +
-                               "x" + std::to_string(n) + ", sweep " +
+                           std::string{"7 GATE 1 at "} + std::to_string(w) +
+                               "x" + std::to_string(h) + ", sweep " +
                                std::to_string(static_cast<int>(sweep)) +
                                ": agrees with poisson_fft, rel " +
                                std::to_string(d));
@@ -504,41 +613,47 @@ int main() {
             }
         }
 
-        // ---- GROUP 8 -- THE GATE'S SIZE SCOPE IS REAL ----
+        // ---- GROUP 8 -- WHAT HAPPENS ABOVE THE GATE'S SIZE. REPORTED ----
         //
-        // P2's criterion said "1e-5 relative to RMS" with no size attached, and
-        // vc_poisson.cpp measured the round-trip error at 3.3e-06 (64^2),
-        // 4.8e-05 (128^2) and 2.0e-04 (256^2) WITH A CORRECT SOLVER -- near-DC
-        // amplification, not a defect. The plan now scopes the gate to 64^2 and
-        // below, and this group is what stops a later edit from quietly
-        // tightening it back.
+        // 32x32 and 64x64 are outside Gate 1's scope, and this group does NOT
+        // assert the gate there. It exists so the shape of the degradation is
+        // on the record and runs every build, rather than being a sentence in
+        // a plan that nobody re-measures.
         //
-        // So: assert 1e-5 at 64^2, and at 128^2 assert only the LOOSER bound
-        // that the measurement supports. A failure here at 128^2 means something
-        // got worse; a 1e-5 PASS at 128^2 would mean the measurement was wrong
-        // and this comment needs rewriting.
+        // The bound asserted is 1e-3 -- loose enough that it cannot be read as
+        // a competing gate, tight enough that a genuine regression (a sign
+        // error, a lost wrap) blows through it. THE PRINTED NUMBERS ARE THE
+        // DELIVERABLE; the assert is a tripwire.
+        //
+        // Both runs stop on a 1e-5 RESIDUAL rather than running to a floor,
+        // because the sweep counts above 64x64 are in the thousands and this
+        // suite runs in the debug tree.
+        //
+        // 128x128 was in a first draft and is DROPPED -- it needs roughly 8,000
+        // sweeps over four times the pixels, tens of seconds, for a number
+        // 64x64 already makes.
         {
-            const vc::vc_image f64 = smooth_field(64, 64);
-            const auto d64 = rel_max_diff(
-                poisson_iter(f64, poisson_sweep::red_black, 200000, 1e-9F).phi,
-                poisson_fft(f64));
-            expect(d64 <= 1e-5,
-                   "8a 1e-5 holds at 64x64, which is where P2 now scopes it");
-
-            const vc::vc_image f128 = smooth_field(128, 128);
-            const auto d128 = rel_max_diff(
-                poisson_iter(f128, poisson_sweep::red_black, 400000, 1e-9F).phi,
-                poisson_fft(f128));
-            std::cout << "  cross-validation rel error:  64^2 " << d64
-                      << "   128^2 " << d128 << '\n';
-            expect(d128 <= 1e-3,
-                   "8b 128x128 agrees to the looser bound the measurement "
-                   "supports, not to 1e-5");
+            for (const vc::image_dim n : {32U, 64U}) {
+                const vc::vc_image f = smooth_field(n, n);
+                const auto r =
+                    poisson_iter(f, poisson_sweep::red_black, 40000, 1e-5F);
+                const auto d = rel_max_diff(r.phi, poisson_fft(f));
+                std::cout << "  8: " << n << "x" << n
+                          << " OUTSIDE Gate 1's scope -- rel " << d << " after "
+                          << sweeps_taken(r) << " sweeps, converged "
+                          << (r.converged ? "yes" : "no") << '\n';
+                expect(d <= 1e-3,
+                       std::string{"8 red_black at "} + std::to_string(n) +
+                           "x" + std::to_string(n) +
+                           " stays within the reporting tripwire, rel " +
+                           std::to_string(d));
+            }
         }
 
         // ---- GROUP 9 -- residual_plot REJECTIONS AND ACCEPTANCE ----
         //
-        // ** 9a-9e PASS VACUOUSLY AGAINST A THROWING STUB. 9f IS THE PAIR. **
+        // ** 9a-9e PASS VACUOUSLY AGAINST A THROWING STUB. 9f AND 9g ARE THE
+        // PAIR THAT MAKES THEM MEAN SOMETHING. **
         {
             const auto throws = [](const std::function<void()>& fn) {
                 try {
@@ -592,15 +707,34 @@ int main() {
             expect(
                 zero_ok,
                 "9g a legitimately zero residual is CLAMPED to the floor and "
-                "drawn, not rejected -- poisson_iter documents this case");
+                "drawn, not rejected -- poisson_iter documents this case, "
+                "and it is also the second half of 9a-9e's pairing");
+
+            const std::vector<residual_series> ragged = {
+                {"short", {1.0F, 0.1F}}, {"long", {1.0F, 0.5F, 0.2F, 0.05F}}};
+            bool ragged_ok = true;
+            try {
+                (void)residual_plot(ragged);
+            } catch (const std::exception&) {
+                ragged_ok = false;
+            }
+            expect(ragged_ok,
+                   "9h series of DIFFERENT LENGTHS are accepted -- channels "
+                   "converge at different sweeps and red_black on a "
+                   "checkerboard finishes in one, so group 10 produces this");
         }
 
         // ---- GROUP 10 -- THE PLOT IS DUMPED. THE ARTIFACT S8b OWES ----
         //
-        // Three methods on one axis, the picture that makes group 3's numbers
-        // and group 6's stall legible. The checks here are weak on purpose: the
-        // output is for a human, and asserting pixel values would pin a drawing
-        // style rather than a property.
+        // Three methods on two fields, on one axis: the picture that makes group
+        // 3's ratio and group 6's stall legible at a glance. The jacobi curve on
+        // the checkerboard is a horizontal line at 1.0 and the red_black curve
+        // beside it drops off the bottom after one sweep.
+        //
+        // The checks here are weak ON PURPOSE. The output is for a human, and
+        // asserting pixel values would pin a drawing style rather than a
+        // property. What is asserted is that every series survived into the
+        // call and that the canvas size was honoured.
         {
             const vc::vc_image smooth = smooth_field(32, 32);
             const vc::vc_image checker = from_rule(32, 32, [](int x, int y) {
@@ -608,15 +742,16 @@ int main() {
             });
 
             std::vector<residual_series> series;
-            for (const auto& [label, f] :
-                 std::vector<std::pair<std::string, vc::vc_image>>{
-                     {"smooth", smooth}, {"checkerboard", checker}}) {
-                for (const auto& [name, sweep] :
-                     std::vector<std::pair<std::string, poisson_sweep>>{
-                         {"jacobi", poisson_sweep::jacobi},
-                         {"gauss_seidel", poisson_sweep::gauss_seidel},
-                         {"red_black", poisson_sweep::red_black}}) {
-                    const auto r = poisson_iter(f, sweep, 400, 1e-8F);
+            const std::vector<std::pair<std::string, vc::vc_image>> fields = {
+                {"smooth", smooth}, {"checkerboard", checker}};
+            const std::vector<std::pair<std::string, poisson_sweep>> sweeps = {
+                {"jacobi", poisson_sweep::jacobi},
+                {"gauss_seidel", poisson_sweep::gauss_seidel},
+                {"red_black", poisson_sweep::red_black}};
+
+            for (const auto& [label, f] : fields) {
+                for (const auto& [name, sweep] : sweeps) {
+                    const auto r = poisson_iter(f, sweep, 400, 1e-5F);
                     series.push_back({label + "/" + name, r.residual.at(0)});
                 }
             }
@@ -631,7 +766,7 @@ int main() {
 
             vc::debug::set_enabled(true);
             vc::debug::dump("poisson_residual", plot);
-            std::cout << "  residual plot written under "
+            std::cout << "  10: residual plot written under "
                       << vc::debug::output_dir().string() << '\n';
         }
 
