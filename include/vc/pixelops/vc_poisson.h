@@ -471,6 +471,83 @@ enum class poisson_sweep : std::uint8_t {
     // read the values pass 1 just wrote; that is the whole reason it converges
     // at gauss_seidel's rate rather than jacobi's.
     //
+    // ---- IT IS FASTER ON ONE THREAD, AND THAT WAS NOT THE PREDICTION ----
+    //
+    // The expectation while this was being scaffolded -- written down twice --
+    // was that red_black would be SLOWER per sweep than gauss_seidel, because
+    // `x += 2` strides memory and uses half of each cache line, and that its
+    // only payoff was parallelism this code does not exploit.
+    //
+    // MEASURED, release build, 256x256, 400 sweeps at tolerance 0, min of five
+    // runs, repeated three times with under 2% spread:
+    //
+    //     jacobi          77.3 ms    0.1932 ms/sweep
+    //     gauss_seidel   161.0 ms    0.4025 ms/sweep
+    //     red_black      103.2 ms    0.2579 ms/sweep
+    //
+    // red_black is 1.56x FASTER PER SWEEP than gauss_seidel, not slower. And
+    // time to solution, 128x128 run to a 1e-4 relative residual:
+    //
+    //     gauss_seidel   768.2 ms    7909 sweeps
+    //     red_black      524.2 ms    8024 sweeps      1.47x faster
+    //
+    // on 1.5% MORE sweeps. The sweep count was never where the difference was.
+    //
+    // ---- WHY, AND IT IS THE SAME FACT THE METHOD WAS CHOSEN FOR ----
+    //
+    // Look at jacobi against gauss_seidel: 0.1932 against 0.4025, a factor of
+    // 2.1, for the SAME loop over the SAME pixels doing the SAME arithmetic.
+    // The only difference is that gauss_seidel's src and dst are one buffer.
+    //
+    // That makes pixel (x,y) read the value pixel (x-1,y) stored moments
+    // earlier, so every pixel waits on the previous pixel's store to forward.
+    // The whole row is one serial dependency chain, and the loop runs at the
+    // latency of that chain rather than at the throughput of the arithmetic.
+    //
+    // Inside a red_black pass NOTHING depends on anything else in that pass --
+    // which is the independence this enumerator exists for. The chain is cut,
+    // so the loop goes back to being throughput-bound, and the stride-2 access
+    // costs less than the chain did.
+    //
+    // ** SO THE INDEPENDENCE PAYS OFF BEFORE ANY PARALLELISM. ** It is not a
+    // deferred benefit waiting on a thread pool or a GPU; it is already in the
+    // wall clock on one core. Parallelism is a second payment on the same
+    // property, not the only one.
+    //
+    // ---- AND GAUSS-SEIDEL'S FAMOUS 2x IN SWEEPS BUYS NOTHING HERE ----
+    //
+    // It needs about half jacobi's sweeps and pays about 2.1x per sweep. Those
+    // very nearly cancel. The textbook result that Gauss-Seidel converges twice
+    // as fast is about ITERATION COUNT, which is the right measure for the
+    // matrix theory in Saad section 4.1 and the wrong one for choosing a solver
+    // on real hardware.
+    //
+    // ---- A SEPARATE JACOBI LIMIT, FOUND IN THE SAME RUN ----
+    //
+    // Jacobi's achievable residual is markedly worse than red_black's, and it
+    // OSCILLATES around that floor rather than settling on it. Over 60,000
+    // sweeps at tolerance 0:
+    //
+    //                  best reached      where it ended
+    //      64x64 jac      1.07e-05          2.12e-05
+    //      64x64 rb       8.66e-06          8.66e-06   (settled)
+    //     128x128 jac     1.63e-04          4.92e-04
+    //     128x128 rb      3.47e-05          3.47e-05   (settled)
+    //
+    // At 128x128 that floor is ABOVE 1e-4, so asking jacobi for a 1e-4 residual
+    // there does not converge at any budget -- measured, it ran 200,000 sweeps
+    // and stopped on the budget. The cause is the same sign structure that
+    // produces the checkerboard stall: jacobi's mode factors are NEGATIVE over
+    // half the spectrum andclose to -1 near Nyquist, so roundoff keeps re-exciting
+    // modes it damps barely at all. gauss_seidel and red_black damp high
+    // frequencies hard -- the classic smoother property -- and settle cleanly.
+    //
+    // Nothing in the suite is affected: group 3 asks jacobi for 1e-4 at 32x32
+    // and group 7 for 1e-6 at 16x8 and below, both well inside its floor. But
+    // a caller handing jacobi a large grid and a tight tolerance will wait
+    // forever, and poisson_iter will report converged == false rather than say
+    // why.
+    //
     // ** THE OBVIOUS TWO-BUFFER VERSION IS EXACTLY JACOBI. ** Read everything
     // from buffer A and write both passes into buffer B, and B ends the sweep
     // holding evens-from-old and odds-from-old -- which is one jacobi sweep,
