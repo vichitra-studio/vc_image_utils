@@ -57,19 +57,26 @@ namespace vc::pixelops {
 //
 // Not a sigma parameter. Deliberately, and for two measured reasons.
 //
-// (1) ITS TAPS SPLIT EXACTLY EVENLY between the positions that land on samples
-//     and those that land on the zeros expand() inserts:
+// (1) ITS TAPS SPLIT EXACTLY EVENLY between the taps an even-parity output
+//     reads and those an odd-parity output reads -- the two groups expand()'s
+//     stencils are built from:
 //
 //       Burt      even taps (-2,0,+2)  (1+6+1)/16 = 0.5000
 //                 odd  taps (-1,+1)    (4+4)/16   = 0.5000      EQUAL
 //
 //       sigma=1   even  0.0545+0.4026+0.0545 = 0.5116
-//       truncated odd   0.2442+0.2442        = 0.4884           off by 1.2%
+//       truncated odd   0.2442+0.2442        = 0.4884           NOT equal
 //
-//     In 2-D the two separable passes MULTIPLY -- 0.5116^2 x 4 = 1.0469 against
-//     0.4884^2 x 4 = 0.9542 -- so a truncated Gaussian leaves a +/-4.64%
-//     checkerboard in expand() where Burt leaves exactly none. Measured on a
-//     flat 0.5 image, interior: Burt 0.500000 flat, sigma=1 0.477 .. 0.523.
+//     That equality is why BOTH of expand()'s stencils can divide by the same
+//     8, and why there is one scale factor rather than two. A kernel that split
+//     0.5116/0.4884 needs its own unequal pair, and with a single divisor
+//     ripples: x2 gives 1.0232 against 0.9768, so +/-2.32% in 1-D. The two
+//     separable passes MULTIPLY, 1.0232^2 = 1.0469 against 0.9768^2 = 0.9542,
+//     so about TWICE that in 2-D -- +/-4.64%, where Burt leaves exactly none.
+//     Measured on a flat 0.5 image, interior: Burt 0.500000 flat, sigma=1
+//     0.477 .. 0.523. (Like for like, 2-D is twice 1-D, not four times: the
+//     earlier "1.2%" was the weight's deviation in percentage points, which is
+//     not the same quantity as the output's.)
 //
 // (2) SIGMA HAS EXACTLY ONE CORRECT VALUE for a 2x reduction, so the parameter
 //     was a knob with one setting. Larger loses detail for nothing; smaller
@@ -82,95 +89,125 @@ namespace vc::pixelops {
 // It also matches the literature, which matters when comparing against a
 // reference implementation at the merge block.
 //
-// ---- expand() MUST NORMALISE, NOT MULTIPLY BY A CONSTANT ----
+// ---- expand() USES PER-PARITY STENCILS, NOT ZERO-INSERT-THEN-BLUR ----
 //
-// The textbook statement is "upsample, blur, multiply by 4" (x2 per separable
-// pass, because only one input in four is real). MEASURED, that is wrong at
-// every border, for every kernel INCLUDING BURT'S. Do this instead:
+// CHANGED 2026-11-06, from mask normalisation. The formulations this replaced
+// are in curriculum/notes/pyramids.txt -- the mask and the constant-x4 border
+// numbers in section 9, padding in 12b -- and 9a is where the three are compared
+// and this one decided. It supersedes them; it does not merely win on taste.
 //
-//     numerator   = blur(upsampled samples)
-//     denominator = blur(a MASK, 1 where a real sample was placed, 0 elsewhere)
-//     out         = numerator / denominator
+// The textbook statement is "insert zeros, blur, multiply by 4" (x2 per
+// separable pass, because only one input in four is real). Insert the zeros and
+// then ask WHICH TAPS CAN POSSIBLY CONTRIBUTE:
 //
-// WHY: A HOLE IS MISSING DATA, NOT DARK DATA. Strip the kernel away -- you want
-// the average around a pixel, two neighbours exist holding 10, three positions
-// are holes:
+//     centred on an EVEN output   sample hole sample hole sample   -> 1 _ 6 _ 1
+//     centred on an ODD  output   hole sample hole sample hole     -> _ 4 _ 4 _
 //
-//     treat holes as ZERO, divide by 5    (10+10+0+0+0)/5 =  4    WRONG
-//     divide by what EXISTS               (10+10)/2       = 10    right
+// Two or three of the five multiplies are times zero at EVERY position. Cross
+// them out and the operator collapses to two one-line stencils that read the
+// COARSE array directly, with j = i/2:
 //
-// The upsampled grid is that situation at every other position. A blur has no
-// concept of a hole: a zero contributes nothing to the numerator while still
-// consuming the weight you assumed it would carry. The constant is an
-// ASSUMPTION ("a quarter of the weight always lands on real data"); the mask is
-// a MEASUREMENT of how much actually did.
+//     i EVEN  ->  ( c[j-1] + 6*c[j] + c[j+1] ) / 8
+//     i ODD   ->  ( c[j]            + c[j+1] ) / 2
 //
-// vc_edge_policy.h already documents this exact bug for `zero`: "A 3x3 box at a
-// corner has four taps inside and five out, so the applied weights sum to 4/9
-// and a flat 100 reads back as 44.4." expand() has it IN THE INTERIOR, not only
-// at the edges, because the holes are everywhere.
+// Not an approximation and not a different filter -- the identical sum with the
+// zero terms deleted. Hand-check it: coarse [10, 20, 30] to a 5-wide target
+// under reflect gives 12.5, 15, 20, 25, 27.5, and zero-insert-then-blur gives
+// the same five numbers. 12_pyramid.cpp group 6c pins them.
 //
-// Measured, flat 0.5 expanded 16x16 -> 32x32, whole image including borders:
+// WHAT FOLLOWS FROM IT, in the order it matters:
 //
-//     constant x4,   Burt       interior exactly 0.500000   border 0.125 .. 1.125
-//     constant x4,   sigma=1    interior 0.477 .. 0.523     border 0.119 .. 1.142
-//     NORMALISED,    either     0.50000000 everywhere
+// (1) THERE IS NO SCALE FACTOR. Both numerators weigh 8 rather than 16, and
+//     that 8 IS the x2: the weight the dropped taps used to consume is simply
+//     absent from the divisor. The 2-D x4 is the two passes' two eights. So the
+//     constant cannot be forgotten, mis-set, or applied twice -- which matters
+//     more than it sounds, because collapse runs the same expand on both sides
+//     of a = (a-b)+b and CANNOT SEE A WRONG ONE.
 //
-// WHERE 1.125 AND 0.125 COME FROM. Upsampled flat c is [c, 0, c, 0, ...]. An
-// interior even position reads c,0,c,0,c -> 8c/16 = 0.5c, as intended. At
-// position 0, clamp makes the two taps reaching left read up[0] = c instead of
-// zeros -> (1+4+6+0+1)c/16 = 12c/16 = 0.75c, which is 1.5x too much; two
-// separable passes make a corner 1.5 x 1.5 = 2.25, and 2.25 x 0.5 = 1.125. The
-// opposite corner is the mirror: where the last index is ODD it holds a zero,
-// the clamped taps read zeros where samples belonged, 4c/16 = 0.25c, and
-// 0.5 x 0.5 x 0.5 = 0.125. One cause, opposite parity, 225% and 25%.
+// (2) THERE ARE NO HOLES, SO THE EDGE POLICY CANNOT LAND ON THE WRONG PARITY.
+//     The policy now applies to the COARSE grid -- to this operation's own
+//     input, which is what reduce() does and what the enum is written for. Every
+//     value an out-of-range read returns is a real sample at a real position.
+//     Measured: a flat image is exact everywhere, border included, under clamp,
+//     reflect AND wrap, at even and odd targets alike.
 //
-// THE MASK IS NEARLY FREE, which is what makes this affordable:
+// (3) IT SAYS WHAT EXPAND DOES. An odd output is the plain AVERAGE of its two
+//     coarse neighbours; an even output keeps mostly its own value. That is
+//     legible in a way "stuff zeros and blur" is not.
 //
-//   IT IS AN OUTER PRODUCT. The mask is 1 exactly where x is even AND y is
-//   even, so it is separable, and blurring a separable thing separably keeps it
-//   separable: den(x,y) = dx(x) . dy(y). Verified, max|den_2d - dx (x) dy| =
-//   0.000e+00. Storage W+H, not W*H; cost two 1-D convolutions.
+// (4) IT IS CHEAPER, by about 4x. Per output pixel, per pass: the stencils do
+//     3 or 2 multiply-adds where the mask formulation did 5 for the numerator
+//     AND 5 for the mask, plus a divide. The peak buffer count drops from five
+//     target-sized images (samples, mask, two blurs, quotient) to two, and the
+//     wider of those two is half the target area.
 //
-//   IT DEPENDS ONLY ON GEOMETRY -- not the image, not the channel, not the
-//   frame. Compute once per level SHAPE and reuse across channels and across
-//   every frame of a bracket.
+//     (A FUSED 2-D form is cheaper again -- four stencils, one per (x,y) parity
+//     pair, 9/6/6/4 taps, no intermediate buffer at all. That is what
+//     darktable's local laplacian writes. Not done here: separable keeps the
+//     weights in ONE place, which is the trade vc_edge_policy.h already makes
+//     for resolve_index.)
 //
-// Multiply-adds per ORIGINAL pixel, separable 5-tap at 10 per blur, level areas
-// summing to 4/3:
+// ONE BEHAVIOUR CHANGE, AND IT IS DELIBERATE: `zero` no longer preserves a flat
+// image. 3x3 -> 5x5 reads (0 + 6 + 1)/8 = 7/8 per axis and 49/64 = 0.765625 at a
+// corner. Mask normalisation CANCELLED `zero` away -- numerator and denominator
+// lost the same taps -- which made expand the one operation in this library
+// where vc_edge_policy.h's documented fading border silently did not happen.
+// It now behaves here as it does everywhere else. Pinned in group 6d.
 //
-//     gaussian pyramid                        13.3
-//     + laplacian                             26.7
-//     + mask, naive 2-D per expand            40.0
-//     + mask, outer product and cached        26.7
+// WHAT THIS DOES NOT BUY YOU, so the kernel note above still earns its place:
+// independence from the kernel. Both stencils dividing by the same 8 IS Burt's
+// 0.5000/0.5000 split, cashed in. A kernel splitting 0.5116/0.4884 needs its own
+// unequal PAIR of divisors, and with a single one still ripples +/-2.32% in 1-D
+// and about twice that in 2-D. Parity is a property of the stencils; the even
+// split is a property of the kernel. Two hardcoded divisors are legitimate only
+// because the kernel is fixed -- the same bargain the section above struck.
 //
-// MEASURED against one full-image blur at 1024x1024, release, and the table
-// holds to within about 15%. The comparison needs a correction to be fair:
-// make_gaussian_1d_x(1.0) is SEVEN taps where Burt's is five, so a single blur
-// with it does 1.4x the per-pixel work.
+// ---- THE THREE FORMULATIONS THIS REPLACED, (A) AND (B) BOTH CORRECT ----
+//
+// Recorded because the measurements are real and the reasoning is reusable.
+// Sections 9 and 12b of the note have them in full; 9a compares them.
+//
+// (A) MASK NORMALISATION. Insert zeros, blur, and divide per pixel by the same
+//     blur of a 1/0 mask -- the weight that actually landed on real data. It is
+//     the general case, and these stencils are it SOLVED IN CLOSED FORM: the
+//     blurred mask has only a handful of distinct values, one per
+//     (parity, distance-from-edge) class, and in the interior it is exactly 0.5,
+//     so "divide by the mask" IS "multiply by 2". Its one real advantage is
+//     kernel independence -- it removes the parity ripple for ANY kernel, which
+//     two fixed divisors cannot. That is a freedom this library deliberately
+//     does not want. Cost: a second blur and a divide.
+//
+// (B) PAD THE SOURCE, then the constant x4 is exact -- measured 0.50000000 for
+//     Burt. This is what Mertens's reference exposure fusion and darktable's
+//     local laplacian both do. Rejected here for pad-then-crop index
+//     arithmetic: a crop offset per level per axis, and every bug this project
+//     has shipped has been index arithmetic (the N/2+1 leak, the causal kernel
+//     placement in conv_frequency, the planar-vs-interleaved stride, the
+//     colliding taps, the span-vs-extent overflow).
+//
+// (C) CONSTANT x2 / x4 ALONE, which is what both of the above are fixing.
+//     Measured, flat 0.5 expanded 16x16 -> 32x32:
+//
+//       constant x4, Burt      interior exactly 0.500000   border 0.125 .. 1.125
+//       constant x4, sigma=1   interior 0.477 .. 0.523     border 0.119 .. 1.142
+//
+//     Wrong at every border under clamp for every kernel, and wrong in the
+//     interior for any kernel whose taps do not split evenly. The note derives
+//     both numbers by hand.
+//
+// COST NOTE, HONESTLY LABELLED: the timings below were measured on the MASK
+// implementation at 1024x1024, release, and have NOT been re-run. They are kept
+// because the comparison they correct for is the instructive part.
 //
 //     one 7-tap blur                 0.0581 s
 //     gaussian pyramid (5-tap)       0.0461 s   0.79x raw, 1.11x tap-adjusted
-//                                               (table predicts 1.33x)
 //     laplacian, naive 2-D mask      0.1411 s   2.43x raw, 3.40x tap-adjusted
-//                                               (table predicts 4.00x)
 //
 // The raw 0.79x reads as "a whole pyramid is cheaper than one blur", which is
-// only true because the blurs are not the same width -- worth stating, because
-// that is the shape of comparison that produces a wrong conclusion.
-//
-// ---- THE REJECTED ALTERNATIVE, AND WHY ----
-//
-// Padding the source before upsampling also fixes the border, and then the
-// constant x4 is exact -- measured 0.50000000 for Burt. It is cheaper. It was
-// rejected because pad-then-crop is MORE INDEX ARITHMETIC: a crop offset per
-// level per axis.
-//
-// That is an evidence-based choice, not an aesthetic one. Every bug this project
-// has actually shipped has been index arithmetic -- the N/2+1 leak, the causal
-// kernel placement in conv_frequency, the planar-vs-interleaved stride, the
-// colliding taps, the span-vs-extent overflow. The mask trades a division for a
-// whole category of off-by-one, and the division is free.
+// only true because the blurs are not the same width: make_gaussian_1d_x(1.0) is
+// SEVEN taps where Burt's is five, so one blur with it does 1.4x the per-pixel
+// work. Worth stating, because that is the shape of comparison that produces a
+// wrong conclusion.
 //
 // ---- THE VARIANT TO AVOID, IN SZELISKI'S OWN WORDS ----
 //
@@ -232,10 +269,14 @@ struct vc_laplacian_pyramid {
 // Output is ceil(w/2) x ceil(h/2), so a 5-wide row reduces to 3 (indices 0,2,4).
 [[nodiscard]] vc::vc_image reduce(const vc::vc_image& src,
                                   vc_edge_policy policy);
-// Upsample to target_width x target_height by inserting zeros, blur with the
-// same fixed kernel, and NORMALISE per output pixel by the blurred mask -- see
-// the long note above. Do NOT multiply by a constant 4; that is wrong at every
-// border, for every kernel including Burt's.
+// Upsample to target_width x target_height with the two per-parity stencils --
+// see the long note above. No zeros are inserted, there is no mask, and there is
+// no scale factor to pass: the x2 per axis lives inside the stencils' divisors.
+//
+// THE EDGE POLICY APPLIES TO THE COARSE GRID, i.e. to `src`, the same as
+// reduce(). A flat image comes back exactly flat under clamp, reflect and wrap;
+// under `zero` it fades at the border, 49/64 at a corner, exactly as `zero` does
+// in every other neighbourhood operation.
 //
 // Throws invalid_argument unless the target is reachable: each target dimension
 // must be src's doubled, or one less (so both 5 and 6 are legal from 3, and

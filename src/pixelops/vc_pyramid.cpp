@@ -29,9 +29,11 @@ namespace {
 // Variance = (1.4 + 4.1 + 6.0 + 4.1 + 1.4)/16 = 16/16 = 1, so this IS the
 // sigma=1 Gaussian to within truncation.
 //
-// [[maybe_unused]] only while the bodies below are stubs -- reduce() and
-// expand() are the two callers, and the attribute comes off with the stubs.
-[[maybe_unused]] const vc_kernel& burt_x() {
+// reduce() IS THE ONLY CALLER. expand() no longer convolves at all -- it carries
+// the same taps pre-collapsed into the two per-parity stencils below, which is
+// where the 0.5000/0.5000 split above is cashed in. Change these weights and
+// expand_tap()'s must change with them; they are the same kernel twice.
+const vc_kernel& burt_x() {
     static const vc_kernel k{
         5,
         1,
@@ -39,12 +41,53 @@ namespace {
     return k;
 }
 
-[[maybe_unused]] const vc_kernel& burt_y() {
+const vc_kernel& burt_y() {
     static const vc_kernel k{
         1,
         5,
         {1.0F / 16.0F, 4.0F / 16.0F, 6.0F / 16.0F, 4.0F / 16.0F, 1.0F / 16.0F}};
     return k;
+}
+
+// THE TWO 1-D PER-PARITY STENCILS. One copy, shared by both axes, for the same
+// reason vc_edge_policy keeps a single resolve_index for x and y: written inline
+// twice, the weights drift the first time one side is touched.
+//
+// `sample(k)` reads COARSE index k with the edge policy applied. `i` indexes the
+// EXPANDED axis, and j = i/2 is the coarse index it sits on or between.
+//
+//     i EVEN  ->  ( c[j-1] + 6*c[j] + c[j+1] ) / 8
+//     i ODD   ->  ( c[j]            + c[j+1] ) / 2
+//
+// WHERE THEY COME FROM -- they are not a different filter. Insert zeros, blur
+// with [1,4,6,4,1]/16, and ask which taps can contribute. Centred on an EVEN
+// output the pattern under the kernel is sample hole sample hole sample, so the
+// two weight-4 taps multiply zeros. Centred on an ODD output it is hole sample
+// hole sample hole, so the 1, 6, 1 taps do. Two or three of the five multiplies
+// are guaranteed to be times zero at EVERY position. These are the same sums
+// with those terms crossed out.
+//
+// BOTH NUMERATORS WEIGH 8, NOT 16, AND THAT 8 IS THE x2. The weight the dropped
+// taps used to consume is simply absent from the divisor -- which is precisely
+// what a constant scale factor was there to compensate for. So no scale factor
+// is passed, stored, or available to get wrong, and the 2-D x4 is the two
+// passes' two eights. The header records why that matters: collapse runs the
+// same expand on both sides of a = (a-b)+b, so it cannot see a wrong one.
+//
+// AND THEY SAY WHAT EXPAND DOES, which "stuff zeros and blur" does not. An odd
+// output is the plain AVERAGE of its two coarse neighbours. An even output keeps
+// mostly its own coarse value, nudged by the two beside it.
+//
+// THE TRAP: swap the two branches and a flat image is still exactly flat, both
+// stencils weighing 8, so neither the flatness check nor collapse can see it.
+// Only the pinned ramp values in 12_pyramid.cpp group 6c can.
+template <typename Sample>
+float expand_tap(const Sample& sample, std::int64_t i) {
+    const std::int64_t j = i / 2;
+    if ((i & 1) == 0) {
+        return (sample(j - 1) + 6.0F * sample(j) + sample(j + 1)) * 0.125F;
+    }
+    return (sample(j) + sample(j + 1)) * 0.5F;
 }
 
 // The f32 requirement, checked HERE rather than inherited from
@@ -138,12 +181,11 @@ void validate_pyramid(const vc_laplacian_pyramid& pyramid) {
 //   2. reduce              -- convolve_separable with burt_x()/burt_y() above,
 //                             then keep even indices. Output
 //                             ceil(w/2) x ceil(h/2).
-//   3. expand              -- validate the target is 2n or 2n-1 per axis; write
-//                             src into every other pixel of a target-sized
-//                             image, zeros elsewhere; ALSO build a 1/0 mask the
-//                             same way; convolve_separable BOTH; divide.
-//                             Do not multiply by a constant 4 -- the header has
-//                             the measurements. Collapse will NOT catch this.
+//   3. expand              -- validate the target is 2n or 2n-1 per axis, then
+//                             two passes of expand_tap(), X then Y, reading the
+//                             COARSE grid through fetch(). No zero insertion, no
+//                             mask, no scale factor. Collapse will NOT catch a
+//                             wrong expand, so group 6c pins actual values.
 //   4. gaussian_pyramid    -- level 0 is the source, then reduce repeatedly.
 //   5. laplacian_pyramid   -- bands[l] = G[l] - expand(G[l+1] -> G[l]'s size),
 //                             top = G[levels-1].
@@ -151,8 +193,10 @@ void validate_pyramid(const vc_laplacian_pyramid& pyramid) {
 //
 // The header's traps, restated as the two most likely failures: expand() needs
 // its target size passed in (it cannot double, because 3 could come from 5 or
-// 6), and a missing x4 passes collapse while halving every level, because the
-// same wrong expand runs on both sides of a = (a-b)+b.
+// 6), and ANY systematically wrong expand passes collapse, because the same
+// wrong expand runs on both sides of a = (a-b)+b. Under the per-parity stencils
+// the live version of that second trap is swapping the even and odd branches --
+// which a flat image also cannot see, since both weigh 8.
 
 std::size_t max_pyramid_levels(vc::image_dim width, vc::image_dim height) {
     std::size_t levels = 1;
@@ -171,31 +215,19 @@ vc::vc_image reduce(const vc::vc_image& src, vc_edge_policy policy) {
     vc::vc_image blurred = convolve_separable(src, kernel_x, kernel_y, policy);
     vc::vc_image_writer reduced((src.width() + 1) / 2, (src.height() + 1) / 2,
                                 src.channels(), vc::buf_f32{0.0F});
-    // ---- THE PIXEL-LOOP IDIOM USED THROUGHOUT THIS FILE ----
-    //
-    // with_pixels<T>() on both sides, with the row offset hoisted into a
-    // std::size_t once per row.
-    //
-    // with_pixels rather than at<>() because vc_image.h names it the preferred
-    // accessor for a loop: at<>() calls as<T>() per element, which re-checks the
-    // variant and materialises a fresh span every time.
-    //
-    // Hoisted because vc_image is INTERLEAVED, so the offset is
-    // (y*width + x)*channels + ch -- and written inline that is image_dim
-    // (uint32_t) arithmetic, which wraps for a large image. Widening once per
-    // row fixes that and also lifts both multiplies out of the innermost loop,
-    // leaving a single add.
+
     const std::size_t nch = src.channels();
-    const std::size_t rw = reduced.width();
     const std::size_t bw = blurred.width();
+    const std::size_t rw = reduced.width();
     const vc::image_dim rh = reduced.height();
+
     blurred.with_pixels<vc::buf_f32>([&](std::span<const vc::buf_f32> in) {
         reduced.with_pixels<vc::buf_f32>([&](std::span<vc::buf_f32> out) {
             for (vc::image_dim y = 0; y < rh; ++y) {
                 const std::size_t orow = static_cast<std::size_t>(y) * rw * nch;
                 const std::size_t irow =
                     static_cast<std::size_t>(y) * 2U * bw * nch;
-                for (vc::image_dim x = 0; x < reduced.width(); ++x) {
+                for (vc::image_dim x = 0; x < rw; ++x) {
                     const std::size_t o =
                         orow + static_cast<std::size_t>(x) * nch;
                     const std::size_t i =
@@ -215,8 +247,7 @@ vc::vc_image expand(const vc::vc_image& src,
                     vc::image_dim target_height,
                     vc_edge_policy policy) {
     // Widened. src.width() is image_dim (uint32_t), so `* 2` was evaluated in
-    // 32 bits and wraps for a width near 2^31 -- the same class as the index
-    // arithmetic below, and the last site of it in this file.
+    // 32 bits and wraps for a width near 2^31.
     validate_source(src);
     const std::uint64_t doubled_w = std::uint64_t{src.width()} * 2U;
     const std::uint64_t doubled_h = std::uint64_t{src.height()} * 2U;
@@ -227,94 +258,78 @@ vc::vc_image expand(const vc::vc_image& src,
                                "minus one of source size");
     }
 
-    const auto& kernel_x = burt_x();
-    const auto& kernel_y = burt_y();
-
-    vc_image_writer expanded(target_width, target_height, src.channels(),
-                             vc::buf_f32{0.0F});
-    vc_image_writer mask(target_width, target_height, 1, vc::buf_f32{0.0F});
-    // SCATTER AND MASK IN ONE LOOP. They mark the SAME positions, so separate
-    // loops can disagree about which -- keeping them together makes that
-    // impossible, leaving only the arithmetic for one of them to get wrong.
+    // TWO SEPARABLE PASSES, the same shape as reduce() and convolve_separable,
+    // and for the load-bearing reason vc_edge_policy.h records: the policy
+    // resolves each axis INDEPENDENTLY, so composing a per-axis expansion lands
+    // where one 2-D expansion would AT THE BORDER and not merely in the
+    // interior. The alternative is four 2-D stencils, one per (x,y) parity pair
+    // -- which is what darktable's local laplacian writes, slightly cheaper,
+    // and four places for the same weights to drift apart.
     //
-    // No bounds guard on the writes: the validation above admits only 2n and
-    // 2n-1, and the tight case is 2n-1, where the last sample lands at 2n-2 =
-    // target-1, exactly the final slot. If that validation were ever loosened,
-    // a guard that silently skipped would drop a sample instead of failing.
+    // THE POLICY NOW APPLIES TO THE COARSE GRID -- to this operation's own
+    // INPUT, which is what reduce() already does and what the enum is written
+    // for. Every value an out-of-range read returns is a real sample at a real
+    // position. There is no interleaved-zero grid for a policy to land on the
+    // wrong parity of, because after expand_tap()'s derivation there are no
+    // zeros to insert.
     const std::size_t nch = src.channels();
-    const std::size_t tw = target_width;
-    const std::size_t sw = src.width();
+
+    // ---- PASS 1: X ONLY.  src -> target_width x src.height() ----
+    vc_image_writer wide(target_width, src.height(), src.channels(),
+                         vc::buf_f32{0.0F});
+    const std::size_t ww = target_width;
     const vc::image_dim sh = src.height();
     src.with_pixels<vc::buf_f32>([&](std::span<const vc::buf_f32> in) {
-        expanded.with_pixels<vc::buf_f32>([&](std::span<vc::buf_f32> out) {
-            mask.with_pixels<vc::buf_f32>([&](std::span<vc::buf_f32> msk) {
-                for (vc::image_dim y = 0; y < sh; ++y) {
-                    const std::size_t irow =
-                        static_cast<std::size_t>(y) * sw * nch;
-                    const std::size_t orow =
-                        static_cast<std::size_t>(y) * 2U * tw * nch;
-                    const std::size_t mrow =
-                        static_cast<std::size_t>(y) * 2U * tw;
-                    for (vc::image_dim x = 0; x < src.width(); ++x) {
-                        const std::size_t i =
-                            irow + static_cast<std::size_t>(x) * nch;
-                        const std::size_t o =
-                            orow + static_cast<std::size_t>(x) * 2U * nch;
-                        msk[mrow + static_cast<std::size_t>(x) * 2U] = 1.0F;
-                        for (std::size_t c = 0; c < nch; ++c) {
-                            out[o + c] = in[i + c];
-                        }
+        wide.with_pixels<vc::buf_f32>([&](std::span<vc::buf_f32> out) {
+            for (vc::image_dim y = 0; y < sh; ++y) {
+                const std::size_t orow = static_cast<std::size_t>(y) * ww * nch;
+                for (vc::image_dim x = 0; x < target_width; ++x) {
+                    const std::size_t o =
+                        orow + static_cast<std::size_t>(x) * nch;
+                    for (std::size_t c = 0; c < nch; ++c) {
+                        const auto ch = static_cast<vc::channel_count>(c);
+                        // y is always in range here, so the policy only ever
+                        // fires on the axis this pass is expanding.
+                        out[o + c] = expand_tap(
+                            [&](std::int64_t k) {
+                                return fetch(in, src, k, y, ch, policy);
+                            },
+                            x);
                     }
                 }
-            });
+            }
         });
     });
-    // Five target-sized buffers are live here: samples, mask, both blurs, and
-    // the result. The mask pair is the reducible part -- the blurred mask is an
-    // OUTER PRODUCT of two 1-D arrays and depends only on geometry, so it could
-    // be W+H instead of W*H and cached per level shape. Not done; see the
-    // header's cost note.
-    auto const_expanded = std::move(expanded).seal();
-    auto blurred_expanded =
-        convolve_separable(const_expanded, kernel_x, kernel_y, policy);
-    auto const_mask = std::move(mask).seal();
-    auto blurred_mask =
-        convolve_separable(const_mask, kernel_x, kernel_y, policy);
+    const vc::vc_image wide_image = std::move(wide).seal();
 
-    vc_image_writer final_expanded(target_width, target_height, src.channels(),
-                                   vc::buf_f32{0.0F});
-    blurred_expanded.with_pixels<vc::buf_f32>(
-        [&](std::span<const vc::buf_f32> num) {
-            blurred_mask.with_pixels<vc::buf_f32>(
-                [&](std::span<const vc::buf_f32> den) {
-                    final_expanded.with_pixels<vc::buf_f32>(
-                        [&](std::span<vc::buf_f32> out) {
-                            for (vc::image_dim y = 0; y < target_height; ++y) {
-                                const std::size_t row =
-                                    static_cast<std::size_t>(y) * tw * nch;
-                                const std::size_t mrow =
-                                    static_cast<std::size_t>(y) * tw;
-                                for (vc::image_dim x = 0; x < target_width;
-                                     ++x) {
-                                    // The guard stays, epsilon-based, returning 0: no real sample
-                                    // influenced this pixel, so the numerator is zero too. Without
-                                    // the epsilon a denormal denominator would divide and amplify.
-                                    const float weight =
-                                        den[mrow + static_cast<std::size_t>(x)];
-                                    const std::size_t o =
-                                        row + static_cast<std::size_t>(x) * nch;
-                                    for (std::size_t c = 0; c < nch; ++c) {
-                                        out[o + c] = weight > 1e-12F
-                                                         ? num[o + c] / weight
-                                                         : 0.0F;
-                                    }
-                                }
-                            }
-                        });
-                });
+    // ---- PASS 2: Y ONLY.  that -> target_width x target_height ----
+    //
+    // Two buffers live at the peak, and the wider one is half the target area.
+    // The mask formulation this replaced held five target-sized buffers at
+    // once: samples, mask, both blurs, and the quotient.
+    vc_image_writer tall(target_width, target_height, src.channels(),
+                         vc::buf_f32{0.0F});
+    wide_image.with_pixels<vc::buf_f32>([&](std::span<const vc::buf_f32> in) {
+        tall.with_pixels<vc::buf_f32>([&](std::span<vc::buf_f32> out) {
+            for (vc::image_dim y = 0; y < target_height; ++y) {
+                const std::size_t orow = static_cast<std::size_t>(y) * ww * nch;
+                for (vc::image_dim x = 0; x < target_width; ++x) {
+                    const std::size_t o =
+                        orow + static_cast<std::size_t>(x) * nch;
+                    for (std::size_t c = 0; c < nch; ++c) {
+                        const auto ch = static_cast<vc::channel_count>(c);
+                        out[o + c] = expand_tap(
+                            [&](std::int64_t k) {
+                                return fetch(in, wide_image, x, k, ch, policy);
+                            },
+                            y);
+                    }
+                }
+            }
         });
+    });
 
-    return std::move(final_expanded).seal();
+    return std::move(tall).seal();
 }
 
 vc_pyramid gaussian_pyramid(const vc::vc_image& src,

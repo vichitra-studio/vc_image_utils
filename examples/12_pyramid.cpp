@@ -23,7 +23,9 @@
 // 5-7   expand. THE MOST IMPORTANT GROUP, because collapse cannot police it:
 //       the same expand() runs on both sides of a = (a-b)+b, so a systematically
 //       wrong expand still collapses perfectly. Only a direct assertion sees it.
-//       Group 6 is the x4 check specifically.
+//       6 is GAIN (a flat image, border included). 6c is SHAPE -- values worked
+//       by hand from the two per-parity stencils, because a flat image is blind
+//       to swapping them, both weighing 8. 6d pins `zero`'s fading border.
 //
 // 8     the bands are signed. Catches storing them unsigned or clamping to 0,
 //       which would also pass collapse on a smooth image and fail on an edge.
@@ -334,17 +336,23 @@ int main() {
                    "expand returns exactly the requested geometry");
         }
 
-        // ---- 6. expand MUST NORMALISE. Collapse cannot catch any of this ----
+        // ---- 6. expand's GAIN. Collapse cannot catch any of this ----------
         //
-        // 1e-5 over the WHOLE image, border included, because the mask
-        // normalisation makes expand exactly flat -- measured 0.50000000
-        // everywhere. A constant scale factor instead of the mask would give
-        // 0.125 .. 1.125 at the border for ANY kernel, and in the interior a
-        // +/-4.64% checkerboard for anything but Burt's taps.
+        // 1e-5 over the WHOLE image, border included. The per-parity stencils
+        // weigh 8 at every position and read only real samples, so a flat image
+        // is exact under clamp, reflect and wrap alike -- there is no scale
+        // factor and no hole pattern for a border to get the wrong parity of.
         //
-        // This is the ONLY check that can see a wrong scale factor. Collapse
-        // cannot: the same expand runs on both sides of a = (a-b)+b, so a
-        // systematically wrong one still reconstructs perfectly.
+        // The two formulations this replaced are recorded in
+        // curriculum/notes/pyramids.txt section 9 (and compared in 9a): a
+        // constant x4 gives 0.125 .. 1.125 at the border under clamp for ANY
+        // kernel, plus a +/-4.64% checkerboard for anything but Burt's taps,
+        // and mask normalisation fixes both at the cost of a second blur and a
+        // divide.
+        //
+        // This group sees a wrong GAIN. It cannot see a wrong SHAPE -- group 6c
+        // is for that. Collapse sees neither: the same expand runs on both sides
+        // of a = (a-b)+b, so a systematically wrong one reconstructs perfectly.
         {
             const vc::vc_image flat =
                 make_image(4, 4, 1, std::vector<float>(16, 0.6F));
@@ -379,7 +387,8 @@ int main() {
         // exactly what exposure fusion and local contrast do. On a FLAT image
         // any surviving texture is pure artifact, and with a constant-x4 expand
         // the artifact measured 9.28% x |gain-1| in the interior -- 27.8% at a
-        // gain of 4. With a normalising expand it is zero at every gain.
+        // gain of 4. With the per-parity stencils it is zero at every gain,
+        // because every band of a flat image is itself exactly zero.
         //
         // So this check is the one that justifies the specification, rather
         // than just asserting it.
@@ -409,6 +418,183 @@ int main() {
             boosted.bands.front() = std::move(scaled).seal();
             expect(rel_diff(collapse(boosted, k_policy), flat) <= 1e-5F,
                    "boosting a band 4x on a flat image stays flat (no ripple)");
+        }
+
+        // ---- 6c. PINNED VALUES. The only group that sees a stencil swap ----
+        //
+        // Groups 5, 6, 6b and every collapse check below are ALL blind to a
+        // whole family of wrong expands. A flat image stays exactly flat if the
+        // two per-parity stencils are SWAPPED (both weigh 8), if j = i/2 is off
+        // by one, or if a pass reads the wrong axis length (anything square
+        // hides that). Collapse is blind to all three, for the usual reason.
+        //
+        // So these are worked by hand from the stencils themselves:
+        //
+        //     i EVEN -> (c[j-1] + 6*c[j] + c[j+1])/8        j = i/2
+        //     i ODD  -> (c[j]            + c[j+1])/2
+        //
+        // Coarse row [10, 20, 30]. The only out-of-range reads are c[-1] and
+        // c[3], and THE POLICY SUPPLIES THEM FROM THE COARSE GRID -- so the same
+        // data gives different ends under clamp and reflect, while the middle
+        // three values, which touch no policy at all, are identical.
+        //
+        //   target 5 (= 2n-1; the last index is EVEN, so an even stencil)
+        //     reflect   c[-1] = c[1] = 20,  c[3] = c[1] = 20
+        //       0  (20 + 6*10 + 20)/8 = 100/8 = 12.5
+        //       1  (10 + 20)/2        =         15
+        //       2  (10 + 6*20 + 30)/8 = 160/8 = 20
+        //       3  (20 + 30)/2        =         25
+        //       4  (20 + 6*30 + 20)/8 = 220/8 = 27.5
+        //     clamp     c[-1] = c[0] = 10,  c[3] = c[2] = 30
+        //       0  (10 + 6*10 + 20)/8 =  90/8 = 11.25
+        //       4  (20 + 6*30 + 30)/8 = 230/8 = 28.75
+        //
+        //   target 6 (= 2n; the last index is ODD, so an odd stencil)
+        //       5  clamp    (c[2] + c[3])/2 = (30 + 30)/2 = 30
+        //       5  reflect  (c[2] + c[1])/2 = (30 + 20)/2 = 25   <- it turns back
+        //
+        // Every one of these is an exact binary fraction, so the tolerance is
+        // slack, not load-bearing.
+        {
+            const vc::vc_image row = make_image(3, 1, 1, {10.0F, 20.0F, 30.0F});
+
+            expect(max_abs_diff(expand(row, 5, 1, vc_edge_policy::reflect),
+                                make_image(5, 1, 1,
+                                           {12.5F, 15.0F, 20.0F, 25.0F,
+                                            27.5F})) <= 1e-4F,
+                   "expand 3x1 -> 5x1 reflect is 12.5 15 20 25 27.5, by hand");
+
+            expect(max_abs_diff(expand(row, 5, 1, vc_edge_policy::clamp),
+                                make_image(5, 1, 1,
+                                           {11.25F, 15.0F, 20.0F, 25.0F,
+                                            28.75F})) <= 1e-4F,
+                   "expand 3x1 -> 5x1 clamp moves ONLY the two end pixels");
+
+            expect(max_abs_diff(expand(row, 6, 1, vc_edge_policy::clamp),
+                                make_image(6, 1, 1,
+                                           {11.25F, 15.0F, 20.0F, 25.0F, 28.75F,
+                                            30.0F})) <= 1e-4F,
+                   "expand 3x1 -> 6x1 clamp: the extra ODD output is 30");
+
+            expect(max_abs_diff(expand(row, 6, 1, vc_edge_policy::reflect),
+                                make_image(6, 1, 1,
+                                           {12.5F, 15.0F, 20.0F, 25.0F, 27.5F,
+                                            25.0F})) <= 1e-4F,
+                   "expand 3x1 -> 6x1 reflect: the extra ODD output turns BACK "
+                   "to 25");
+
+            // THE SAME TABLE DOWN Y. A 3x1 IS the x-axis table and a 1x3 IS the
+            // y-axis one -- the idiom vc_edge_policy.h already uses for exactly
+            // this, because the two passes share expand_tap() but NOT their
+            // index arithmetic, and nothing square can tell them apart.
+            //
+            // It also drives a 1-wide coarse axis through reflect, where the
+            // mirror period 2*(n-1) is zero and resolve_index has a special
+            // case. The even stencil there reads (c0 + 6*c0 + c0)/8 = c0.
+            const vc::vc_image col = make_image(1, 3, 1, {10.0F, 20.0F, 30.0F});
+            expect(
+                max_abs_diff(
+                    expand(col, 1, 5, vc_edge_policy::reflect),
+                    make_image(1, 5, 1, {12.5F, 15.0F, 20.0F, 25.0F, 27.5F})) <=
+                    1e-4F,
+                "expand 1x3 -> 1x5 reflect gives the SAME five values down Y");
+
+            // INTERIOR RAMP, a stencil-swap detector that touches no policy.
+            // On a linear ramp of step d the even stencil gives
+            // (c-d + 6c + c+d)/8 = c and the odd one the midpoint, so the
+            // interior must be the same ramp at half the step. Swap the
+            // branches and index 2 reads 25 where 20 belongs.
+            const vc::vc_image ramp =
+                make_image(5, 1, 1, {10.0F, 20.0F, 30.0F, 40.0F, 50.0F});
+            const vc::vc_image e_ramp = expand(ramp, 10, 1, k_policy);
+            bool interior_ramp = true;
+            e_ramp.with_pixels<vc::buf_f32>(
+                [&](std::span<const vc::buf_f32> p) {
+                    for (std::size_t i = 2; i <= 7; ++i) {
+                        const float want = 10.0F + 5.0F * static_cast<float>(i);
+                        interior_ramp =
+                            interior_ramp && std::fabs(p[i] - want) <= 1e-4F;
+                    }
+                });
+            expect(
+                interior_ramp,
+                "expand reproduces a ramp exactly inside: 20 25 30 35 40 45");
+
+            // AXIS-LENGTH SWAP, both directions. Content varying only along X
+            // must give identical ROWS, because the Y pass on a constant column
+            // is exact: (1+6+1)/8 = 1 and (4+4)/8 = 1. Non-square and odd on
+            // both axes, so passing height where width belongs cannot survive.
+            const vc::vc_image bars =
+                make_image(3, 2, 1, {10.0F, 20.0F, 30.0F, 10.0F, 20.0F, 30.0F});
+            expect(max_abs_diff(
+                       expand(bars, 5, 3, vc_edge_policy::reflect),
+                       make_image(5, 3, 1,
+                                  {12.5F, 15.0F, 20.0F, 25.0F, 27.5F, 12.5F,
+                                   15.0F, 20.0F, 25.0F, 27.5F, 12.5F, 15.0F,
+                                   20.0F, 25.0F, 27.5F})) <= 1e-4F,
+                   "expand 3x2 -> 5x3: X-only content gives three equal rows");
+
+            const vc::vc_image stripes =
+                make_image(2, 3, 1, {10.0F, 10.0F, 20.0F, 20.0F, 30.0F, 30.0F});
+            expect(max_abs_diff(
+                       expand(stripes, 3, 5, vc_edge_policy::reflect),
+                       make_image(3, 5, 1,
+                                  {12.5F, 12.5F, 12.5F, 15.0F, 15.0F, 15.0F,
+                                   20.0F, 20.0F, 20.0F, 25.0F, 25.0F, 25.0F,
+                                   27.5F, 27.5F, 27.5F})) <= 1e-4F,
+                   "expand 2x3 -> 3x5: Y-only content gives five equal rows");
+        }
+
+        // ---- 6d. `zero` NO LONGER PRESERVES A FLAT IMAGE, deliberately -----
+        //
+        // A behaviour change, pinned so it stays a decision. `zero` now darkens
+        // expand()'s border the way it darkens every other neighbourhood
+        // operation's -- vc_edge_policy.h's documented "a flat 100 reads back as
+        // 44.4". The mask formulation this replaced CANCELLED `zero` away:
+        // numerator and denominator lost exactly the same taps, so the quotient
+        // came back flat, and expand was the one operation in the library where
+        // a documented fading border silently did not happen.
+        //
+        // 3x3 -> 5x5, so both ends of both axes are EVEN outputs:
+        //
+        //     per axis   (0 + 6*1 + 1)/8 = 7/8
+        //     corner     7/8 x 7/8 = 49/64 = 0.765625        exactly
+        //     centre     untouched by any policy             exactly 1
+        {
+            const vc::vc_image flat3 =
+                make_image(3, 3, 1, std::vector<float>(9, 1.0F));
+            const vc::vc_image ez = expand(flat3, 5, 5, vc_edge_policy::zero);
+            expect(std::fabs(ez.at<vc::buf_f32>(0, 0, 0) - 0.765625F) <= 1e-5F,
+                   "expand under `zero` reads 49/64 at a corner, not 1");
+            expect(std::fabs(ez.at<vc::buf_f32>(2, 2, 0) - 1.0F) <= 1e-5F,
+                   "and is still exactly 1 in the interior under `zero`");
+            // THE EVEN TARGET IS A DIFFERENT CASE and must be checked too:
+            // 3x3 -> 6x6 ends on an ODD output, so the last value is
+            // (c[2] + c[3])/2 and only the policy decides c[3]. Under `zero`
+            // that is (1 + 0)/2 = 0.5 per axis, so 0.25 at the corner -- a
+            // different number from the odd target's 49/64, from the same rule.
+            const vc::vc_image ez6 = expand(flat3, 6, 6, vc_edge_policy::zero);
+            expect(std::fabs(ez6.at<vc::buf_f32>(5, 5, 0) - 0.25F) <= 1e-5F,
+                   "expand under `zero` reads 1/4 at an EVEN target's corner");
+
+            // clamp, reflect and wrap all stay exact everywhere, at BOTH target
+            // parities, because the stencils read REAL SAMPLES whatever index
+            // the policy returns. c[3] resolves to c[2], c[1] and c[0]
+            // respectively, and all three hold 1.
+            for (const vc_edge_policy p :
+                 {vc_edge_policy::clamp, vc_edge_policy::reflect,
+                  vc_edge_policy::wrap}) {
+                expect(
+                    rel_diff(expand(flat3, 5, 5, p),
+                             make_image(5, 5, 1,
+                                        std::vector<float>(25, 1.0F))) <= 1e-5F,
+                    "expand keeps flat flat, ODD target, clamp/reflect/wrap");
+                expect(
+                    rel_diff(expand(flat3, 6, 6, p),
+                             make_image(6, 6, 1,
+                                        std::vector<float>(36, 1.0F))) <= 1e-5F,
+                    "expand keeps flat flat, EVEN target, clamp/reflect/wrap");
+            }
         }
 
         // ---- 7. expand then reduce returns the geometry, not the image -----

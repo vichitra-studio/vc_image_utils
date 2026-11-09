@@ -1,6 +1,7 @@
 template <vc_pixel_element_req T, typename F> void with_pixels(F&& f)
 > Add the iterator inside this function and pass the actual function?
-	- a lot of with_pixel implementation use at accessor for different image
+	- a lot of with_pixel implementation use at accessor for different image within the same loop
+	- combination of vc_image and writers are also involved
 
 - Optimise multiplication/division by using bitwise ops
 
@@ -32,6 +33,10 @@ template <vc_pixel_element_req T, typename F> void with_pixels(F&& f)
 	  intent -- neither writes through it. Adding
 	      const T& at(x, y, ch) const
 	  to vc_image_writer fixes it everywhere and is a two-line change.
+	- We need to have both planar and interleaved buffer support (CPU needs planar, GPU needs interleaved?)
+	- Ability to extract/work ROI from vc_image/writer
+
+- we do a lot of sequential vc_image operations which require writing and reading. Writing is only supported via image writer and all the functions take input as vc_image. This means, for every operation we are allocating memory and maintaining it fore the whole operation. Isnt this wrong? Whats the best practice here? Should we allow casiting of writer as vc_image or have a getter which doesnt move? Should we aim to eliminate memory allocation for every atomic image operation that will form a step in stage pipeline?
 
 - looping for cpu/gpu optimised manner? memory Layout?
 
@@ -61,3 +66,6 @@ The real formula, vc_image_info.h:113:
 return (static_cast<std::size_t>(y) * width_ + x) * channels_ + ch;
 
 - unnecessary examples/debug files should not be compiled and linked in release?
+- A lot of places handle indexing via % operator manually. Instead everyplace should use the edge policy. Edhe policy should also have a function which returns the index based on the policy and not just the pixel value? Should it be part of vc_image?
+
+- calude desktop : HDR merge CPU implementation timeline
