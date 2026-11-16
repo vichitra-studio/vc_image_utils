@@ -263,6 +263,37 @@ class vc_kernel {
     kernel_weights weights_;
 };
 
+// ---- the outer product ------------------------------------------------------
+//
+// COLUMN * ROW. The separability condition above is written k = v * h^T, and
+// for a column v and a row h^T that product under ORDINARY MATRIX
+// MULTIPLICATION *is* the outer product -- (N x 1)(1 x M) = (N x M). So this
+// is not a symbol borrowed for convenience; it is the operation the notation
+// already meant, and it follows vc_linalg.h's existing operator* for mat2 and
+// mat3.
+//
+// THE ORDER IS LOAD-BEARING AND SELF-CHECKING. Reverse the operands and the
+// shapes give (1 x M)(N x 1) -- a 1x1 inner product, which is never what a
+// caller building a 2-D kernel wants. So a row on the left or a column on the
+// right is REJECTED with invalid_argument rather than quietly transposed. The
+// argument-order slip that convolve_separable() catches by shape, this one
+// catches by algebra.
+//
+// WHY IT EARNS ITS PLACE: make_gaussian() below is now DEFINED as this
+// product -- it used to open-code the same double loop -- and make_sobel_x/_y
+// want it too. More to the point, the separable and full paths agreeing was
+// previously an invariant maintained by hand and checked by a test; built this
+// way it holds BY CONSTRUCTION, and the test becomes an independent pin on the
+// result rather than a guard against drift.
+//
+// ONE THING THIS SYMBOL IS NOW NOT AVAILABLE FOR. Convolving two kernels into
+// a single composed kernel -- blur-then-differentiate collapsed into one pass
+// -- is also written with a star in the literature, and [1,2,1] * [1,2,1] =
+// [1,4,6,4,1] under THAT reading while this one gives a 3x3. That operation
+// is not built, and when it is it needs a NAME, not this operator.
+[[nodiscard]] vc_kernel operator*(const vc_kernel& column,
+                                  const vc_kernel& row);
+
 // ---- kernel factories -------------------------------------------------------
 //
 // Constructed from known 1-D factors, never detected. See the separability

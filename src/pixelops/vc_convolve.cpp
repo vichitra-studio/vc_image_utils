@@ -133,30 +133,72 @@ vc_kernel make_box(vc::image_dim width, vc::image_dim height) {
             kernel_weights(count, 1.0F / static_cast<float>(count))};
 }
 
-vc_kernel make_gaussian(float sigma_x, float sigma_y) {
-    // The OUTER PRODUCT of the two 1-D factors, not a fresh 2-D evaluation.
-    // Mathematically identical -- exp of a sum is a product of exps, and the
-    // normalising sums factorise as S_2d = Sx * Sy -- but building it this way
-    // makes the full and separable paths agree by construction rather than by
-    // coincidence, which is exactly what the separability test checks.
+vc_kernel operator*(const vc_kernel& column, const vc_kernel& row) {
+    // (N x 1) * (1 x M) only -- RANK-1 OPERANDS OF ANY SIZE. N and M are
+    // independent and need not match; 7x1 * 1x3 -> 7x3 is fine. What is
+    // rejected is a 2-D OPERAND, not a mismatched size.
     //
-    // It also means there is one place a Gaussian is evaluated, so the two
-    // paths cannot drift apart later.
-    const kernel_weights tx = gaussian_taps(sigma_x);
-    const kernel_weights ty = gaussian_taps(sigma_y);
+    // Why a 2-D operand is rejected rather than handled: relaxing this to the
+    // conformable condition (column.width() == row.height()) would be general
+    // matrix multiplication, and matrix multiplication IS NOT COMPOSITION.
+    // Check it against the 3x3 delta kernel D, a single 1 in the centre, which
+    // any composition must leave its partner unchanged by:
+    //
+    //   sobel_x . D   keeps only sobel_x's middle COLUMN, which is {0,0,0}.
+    //                 So "Sobel, then do nothing" gives the ZERO KERNEL.
+    //   D . sobel_x   keeps only the middle ROW -- {0,0,0; .25,0,-.25; 0,0,0}.
+    //                 The smoothing is gone.
+    //
+    // Composing two kernels means CONVOLVING them, and that grows the support
+    // to (H1+H2-1) x (W1+W2-1). For a column and a row that is N x M with no
+    // flip, because each factor extends along one axis only -- which is why
+    // the outer product is exactly where the two readings agree, and why this
+    // operator looks like a special case of something larger. It is; the
+    // larger thing is convolution, and it needs a name (see the header).
+    //
+    // The reverse ORDER is rejected for a second, independent reason: it is a
+    // 1x1 inner product. Row [1,2,1] times column [1,2,1] is the 1x1 kernel
+    // [6], which merely multiplies the image by 6.
+    if (column.width() != 1 || row.height() != 1) {
+        throw vc::vc_exception(
+            vc::vc_error_code::invalid_argument,
+            "operator*(vc_kernel, vc_kernel): expects COLUMN * ROW -- the "
+            "left operand must be 1 tap wide and the right 1 tap tall");
+    }
 
-    const auto width = static_cast<vc::image_dim>(tx.size());
-    const auto height = static_cast<vc::image_dim>(ty.size());
+    const vc::image_dim width = row.width();
+    const vc::image_dim height = column.height();
 
-    kernel_weights weights(tx.size() * ty.size());
-    for (std::size_t j = 0; j < ty.size(); ++j) {
-        for (std::size_t i = 0; i < tx.size(); ++i) {
-            weights[j * tx.size() + i] = tx[i] * ty[j];
+    const auto w = static_cast<std::size_t>(width);
+    const auto h = static_cast<std::size_t>(height);
+
+    kernel_weights weights(w * h);
+    for (std::size_t j = 0; j < h; ++j) {
+        for (std::size_t i = 0; i < w; ++i) {
+            weights[(j * w) + i] = column.weights()[j] * row.weights()[i];
         }
     }
-    // No second normalisation: each factor already sums to 1, so their outer
-    // product does too.
     return {width, height, std::move(weights)};
+}
+
+vc_kernel make_gaussian(float sigma_x, float sigma_y) {
+    // The OUTER PRODUCT of the two 1-D factors, not a fresh 2-D evaluation --
+    // and now written as one instead of open-coded. Mathematically identical
+    // to a 2-D evaluation -- exp of a sum is a product of exps, and the
+    // normalising sums factorise as S_2d = Sx * Sy -- but built this way the
+    // full and separable paths agree BY CONSTRUCTION rather than by
+    // coincidence. 05_convolve's separability test therefore becomes an
+    // independent pin on the result rather than a guard against two
+    // hand-written loops drifting apart.
+    //
+    // COLUMN FIRST, so sigma_y -- the vertical factor -- is the LEFT operand.
+    // Swap the operands and the kernel comes out transposed; that test uses
+    // INDEPENDENT sigmas (2.0 and 0.8) precisely so a transpose changes the
+    // shape and fails loudly rather than cancelling out.
+    //
+    // No second normalisation: each 1-D factor already sums to 1, so their
+    // outer product does too.
+    return make_gaussian_1d_y(sigma_y) * make_gaussian_1d_x(sigma_x);
 }
 
 vc_kernel make_gaussian_1d_x(float sigma) {
