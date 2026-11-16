@@ -45,3 +45,17 @@ CMakeLists.txt   text
 *.orf            binary
 *.rw2            binary
 *.pdf            binary
+
+# Vendored third-party code — preserve upstream bytes EXACTLY.
+# `* text=auto` above is right for our own sources: it kills CRLF/LF churn
+# between contributors on different systems. It is wrong for vendored code,
+# where the point is that the tree can be verified byte-for-byte against the
+# pinned upstream tag, and that a version bump diffs cleanly against it.
+# Caught on the Eigen 5.0.1 vendor: Eigen ships exactly one CRLF file,
+# Eigen/src/Core/arch/AVX512/PacketMathFP16.h, and `*.h text` silently
+# rewrote its 1413 line endings on the way into the index — a file that no
+# ARM build ever compiles, so nothing would have failed and nothing would
+# have reported it. `-text` disables all line-ending translation for these
+# paths. It changes no file already committed (those were stored LF, and
+# -text checks them out LF unchanged); it only stops future normalization.
+third_party/**  -text
