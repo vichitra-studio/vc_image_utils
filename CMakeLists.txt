@@ -110,6 +110,7 @@ set(VC_LIB_SOURCES
     src/pixelops/vc_conv_frequency.cpp
     src/pixelops/vc_pyramid.cpp
     src/pixelops/vc_laplacian.cpp
+    src/pixelops/vc_gradients.cpp
     src/pixelops/vc_poisson.cpp
     src/pipe/vc_pipe_contract.cpp
     src/pipe/vc_pipe_context.cpp
@@ -376,6 +377,8 @@ if(VC_BUILD_EXAMPLES)
         14_poisson
         15_poisson_iter
         16_poisson_crossval
+        17_gradients
+        18_edges
     )
 
     foreach(example ${VC_EXAMPLE_TARGETS})
