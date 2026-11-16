@@ -155,6 +155,33 @@ target_link_libraries(vc_image_utils_app PRIVATE
     $<$<BOOL:${ENABLE_TSAN}>:vc_tsan>
 )
 
+# ---------- vendored Eigen ----------
+# Eigen 5.0.1, pinned at commit bc3b39870ecb690a623a3f49149a358b95c5781d.
+# Licensing, the excluded directories and the two checks behind this are
+# recorded in THIRD_PARTY_LICENSES.md; tests/test_third_party_eigen.cpp
+# enforces the version at compile time.
+#
+# NOT LINKED INTO vc_image_utils_lib, DELIBERATELY. Eigen's only job at P3 is
+# to be an independent oracle for exercises that hand-roll the same small
+# dense algebra, which makes it test scaffolding rather than a dependency of
+# the shipped library. Keeping it out of the lib target means the distributed
+# artifact carries no Eigen code and so carries no MPL2 notice obligation
+# yet -- the same posture as doctest. The first thing that would change this
+# is P11b, where a 9x9 DLT solve might genuinely want to ship; that is a
+# deliberate decision to make there, not a default to drift into.
+#
+# The include path is its own directory rather than `third_party` so the
+# canonical `#include <Eigen/SVD>` spelling works unchanged -- the same
+# reasoning as the third_party/nanobench line further down, and the opposite
+# case to nlohmann, which is included as `nlohmann/json.hpp`.
+#
+# SYSTEM, for the usual reason and one extra. Eigen is a large header set
+# built to be warning-clean under its own flags, not under this tree's, and
+# vc_warnings is deliberately strict; without SYSTEM the vendored headers
+# would emit warnings no one here can fix without patching upstream.
+add_library(vc_eigen INTERFACE)
+target_include_directories(vc_eigen SYSTEM INTERFACE third_party/eigen)
+
 # ---------- tests ----------
 enable_testing()
 
@@ -170,6 +197,7 @@ add_executable(vc_image_utils_tests
     tests/test_vc_grid2d.cpp
     tests/test_vc_transform.cpp
     tests/test_vc_edge_policy.cpp
+    tests/test_third_party_eigen.cpp
     tests/samples/vc_sample_grayscale_stage.cpp
     tests/samples/vc_sample_mean_brightness_stage.cpp
     tests/samples/vc_sample_blur_stage.cpp
@@ -194,6 +222,7 @@ target_compile_definitions(vc_image_utils_tests PRIVATE
 target_link_libraries(vc_image_utils_tests PRIVATE
     vc_image_utils_lib
     vc_warnings
+    vc_eigen
     $<$<BOOL:${ENABLE_SANITIZERS}>:vc_sanitizers>
     $<$<BOOL:${ENABLE_TSAN}>:vc_tsan>
 )
@@ -384,9 +413,16 @@ if(VC_BUILD_EXAMPLES)
     foreach(example ${VC_EXAMPLE_TARGETS})
         set(target vc_example_${example})
         add_executable(${target} examples/${example}.cpp)
+        # vc_eigen is an include path only, so examples that never include
+        # Eigen pay nothing for it. Wired here rather than per-example so
+        # that S2's acceptance suite in week 10 does not have to touch this
+        # file -- P3 section F.4's constraint is "vendor before week 10, not
+        # during", and editing the build during the crux week is exactly
+        # what that was meant to prevent.
         target_link_libraries(${target} PRIVATE
             vc_image_utils_lib
             vc_warnings
+            vc_eigen
             $<$<BOOL:${ENABLE_SANITIZERS}>:vc_sanitizers>
             $<$<BOOL:${ENABLE_TSAN}>:vc_tsan>
         )

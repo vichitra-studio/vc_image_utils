@@ -158,6 +158,86 @@ be reproduced on distribution — paste the required notice text in the entry.
       OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
       THE SOFTWARE.
 
+### Eigen 5.0.1
+- License: **MPL-2.0** primary, plus **Apache-2.0** and **BSD-3-Clause** for three files (below)
+- Used in: **tests and examples only — NOT linked into the distributed library**
+- Link type: header-only (no compiled TU; `vc_eigen` is an INTERFACE include path)
+- Notice required on distribution: **not yet** — nothing shipped contains Eigen code. This
+  becomes **yes** the moment Eigen is linked into `vc_image_utils_lib` or the app; see
+  "If this ever ships" below.
+- Source: https://gitlab.com/libeigen/eigen
+- **Pinned at tag `5.0.1` = commit `bc3b39870ecb690a623a3f49149a358b95c5781d` (2025-11-08).**
+  Vendored tree verified byte-identical to that checkout (`diff -r`, and the committed blobs
+  re-checked via `git archive` rather than the working copy).
+
+**WHY THE VERSION IS LOAD-BEARING, AND NOT A DETAIL.** Eigen's **3.4 line ships LGPL-licensed
+files** (`COPYING.LGPL` and `COPYING.GPL` are both present in 3.4.1) and documents a
+preprocessor symbol, `EIGEN_MPL2_ONLY`, that makes including one a compile error. **Eigen 5.0
+removed all LGPL code outright (upstream MR !1197; see `CHANGELOG.md`), and removed the symbol
+with it.** Defining `EIGEN_MPL2_ONLY` here would therefore do *nothing* — it would read as
+enforcement while enforcing nothing — so it is deliberately **not** set.
+
+Consequence worth stating plainly: **the distro package is the risky path and vendoring is the
+safe one**, because system packages track the 3.4 line. Do not replace this vendored copy with
+a `find_package(Eigen3)` without redoing the licence check.
+
+The two files that carried LGPL in 3.x are present here and **both read MPL2 in their own
+headers**: `Eigen/src/SparseCholesky/SimplicialCholesky.h`, and
+`Eigen/src/OrderingMethods/Amd.h`, whose header records that CSparse's author Timothy A. Davis
+executed a licence with Google LLC permitting MPL2 distribution.
+
+**ENFORCEMENT.** Since the flag is gone, the pin is asserted at compile time in
+`tests/test_third_party_eigen.cpp`. Note that the obvious check is wrong: `EIGEN_WORLD_VERSION`
+is **3 in both 5.0.1 and 3.4.1** — upstream calls it a permanent name for "the Eigen3 library",
+not a version — so the assertion uses `EIGEN_MAJOR/MINOR/PATCH_VERSION` (semver as of 5.0.0)
+and `EIGEN_VERSION_STRING`.
+
+**WHAT WAS EXCLUDED, AND THE ONE THAT MATTERS.** Only `Eigen/`, `LICENSE` and the `COPYING.*`
+files are vendored. **`bench/btl/COPYING` is GNU GPL v2** — the Benchmark Template Library and
+its GMM++/blaze/blitz comparison interfaces. It is not a header and would never be compiled
+into anything shipped, but copying the whole upstream tarball would place GPL-licensed files
+inside this repository, against this document's own rule that the closed artifact stays
+permissive-clean. Also excluded: `blas/`, `lapack/`, `test/`, `demos/`, `doc/`, `failtest/`,
+`ci/`, `cmake/`, `debug/`, `scripts/`, and `unsupported/`. `COPYING.MINPACK` covers
+`unsupported/`'s Levenberg-Marquardt only, and is vendored for completeness rather than need.
+
+**RE-RUNNING THE CHECK WHEN THE PIN MOVES.** This replaces `EIGEN_MPL2_ONLY`, which no longer
+exists. It measures the real include closure rather than trusting four file headers:
+
+      # from the repo root, with <tu.cpp> including <Eigen/Eigenvalues>, <Eigen/SVD>, <Eigen/QR>
+      c++ -std=c++20 -I third_party/eigen -M tu.cpp | tr ' \\' '\n\n' \
+        | grep '^third_party/eigen' | sort -u > closure.txt
+      grep -il 'LGPL\|GNU General Public\|GNU Lesser' $(cat closure.txt)   # must print nothing
+      grep -Li 'mozilla' $(cat closure.txt)                                # review each hit
+
+  As of 5.0.1 the closure is **188 files**, **none** of which mention LGPL or GNU General
+  Public. Note `grep -i mozilla` on one line only — Eigen wraps its notice so that "Mozilla"
+  and "Public License" fall on separate lines, and a `grep 'Mozilla Public'` returns every file
+  as a false positive.
+
+**THE THREE NON-MPL2 FILES IN THAT CLOSURE.** All permissive; their full texts are in the
+vendored `COPYING.APACHE` and `COPYING.BSD`.
+
+| File | License | Copyright |
+|---|---|---|
+| `Eigen/src/Core/arch/Default/BFloat16.h` | Apache-2.0 | Copyright 2017 The TensorFlow Authors. All Rights Reserved. |
+| `Eigen/src/Core/util/MKL_support.h` | BSD-3-Clause | Copyright (c) 2011, Intel Corporation. All rights reserved. |
+| `Eigen/src/Geometry/AlignedBox.h` — **`AlignedBox::transform()` only**, rest is MPL2 | BSD-3-Clause | Copyright (c) 2011-2014, Willow Garage, Inc.; Copyright (c) 2014-2015, Open Source Robotics Foundation |
+
+*Not* licence hits, recorded so the next audit does not re-investigate them:
+`Eigen/src/Core/util/Memory.h` and `Eigen/src/Core/util/Macros.h` mention BSD only as an
+**operating system** (`EIGEN_OS_BSD`, FreeBSD malloc alignment).
+
+**IF THIS EVER SHIPS** — i.e. if Eigen is linked into the library or the app, which P11b's DLT
+solve could prompt — three things become due, none of them onerous, and **none of which
+threaten a paid licence**, because MPL-2.0 is file-level copyleft and does not reach this
+project's own sources:
+1. Reproduce the MPL-2.0 notice and make the Eigen source available (pointing at the pinned
+   tag above satisfies this).
+2. Reproduce the Apache-2.0 and BSD-3 notices in the table above.
+3. If any vendored Eigen *file* is modified, that file stays MPL-2.0. Prefer wrapping over
+   patching, per this project's thin-interface rule.
+
 <!-- Template — copy one block per dependency:
 
 ### <name> <version>
