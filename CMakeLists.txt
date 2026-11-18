@@ -415,10 +415,13 @@ if(VC_BUILD_EXAMPLES)
         add_executable(${target} examples/${example}.cpp)
         # vc_eigen is an include path only, so examples that never include
         # Eigen pay nothing for it. Wired here rather than per-example so
-        # that S2's acceptance suite in week 10 does not have to touch this
-        # file -- P3 section F.4's constraint is "vendor before week 10, not
-        # during", and editing the build during the crux week is exactly
-        # what that was meant to prevent.
+        # that week 10 does not have to touch LINK DEPENDENCIES -- P3 section
+        # F.4's constraint is "vendor before week 10, not during", and
+        # rediscovering a dependency's wiring during the crux week is what
+        # that was meant to prevent. A new example does still add its name to
+        # VC_EXAMPLE_TARGETS above; an earlier version of this comment
+        # claimed the suite would not touch this file at all, which was
+        # overstated.
         target_link_libraries(${target} PRIVATE
             vc_image_utils_lib
             vc_warnings
