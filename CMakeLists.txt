@@ -408,6 +408,7 @@ if(VC_BUILD_EXAMPLES)
         16_poisson_crossval
         17_gradients
         18_edges
+        19_eigen2x2
     )
 
     foreach(example ${VC_EXAMPLE_TARGETS})

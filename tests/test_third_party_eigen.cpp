@@ -73,9 +73,22 @@ static_assert(std::string_view{EIGEN_VERSION_STRING} == "5.0.1",
 
 TEST_CASE("vendored Eigen: the headers we depend on parse and link") {
     // The three includes above are the actual subject of this test case. They
-    // drag in roughly 190 files -- Core, Jacobi, Householder, LU, Cholesky,
-    // Geometry and the arch/ back-end for whatever this machine is -- and
-    // compile them under this tree's real warning flags and sanitizers.
+    // drag in 204 distinct files from third_party/eigen -- Core, Jacobi,
+    // Householder, LU, Cholesky, Geometry and the arch/ back-end for whatever
+    // this machine is -- and compile them under this tree's real warning
+    // flags and sanitizers.
+    //
+    // 204 is the count of DISTINCT FILES. `c++ -M` prints 217 path strings,
+    // because it reaches some headers by more than one spelling and a plain
+    // `sort -u` dedupes strings rather than files; THIRD_PARTY_LICENSES.md
+    // carries the recipe that resolves them. An earlier version of this
+    // comment said "roughly 190", which was wrong in both senses.
+    //
+    // Worth knowing: <Eigen/Eigenvalues> alone accounts for all 217, because
+    // it transitively includes Eigen/QR and Eigen/SVD. So naming those two
+    // separately buys no extra parse coverage -- they are listed because
+    // P3 F.4's dependency-closure analysis named them, and an explicit
+    // include documents the intent even where it is redundant.
     //
     // The body only has to prove the result is usable, so it stays trivial and
     // stays away from anything a later exercise is graded on. A 2x2 identity

@@ -210,10 +210,32 @@ exists. It measures the real include closure rather than trusting four file head
       grep -il 'LGPL\|GNU General Public\|GNU Lesser' $(cat closure.txt)   # must print nothing
       grep -Li 'mozilla' $(cat closure.txt)                                # review each hit
 
-  As of 5.0.1 the closure is **188 files**, **none** of which mention LGPL or GNU General
-  Public. Note `grep -i mozilla` on one line only — Eigen wraps its notice so that "Mozilla"
-  and "Public License" fall on separate lines, and a `grep 'Mozilla Public'` returns every file
-  as a false positive.
+  **Corrected 2026-11-20 (third review pass): the closure is 204 DISTINCT FILES, not 188.**
+  The recipe above prints **217 path strings**, and `sort -u` dedupes *strings*, not *files* —
+  clang's `-M` reaches some headers by more than one spelling (`src/Eigenvalues/./…` and
+  `src/Eigenvalues/././…` are the same file), so resolve the paths before counting:
+
+      while read -r f; do python3 -c "import os,sys;print(os.path.realpath(sys.argv[1]))" "$f"; \
+        done < closure.txt | sort -u | wc -l        # 204
+
+  **The load-bearing claim is re-verified and holds: ZERO files in that closure mention LGPL,
+  GNU Lesser, or GNU General Public.** That is the conclusion this vendoring rests on, and it
+  was re-run against the 204 distinct files, not the old count.
+
+  Note `grep -i mozilla` on one line only — Eigen wraps its notice so that "Mozilla" and
+  "Public License" fall on separate lines, and a `grep 'Mozilla Public'` returns every file as a
+  false positive.
+
+  **What the `grep -Li mozilla` review actually found**, recorded in full so the next audit does
+  not redo it: **19** of the 204 carry no Mozilla notice. Exactly **two** of those carry a
+  licence notice of their own — `BFloat16.h` (Apache-2.0) and `MKL_support.h` (BSD-3-Clause),
+  both tabled below. The remaining **17 carry no copyright or licence text at all**: the
+  per-directory `InternalHeaderCheck.h` files, the `plugins/*.inc` fragments,
+  `DisableStupidWarnings.h`, `ReenableStupidWarnings.h`, `Eigen/Version`, and
+  `arch/NEON/GeneralBlockPanelKernel.h`. Un-noticed files in an MPL-2.0 distribution take the
+  project's own licence; they are listed here because an earlier version of this section implied
+  the review had found only three hits, which was an undercount of the hits rather than of the
+  licences.
 
 **THE THREE NON-MPL2 FILES IN THAT CLOSURE.** All permissive; their full texts are in the
 vendored `COPYING.APACHE` and `COPYING.BSD`.
