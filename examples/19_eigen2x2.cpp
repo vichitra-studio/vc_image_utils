@@ -884,69 +884,36 @@ int main() {
             }
         }
 
-        // ---- 6. YOUR hand-computed examples ------------------------------
+        // ---- 6. (REMOVED) the learner's hand-computed examples ----------
         //
         // Section B accepts this row on eigenvalues matching HAND COMPUTATION
-        // *and* agreeing with Eigen. Group 3 does the second half. This group
-        // is the first half, and it is deliberately left empty.
+        // *and* agreeing with Eigen. Group 3's 200 fixed-seed trials do the
+        // second half. The first half used to live here as two empty slots
+        // that failed loudly until filled.
         //
-        // Week 9 recorded what a scaffolder-supplied hand check costs: the
-        // `+50` derivation in 17_gradients.cpp was written out by the
-        // scaffolder, which spent the independence it was meant to buy, and
-        // the notes record that half of the mitigation as unrecoverable. So
-        // the numbers below are not here, and this group FAILS LOUDLY until
-        // you put them in -- rather than passing silently and quietly
-        // dropping an acceptance criterion.
+        // REMOVED 2026-11-21, on the learner's call, and the reasoning is
+        // recorded because the criterion is section B's and does not just
+        // evaporate:
         //
-        // Pick two matrices, work both eigenvalues by hand, and fill them in.
-        // Make them count: at least one with a != c and b != 0 and b != 1.
-        // That bar is ENFORCED below, not merely suggested -- a fixture of
-        // all zeros with hand values of zero would otherwise satisfy "filled
-        // in" while checking nothing, which is the failure mode this whole
-        // file is built against.
-        {
-            struct hand_worked {
-                float a;
-                float b;
-                float c;
-                double lambda_major;
-                double lambda_minor;
-            };
+        //   - The hand computation DID happen, during the week-10 review:
+        //     [[3,1],[1,3]], [[9,2],[2,3]], [[1e4,1],[1,1]] and
+        //     diag(1e-6, 2e-6) were each worked by hand, and two of them
+        //     found real defects that way. See P3 section H.5.10.
+        //   - But it was worked by the REVIEWER, not the learner, which is
+        //     precisely the independence this group existed to protect --
+        //     week 9's `+50` derivation in 17_gradients.cpp was supplied the
+        //     same way, and the notes record that mitigation as spent. So
+        //     most of what the group was buying had already been spent before
+        //     the learner reached it.
+        //   - Against group 3's 200 trials against Eigen, two hand values add
+        //     almost nothing as an ORACLE.
+        //   - What it did still cost was a permanently red ctest, which
+        //     teaches you to ignore a red ctest.
+        //
+        // The honest summary: this was a real criterion, it was met in the
+        // wrong place by the wrong person, and leaving a failing stub here
+        // would have recorded that less clearly than saying so.
 
-            constexpr double k_unfilled = -12345.0;
-
-            // FILL THESE IN. Replace k_unfilled with your own worked values.
-            const hand_worked mine[] = {
-                {0.0F, 0.0F, 0.0F, k_unfilled, k_unfilled},
-                {0.0F, 0.0F, 0.0F, k_unfilled, k_unfilled},
-            };
-
-            bool any_interesting = false;
-            for (const auto& h : mine) {
-                const bool filled = h.lambda_major != k_unfilled &&
-                                    h.lambda_minor != k_unfilled;
-                any_interesting =
-                    any_interesting ||
-                    (h.a != h.c && h.b != 0.0F && std::abs(h.b) != 1.0F);
-                expect(filled,
-                       "group 6 is filled in with your own hand-computed "
-                       "eigenvalues (section B asks for two examples)");
-                if (!filled) {
-                    continue;
-                }
-
-                const vc_eigen_2x2 r = eigen_symmetric(sym(h.a, h.b, h.c));
-                expect(close_rel(static_cast<double>(r.lambda_major),
-                                 h.lambda_major, k_tol) &&
-                           close_rel(static_cast<double>(r.lambda_minor),
-                                     h.lambda_minor, k_tol),
-                       "the code agrees with YOUR hand computation");
-            }
-
-            expect(any_interesting,
-                   "at least one of YOUR two examples is non-trivial: a != c, "
-                   "b != 0, |b| != 1 (all-zero fixtures would check nothing)");
-        }
     } catch (const vc::vc_exception& e) {
         std::cerr << "EXCEPTION: " << e.what() << '\n';
         std::cout << "19_eigen2x2: " << passed << " / " << total_checks

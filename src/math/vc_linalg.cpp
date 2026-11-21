@@ -157,36 +157,52 @@ vc_eigen_2x2 eigen_symmetric(const vc_mat2& a) {
     }
 
     const vc::float32 mean = trace(a) * 0.5F;
-    const vc::float32 product = determinant(a);
 
-    // CLAMPED AT ZERO, and the clamp can only ever discard a rounding
-    // artefact. Expand the discriminant once:
+    // THE DISCRIMINANT AS A SUM OF SQUARES, which is the same quantity as
+    // sqrt(mean^2 - det) with nothing large ever subtracted. Expand it once:
     //
-    //   mean^2 - det = ((a + d)/2)^2 - (a*d - b^2) = (a - d)^2 / 4 + b^2
+    //   mean^2 - det = ((a + d)/2)^2 - (a*d - b^2)
+    //                = (a^2 + 2ad + d^2)/4 - ad + b^2
+    //                = (a^2 - 2ad + d^2)/4 + b^2
+    //                = ((a - d)/2)^2 + b^2
     //
-    // a sum of two squares, so for a symmetric matrix it is never negative in
-    // exact arithmetic. A negative value here is therefore always rounding.
+    // IDENTICAL ALGEBRA. The body first used the left-hand form -- it is what
+    // 3B1B EoLA Ch 15 derives, and section C of the phase plan points at that
+    // video with the words "this one IS eigen2x2" -- and it was replaced for
+    // two float32 reasons, both of which the right-hand form simply does not
+    // have.
     //
-    // WHERE THE NEGATIVE COMES FROM, because it is not what it looks like. On
+    // ONE: CANCELLATION. On a = d = 1e4, b = 1 -- strong isotropic texture,
+    // i.e. a corner -- mean^2 is 1e8 and det is 1e8 - 1. float32 spacing at
+    // 1e8 is 8 (1e8 lies in [2^26, 2^27), so the ulp is 2^(26-23) = 8), and
+    // 99999999 is one step short of 1e8 and seven from the step below, so det
+    // rounds back to 1e8 exactly. The subtraction then gives 0, offset is 0,
+    // and both eigenvalues come back as 1e4 where the truth is 10001 and
+    // 9999. The b = 1 was not approximated, it was DESTROYED -- it had been
+    // hiding inside a difference of two numbers near 1e8, below the spacing
+    // there. The sum of squares gives ((1e4 - 1e4)/2)^2 + 1^2 = 1 exactly,
+    // and never forms 1e8 at all.
+    //
+    // Generally: squaring and then subtracting costs half the available
+    // digits, so the left-hand form carries a relative error near
+    // 2*sqrt(eps), about 7e-4 for float32 -- roughly 70x
+    // degenerate_gap_tolerance, which is why THAT FORM CANNOT MEET THIS
+    // HEADER'S 1e-5 CONTRACT at scale and this one can.
+    //
+    // TWO: IT COULD RETURN NaN, and not for a reason in the maths. On
     // (a, b, d) = (30000, 0.1, 30001) both mean^2 and det round to the same
-    // stored float32, 900030016, so the true radicand is 0. Written as one
-    // expression, the compiler may contract it into a fused multiply-add that
-    // keeps mean^2 unrounded and subtracts the ROUNDED determinant; the -15.75
-    // that comes out is just the determinant's rounding error with its sign
-    // flipped, and sqrt of it is NaN. Splitting the statement is NOT a fix,
-    // because -ffp-contract=fast produces the NaN either way. The clamp does
-    // not depend on a flag.
-    //
-    // WHAT THE CLAMP DOES NOT FIX: squaring and then subtracting costs half
-    // the available digits, so this form carries a relative error of about
-    // 2*sqrt(eps), near 7e-4 for float32 -- roughly 70x
-    // degenerate_gap_tolerance. The eigenvalues stay finite and correct to
-    // that error, but a small gap can be destroyed, which is why the
-    // acceptance suite REPORTS precision at scale rather than gating it. The
-    // sum-of-squares form above, sqrt((a - d)^2 / 4 + b^2), has no such term
-    // and needs no clamp.
-    const vc::float32 radicand = mean * mean - product;
-    const vc::float32 offset = std::sqrt(std::max(0.0F, radicand));
+    // stored float32, 900030016, so the true radicand is 0 -- but written as
+    // one expression the compiler may contract it into a fused multiply-add
+    // that keeps mean^2 unrounded and subtracts the ROUNDED det, yielding
+    // -15.75, which is just det's rounding error with its sign flipped.
+    // sqrt of that is NaN. Splitting the statement is not a fix either, since
+    // -ffp-contract=fast produces it both ways. A sum of two squares cannot
+    // be negative, so there is nothing to clamp and no flag to depend on.
+    // Group 2b of the acceptance suite still prints both radicands from your
+    // own build, because the effect is worth seeing once.
+    const vc::float32 half_diff = (a.m[0][0] - a.m[1][1]) * 0.5F;
+    const vc::float32 b_off = a.m[0][1];
+    const vc::float32 offset = std::sqrt(half_diff * half_diff + b_off * b_off);
 
     // offset is non-negative, so these are already ordered and no sort or
     // comparison is needed to tell which is which.

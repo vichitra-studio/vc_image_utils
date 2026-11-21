@@ -69,3 +69,7 @@ return (static_cast<std::size_t>(y) * width_ + x) * channels_ + ch;
 - A lot of places handle indexing via % operator manually. Instead everyplace should use the edge policy. Edhe policy should also have a function which returns the index based on the policy and not just the pixel value? Should it be part of vc_image?
 
 - calude desktop : HDR merge CPU implementation timeline
+- standford, fcam
+- Benchmarks
+- Examples have a lot of redundant code
+- What structs need to be classes?
