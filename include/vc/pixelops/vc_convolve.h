@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -189,6 +190,29 @@ using kernel_offset = std::int64_t;
 // free to stay different types.
 using kernel_weights = std::vector<vc::float32>;
 
+// THE 1-D CENTRAL DIFFERENCE, AND THE ONE PLACE ITS SIGN IS DECIDED.
+//
+// The 1/2 is the normalisation that makes a unit ramp report a slope of
+// exactly 1 rather than 2. The ORDER is the sign convention: stored this way
+// and flipped by convolve(), +x points right and +y points down.
+//
+// SHARED BETWEEN TWO LAYERS, AND IT HAS TO LIVE IN THE LOWER ONE. Two
+// things are built from these three taps -- make_sobel_derivative_1d_x/y()
+// in vc_gradients.h, and the fused make_gaussian_derivative_1d_* below.
+// vc_gradients.h INCLUDES this header, so the shared value cannot sit up
+// there without inverting the dependency; it sits here, where the kernel
+// vocabulary already is, and both layers read it.
+//
+// WHY IT IS WORTH A NAME RATHER THAN TWO LITERALS. A sign convention is
+// invisible to the tests that matter most. A structure tensor is built from
+// PRODUCTS of gradients, so negating dx, or dy, or both, leaves A, B, C and
+// therefore det, trace and the Harris response R all completely unchanged --
+// two copies of these taps could drift into disagreeing about the sign and
+// the whole acceptance suite would stay green. Something no test can check
+// gets exactly one definition.
+inline constexpr std::array<vc::float32, 3> k_central_difference_taps = {
+    0.5F, 0.0F, -0.5F};
+
 // A 2-D convolution kernel: weights, plus the declaration that its centre tap
 // is the origin.
 //
@@ -289,8 +313,17 @@ class vc_kernel {
 // ONE THING THIS SYMBOL IS NOW NOT AVAILABLE FOR. Convolving two kernels into
 // a single composed kernel -- blur-then-differentiate collapsed into one pass
 // -- is also written with a star in the literature, and [1,2,1] * [1,2,1] =
-// [1,4,6,4,1] under THAT reading while this one gives a 3x3. That operation
-// is not built, and when it is it needs a NAME, not this operator.
+// [1,4,6,4,1] under THAT reading while this one gives a 3x3. It is a
+// DIFFERENT OPERATION, told apart by the rank of its output rather than by
+// taste, so it gets a NAME and not this operator.
+//
+// It now exists, as the 1-D case only: convolve_taps() in vc_convolve.cpp,
+// private, which is what make_gaussian_derivative_1d_* composes its taps
+// with. PRIVATE ON PURPOSE -- it has one caller, and the bar above is that an
+// operation earns its public place by having several plus an invariant that
+// then holds by construction. The general 2-D case is not built: it grows the
+// support to (H1+H2-1) x (W1+W2-1) and has to settle whether it convolves or
+// correlates, and no caller needs that answer yet.
 [[nodiscard]] vc_kernel operator*(const vc_kernel& column,
                                   const vc_kernel& row);
 
@@ -334,6 +367,31 @@ class vc_kernel {
 // test asserts precisely that.
 [[nodiscard]] vc_kernel make_gaussian_1d_x(float sigma);
 [[nodiscard]] vc_kernel make_gaussian_1d_y(float sigma);
+
+// THE DERIVATIVE-OF-GAUSSIAN, AS ONE KERNEL. Blurring at sigma and then
+// differencing IS differencing a blurred image -- (I (x) G) (x) D = I (x) (G
+// (x) D), by associativity -- so the two passes fuse into a single kernel
+// EXACTLY, with no approximation. Hand-check on the narrowest case:
+// [1,2,1] (x) [-1,0,1] = [-1,-2,0,2,1], antisymmetric and summing to zero.
+//
+// WHY THIS EXISTS INSTEAD OF BEING COMPOSED AT THE CALL SITE. Pre-blurring at
+// sigma and then calling gradient_x() gives sigma along the differencing
+// direction but sqrt(sigma^2 + 0.5) across it, because Sobel carries its own
+// [1,2,1] there -- 1.0 against 1.22 at sigma = 1, anisotropic by about a
+// fifth. An operator built from such a gradient is not rotationally
+// symmetric, which is exactly the property corner repeatability is measured
+// on. make_gaussian_derivative_1d_x(sigma) paired with make_gaussian_1d_y(
+// sigma) is isotropic BY CONSTRUCTION, and there is no way to hold it wrong.
+//
+// SCALED LIKE vc_gradients' SOBEL FACTORS -- 1/2 on the difference -- so a
+// unit ramp reports a slope of 1 and magnitudes stay comparable to
+// gradient_x(). Width is make_gaussian_1d_x(sigma)'s plus 2, so still odd and
+// still centred. IT SUMS TO ZERO, not to one: it is a derivative, and a flat
+// region must come back as no gradient.
+//
+// REJECTS, with invalid_argument: a sigma that is not finite and > 0.
+[[nodiscard]] vc_kernel make_gaussian_derivative_1d_x(float sigma);
+[[nodiscard]] vc_kernel make_gaussian_derivative_1d_y(float sigma);
 
 // ---- the operations ---------------------------------------------------------
 

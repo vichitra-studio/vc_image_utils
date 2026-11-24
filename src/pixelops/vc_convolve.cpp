@@ -4,6 +4,7 @@
 #include "vc/pixelops/vc_convolve.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <numeric>
@@ -30,14 +31,65 @@ namespace {
 // the same as normalising the product -- the separable and full paths then
 // agree by construction, which is what the separability test asserts.
 //
-// Radius is ceil(3 * sigma): three standard deviations hold ~99.7% of the
-// mass, and the tail beyond it is below what a float can represent against the
-// centre weight. Width is 2*radius + 1, so always odd, so the kernel always
-// has a centre.
+// RADIUS IS ceil(3 * sigma), AND THE REASON IS THE OUTPUT'S PRECISION, NOT
+// THE FLOAT'S. An earlier version of this comment claimed the tail beyond 3
+// sigma is below what a float can represent against the centre weight. That
+// is wrong by a wide margin: at sigma = 1 the first DISCARDED tap is
+// exp(-8) = 3.35e-04 of the centre, where float epsilon is 1.19e-07, and
+// taps only vanish against the centre at about 5.66 sigma. Truncating at 3
+// sigma throws away mass that a float represents perfectly well.
+//
+// The real criterion is that the discarded mass stay below one quantisation
+// step of the output -- AND THE BIT DEPTH HAS TO BE NAMED, because the answer
+// is not the same at 8 and 12 bits, and this project's data is raw:
+//
+//     radius   width   mass dropped    8-bit (255)    12-bit (4095)
+//       2 s      5      9.13e-03        2.33 steps     37.4 steps
+//       3 s      7      2.71e-04        0.069 steps     1.11 steps
+//       4 s      9      2.99e-06        0.001 steps     0.012 steps
+//
+// 3 sigma is the knee AT 8 BITS, with a factor of 14 to spare. At 12 bits it
+// is marginal -- 1.1 steps, so just over one LSB -- and at 16 it is 17.7
+// steps and plainly not enough. Dropping to 2 sigma is visible banding at any
+// depth. So 3 is the right default for display-range work and the number to
+// revisit if a 12- or 16-bit path ever cares about the last code value;
+// 4 sigma costs two more taps per axis and buys a factor of 90.
+//
+// A SUBTLETY THE TEXTBOOK "99.7%" FIGURE HIDES: that figure is the
+// CONTINUOUS integral beyond 3 sigma, so it predicts dropping 0.27%. The
+// table says 0.027%, ten times less, because the taps sit at INTEGER
+// offsets -- with radius 3 the outermost tap KEPT is at 3 sigma and the first
+// one DROPPED is at 4 sigma. The continuous rule charges for the tail from 3
+// sigma out; discrete sampling only charges from the next sample out. So
+// 99.7% is the right instinct and a pessimistic bound.
+//
+// WHAT THE DISCARDED MASS ACTUALLY COSTS, given the renormalisation below:
+// nothing in brightness. Dividing by the SAMPLED sum redistributes it over
+// the taps that were kept, so the error is not "0.027% darker" but a slight
+// SHAPE error -- a truncated-then-renormalised Gaussian whose effective sigma
+// is a hair under the one requested. Which is the better kind of error, and
+// is the second reason the sampled-sum normalisation matters.
+//
+// CEIL, NOT ROUND. It guarantees radius >= 1 for every sigma > 0, so the
+// kernel is never a single tap and always has a centre. At sigma = 0.1 the
+// radius is 1 and the two outer taps are exp(-50) ~ 2e-22, which normalises
+// to [0, 1, 0] -- an identity, and correct: a Gaussian that narrow IS a
+// delta. Width is 2*radius + 1, so always odd, which is what vc_kernel's
+// constructor requires and what makes "the centre tap is the origin"
+// expressible at all.
 kernel_weights gaussian_taps(float sigma) {
-    if (!(sigma > 0.0F)) {
+    // FINITE, NOT JUST POSITIVE. `!(sigma > 0)` catches 0, negatives and NaN,
+    // but +INFINITY sails through it -- and then ceil(3 * inf) is inf, the
+    // cast to an integer radius is undefined, and the vector sizing throws
+    // std::length_error("vector"). That is not an invalid_argument rejection,
+    // the message names nothing the caller passed, and every contract in this
+    // library that says "not finite is rejected" was quietly untrue for that
+    // one value. Found while writing the S3 Harris contract, which needs this
+    // guarantee for both of its scales.
+    if (!std::isfinite(sigma) || !(sigma > 0.0F)) {
         throw vc::vc_exception(vc::vc_error_code::invalid_argument,
-                               "gaussian_taps: sigma must be positive");
+                               "gaussian_taps: sigma must be finite and "
+                               "positive");
     }
 
     // SIGNED, deliberately. A loop from -radius written with an unsigned type
@@ -209,6 +261,75 @@ vc_kernel make_gaussian_1d_x(float sigma) {
 
 vc_kernel make_gaussian_1d_y(float sigma) {
     kernel_weights taps = gaussian_taps(sigma);
+    const auto height = static_cast<vc::image_dim>(taps.size());
+    return {1, height, std::move(taps)}; // a COLUMN
+}
+
+namespace {
+
+// 1-D FULL DISCRETE CONVOLUTION of two tap arrays along ONE axis, which is
+// the operation vc_convolve.h's operator* is explicitly NOT -- see that
+// declaration's "ONE THING THIS SYMBOL IS NOW NOT AVAILABLE FOR" note, which
+// predicted this helper and asked for it to be given a name.
+//
+// THE TWO OPERATIONS DIFFER IN THE RANK OF THEIR OUTPUT, so neither can stand
+// in for the other. operator* is the OUTER product: a 7-tap row times a
+// 3-tap column is a 3x7 GRID, 21 weights, a 2-D kernel. This composes along
+// a SINGLE axis: 7 taps convolved with 3 gives 9 taps, still 1-D. Handing
+// two rows to operator* does not even compile into a wrong answer -- it
+// throws, because the left operand must be 1 tap wide.
+//
+// out[i + j] += a[i] * b[j] IS the convolution sum, not a shortcut for it:
+// substitute j = n - i into sum_k a[k] * b[n - k] and this is what is left.
+// It is NOT correlation, and the difference is load-bearing here -- reverse
+// b and {0.5, 0, -0.5} becomes {-0.5, 0, 0.5}, which negates every gradient
+// the composed kernel goes on to produce. The hand-check from the operator*
+// note is the symmetric case, where a flip could hide:
+//
+//     [1,2,1] (x) [1,2,1] = [1,4,6,4,1]        (this operation)
+//     [1,2,1]  *  [1,2,1] = a 3x3 grid         (operator*)
+//
+// Width is a.size() + b.size() - 1, so odd stays odd when both operands are
+// odd and the composed kernel keeps its centre tap.
+kernel_weights convolve_taps(std::span<const vc::float32> a,
+                             std::span<const vc::float32> b) {
+    if (a.empty() || b.empty()) {
+        // a.size() + b.size() - 1 would wrap to SIZE_MAX and size a vector
+        // from it. No caller does this; an empty result fails vc_kernel's
+        // odd-and-non-zero width check loudly instead.
+        return {};
+    }
+
+    kernel_weights out(a.size() + b.size() - 1, 0.0F);
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        for (std::size_t j = 0; j < b.size(); ++j) {
+            out[i + j] += a[i] * b[j];
+        }
+    }
+    return out;
+}
+
+// The Gaussian taps composed with k_central_difference_taps -- the SAME three
+// numbers vc_gradients' Sobel factors are built from, read from the one place
+// they are defined rather than written out again here. Same sign convention
+// and same 1/2 normalisation, so a derivative-of-Gaussian gradient is
+// directly comparable with a Sobel one. Output width is n + 2, odd whenever
+// n is.
+kernel_weights gaussian_derivative_taps(float sigma) {
+    const kernel_weights g = gaussian_taps(sigma); // validates sigma
+    return convolve_taps(g, k_central_difference_taps);
+}
+
+} // namespace
+
+vc_kernel make_gaussian_derivative_1d_x(float sigma) {
+    kernel_weights taps = gaussian_derivative_taps(sigma);
+    const auto width = static_cast<vc::image_dim>(taps.size());
+    return {width, 1, std::move(taps)}; // a ROW
+}
+
+vc_kernel make_gaussian_derivative_1d_y(float sigma) {
+    kernel_weights taps = gaussian_derivative_taps(sigma);
     const auto height = static_cast<vc::image_dim>(taps.size());
     return {1, height, std::move(taps)}; // a COLUMN
 }

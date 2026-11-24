@@ -111,6 +111,7 @@ set(VC_LIB_SOURCES
     src/pixelops/vc_pyramid.cpp
     src/pixelops/vc_laplacian.cpp
     src/pixelops/vc_gradients.cpp
+    src/pixelops/vc_harris.cpp
     src/pixelops/vc_poisson.cpp
     src/pipe/vc_pipe_contract.cpp
     src/pipe/vc_pipe_context.cpp
@@ -409,6 +410,7 @@ if(VC_BUILD_EXAMPLES)
         17_gradients
         18_edges
         19_eigen2x2
+        20_harris
     )
 
     foreach(example ${VC_EXAMPLE_TARGETS})

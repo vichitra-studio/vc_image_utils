@@ -3,6 +3,7 @@
 
 #include "vc/pixelops/vc_gradients.h"
 
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <span>
@@ -99,22 +100,43 @@ void require_matched_pair(const vc::vc_image& dx,
     }
 }
 
+// SOBEL'S SMOOTHING FACTOR, ONCE. [1,2,1]/4, the binomial approximation to a
+// Gaussian of variance 0.5 that gives Sobel its perpendicular blur. It was
+// written out in both make_sobel_smooth_1d_x and _y; PRIVATE rather than in
+// vc_convolve.h beside k_central_difference_taps, because unlike the central
+// difference nothing outside this file needs it -- the fused
+// make_gaussian_derivative_1d_* use a real Gaussian, not this.
+constexpr std::array<vc::float32, 3> k_sobel_smooth_taps = {0.25F, 0.5F, 0.25F};
+
 } // namespace
 
+// Both read k_central_difference_taps from vc_convolve.h rather than spelling
+// the three numbers out. They were literals here until the fused
+// make_gaussian_derivative_1d_* needed the same taps; a second copy of a sign
+// convention that no test can catch is worth deleting. See that constant's
+// comment for why it lives in the lower header.
 vc_kernel make_sobel_derivative_1d_x() {
-    return vc_kernel{3, 1, {0.5F, 0.0F, -0.5F}};
+    return vc_kernel{3, 1,
+                     kernel_weights{k_central_difference_taps.begin(),
+                                    k_central_difference_taps.end()}};
 }
 
 vc_kernel make_sobel_derivative_1d_y() {
-    return vc_kernel{1, 3, {0.5F, 0.0F, -0.5F}};
+    return vc_kernel{1, 3,
+                     kernel_weights{k_central_difference_taps.begin(),
+                                    k_central_difference_taps.end()}};
 }
 
 vc_kernel make_sobel_smooth_1d_x() {
-    return vc_kernel{3, 1, {0.25F, 0.5F, 0.25F}};
+    return vc_kernel{
+        3, 1,
+        kernel_weights{k_sobel_smooth_taps.begin(), k_sobel_smooth_taps.end()}};
 }
 
 vc_kernel make_sobel_smooth_1d_y() {
-    return vc_kernel{1, 3, {0.25F, 0.5F, 0.25F}};
+    return vc_kernel{
+        1, 3,
+        kernel_weights{k_sobel_smooth_taps.begin(), k_sobel_smooth_taps.end()}};
 }
 
 // COLUMN FIRST, both of them. See DEFECT 1 above: convolve_separable() takes

@@ -35,8 +35,10 @@ template <vc_pixel_element_req T, typename F> void with_pixels(F&& f)
 	  to vc_image_writer fixes it everywhere and is a two-line change.
 	- We need to have both planar and interleaved buffer support (CPU needs planar, GPU needs interleaved?)
 	- Ability to extract/work ROI from vc_image/writer
+	- std::move(R).seal(): there should be a cleaner way to perform this. Its too big for a syntax. Wrapped in function itself.
+	- image_dim is adding a lot of chaos since there are legit cases of negative index. Also, channels having a separate typedef makes it even worse.
 
-- we do a lot of sequential vc_image operations which require writing and reading. Writing is only supported via image writer and all the functions take input as vc_image. This means, for every operation we are allocating memory and maintaining it fore the whole operation. Isnt this wrong? Whats the best practice here? Should we allow casiting of writer as vc_image or have a getter which doesnt move? Should we aim to eliminate memory allocation for every atomic image operation that will form a step in stage pipeline?
+- we do a lot of sequential vc_image operations which require writing and reading. Writing is only supported via image writer and all the functions take input as vc_image. This means, for every operation we are allocating memory and maintaining it fore the whole operation. Isnt this wrong? Whats the best practice here? Should we allow casiting of writer as vc_image or have a getter which doesnt move? Should we aim to eliminate memory allocation for every atomic image operation that will form a step in stage pipeline? Also, each image operation in a pipeline results in its own copy of the result which is then fed to the next step. Effectively, we end up with a lot more memory consumption during the pipeline execution.
 
 - looping for cpu/gpu optimised manner? memory Layout?
 
@@ -73,3 +75,94 @@ return (static_cast<std::size_t>(y) * width_ + x) * channels_ + ch;
 - Benchmarks
 - Examples have a lot of redundant code
 - What structs need to be classes?
+- Create interface for feature detectors/descriptors/matchers? All algorimths get wired through this interface instead of concrete types?
+- check duplicate kernel definitions/hard coded values. We need to have just one function for every kernel that gets used. 
+- A lot of duplicate kernel work exists (blurring and derivatives for now)
+- vc_structure_tensor: NAME IS RIGHT, PLACEMENT IS NOT.
+	- It lives in vc_harris.h, which implies it belongs to Harris. It does
+	  not. The same M is Shi-Tomasi (R = min eigenvalue -- S2's eigen2x2
+	  already does the readout), Lucas-Kanade/KLT (solves M*[u,v]^T = -b),
+	  Foerstner, and Di Zenzo's colour tensor.
+	- Do NOT rename it to anything with "harris" or "descriptor" in it.
+	  "descriptor" is needed for the real thing (a vector on a detected
+	  keypoint, for matching) -- see the detector/descriptor/matcher item
+	  above, which is the same question from the other end.
+	- MOVE IT OUT when the second caller exists, i.e. when P4's optical
+	  flow needs M. Mechanical: it is a plain aggregate with no other
+	  dependency on vc_harris.h. Splitting the header before that is churn.
+
+- CHANNEL COLLAPSE IS A MISSING PIPELINE STAGE, not a missing field.
+	- vc_corner has no channel and should not: a corner is a position.
+	  But corner_peaks currently reads CHANNEL 0 ONLY, so on RGB it
+	  silently returns corners found in red and discards G and B. That is
+	  a silent wrong answer, not a deferred policy decision.
+	- The reduction must happen at the TENSOR, before corner_response,
+	  because R = det - k*tr^2 is NONLINEAR: sum(R(M_c)) != R(sum(M_c)).
+	  A red horizontal edge crossing a green vertical edge is a corner,
+	  and per-channel R says it is not.
+	- sum_c M_c is J^T J for the 3x2 Jacobian, i.e. Di Zenzo 1986 -- the
+	  honest generalisation, not a merge heuristic.
+	- BOTH DONE. corner_peaks rejects multi-channel; corner_response
+	  collapses to the mean and R is now always single-channel. What is
+	  left for P4:
+	    * THE COLLAPSE COULD MOVE BEFORE THE WINDOW. Summation and
+	      convolution are both linear so it commutes, and collapsing
+	      first means windowing 1 channel instead of C -- a 3x saving on
+	      the most expensive stage, for an identical result. Not done
+	      because structure_tensor() owns the window; it would need a
+	      flag or a split.
+	    * IT MOVES WITH vc_structure_tensor when that type leaves
+	      vc_harris.h (see the item above).
+	    * ITS INDEXING ASSUMES INTERLEAVED STORAGE. px[i * ch + c]
+	      matches vc_image_info::index(), and the channel loop is
+	      innermost BECAUSE channels are adjacent. Under the planar/
+	      interleaved item above, this is one of the places that has to
+	      change, and it will be silently wrong rather than loud.
+
+- DONE since this list was written, for the two kernel-duplication items
+  above: k_central_difference_taps in vc_convolve.h is now the single
+  definition of {0.5, 0, -0.5}, read by both make_sobel_derivative_1d_x/y
+  and the fused make_gaussian_derivative_1d_*. The Gaussian taps already
+  had one home in gaussian_taps(). Still outstanding: the Gaussian's own
+  extraction into its own file, and a sweep for any other duplicates.
+
+- ANISOTROPY COVERAGE: CLOSED, by group 1c of 20_harris -- a reference
+  comparison against a tensor built from the fused DoG kernels, matched in
+  the interior to 1e-4. Kept here because the route to it is instructive.
+	- Three gate designs failed first. On-axis tensor gates are blind by
+	  transpose symmetry. The rotated peak count is blind at sigma_i = 2
+	  (same 24 interior peaks either way) and only worked at sigma_i = 1,
+	  which is the ring defect. A/B against its geometric value on a
+	  tilted edge was INCONCLUSIVE, not disproved: at 45 degrees
+	  transpose symmetry forces A/B = 1 for BOTH routes and the
+	  diagnostic returned 1.90 and 2.03, which means the diagnostic was
+	  broken (double cos45 != sin45 flips anti-diagonal pixels, and the
+	  sample point sat on the step). An anti-aliased analytic edge would
+	  be the way to test the idea properly, if it is ever wanted.
+	- The lesson worth keeping: the working gate compares against a
+	  CONSTRUCTION, not against a consequence. Consequence gates
+	  (counts, ratios, peaks) all turned out to depend on the scales;
+	  the construction gate does not.
+	- It also EXCLUDED a construction the header used to permit: a
+	  sampled analytic Gaussian derivative is 1.6e-01 away from
+	  Gaussian-convolved-with-difference, further than the trap itself.
+	  Header narrowed accordingly.
+
+- group 0 of 20_harris gates make_gaussian_derivative_1d_x/y. Those are
+  CONVOLVE kernels and the gates belong with a convolve suite, not with
+  Harris; they live there because 20_harris is the file that needed them.
+  Note they still have ZERO production callers -- the implementation chose
+  route B -- so they are kept on the strength of route A staying documented.
+
+- gaussian_blur(src, sigma, policy) helper in vc_convolve: wraps
+  make_gaussian_1d_x/y + convolve_separable. 4 call sites in src/ today.
+  Clears the several-callers bar that operator* set; not done mid-slice.
+  The larger version is extracting the Gaussian into its own file.
+
+- Tap-literal duplication is now CLOSED for the kernels in use:
+  k_central_difference_taps (vc_convolve.h, shared across two layers) and
+  k_sobel_smooth_taps (vc_gradients.cpp, private). Remaining literal kernel
+  is the 3x3 Laplacian in vc_laplacian.cpp, which has one definition and one
+  caller, so nothing to dedupe. Test-side literals in examples/ stay
+  literal on purpose -- a gate that reads the constant it is checking
+  compares it against itself.
