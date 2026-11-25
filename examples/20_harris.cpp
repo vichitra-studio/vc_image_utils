@@ -1786,8 +1786,42 @@ int main() {
     run_group("6", [&] {
         std::cout << "group 6: the chosen k and threshold (report only)\n";
 
-        constexpr float k_chosen = 0.06F; // <-- REPLACE with your own, and say
-        constexpr float k_fraction = 0.05F; // <-- why, in a comment here.
+        // BOTH CHOSEN BY REASONING, and the reasoning is written down in
+        // vc_docs/curriculum/notes/corners.txt -- not here, because it is
+        // several pages of it. This comment records the conclusions and where
+        // they come from, which is what the code needs to carry.
+        //
+        // k = 0.06, FROM SZELISKI 7.1.1, and the note's section 18 is why that
+        // is a defensible number rather than a copied one: k sets how lopsided
+        // the two curvatures may be before a point stops counting as a corner,
+        // with a hard ceiling at k < 0.25 (at alpha == beta,
+        // R = alpha^2 * (1 - 4k), so at k = 0.25 nothing is ever a corner).
+        // The paper itself gives NO value on the technical pages -- checked
+        // against the rendered page, not recalled -- and section 18 also
+        // records that the formula is "inspired", engineered for a sign
+        // pattern, not derived from anything, which is why the constant is
+        // taken from practice and not from first principles.
+        //
+        // THE THRESHOLD IS RELATIVE, AND THAT IS THE REASONED PART. Section 19
+        // of the note is an objection worked through to a conclusion: an
+        // ABSOLUTE threshold on R is not contrast-proof, because scaling the
+        // image by p scales every tensor entry by p^2 and R by p^4, so the
+        // same scene at different exposure crosses the threshold at different
+        // places. Thresholding relative to max(R) makes the cut ride along
+        // with the contrast. That is trap 4 of vc_harris.h, reached
+        // independently from the paper.
+        //
+        // The FRACTION is the one free number left. 0.05 is tuned to this
+        // fixture; the note's section 19 quotes 0.01 as the usual figure, and
+        // either finds all 36 junctions here. It is a fixture constant, not a
+        // claim about images in general.
+        //
+        // NOTE k_fixture_k IS ALSO 0.06, AND THAT IS A COINCIDENCE OF TWO
+        // INDEPENDENT ROUTES -- one a constant the gates needed, one Szeliski's
+        // published value. They are not the same decision and changing one
+        // must not silently change the other.
+        constexpr float k_chosen = 0.06F;
+        constexpr float k_fraction = 0.05F;
 
         const vc::vc_image r = vc::pixelops::corner_response(m_board, k_chosen);
         float max_r = 0.0F;
