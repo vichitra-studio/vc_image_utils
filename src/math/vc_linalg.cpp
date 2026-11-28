@@ -359,12 +359,15 @@ vc::float32 norm_squared(const vc_vec3& v) {
     return dot(v, v);
 }
 
+// std::hypot, NOT sqrt(norm_squared(v)) -- see the note on norm() in the
+// header. The intermediate square is what overflows and underflows; hypot
+// never forms it.
 vc::float32 norm(const vc_vec2& v) {
-    return std::sqrt(norm_squared(v));
+    return std::hypot(v.x, v.y);
 }
 
 vc::float32 norm(const vc_vec3& v) {
-    return std::sqrt(norm_squared(v));
+    return std::hypot(v.x, v.y, v.z);
 }
 
 vc_vec2 project(const vc_vec2& v, const vc_vec2& onto) {

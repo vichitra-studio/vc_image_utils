@@ -5,6 +5,7 @@
 
 #include "vc/core/vc_scalar.h" // vc::float32 -- leaf header
 #include <array>
+#include <cmath> // std::isfinite, std::sqrt -- used by vc_vec2 below
 
 namespace vc::math {
 
@@ -61,12 +62,24 @@ namespace vc::math {
 struct vc_vec2 {
     vc::float32 x;
     vc::float32 y;
+
+    // Every component finite. A predicate and not a norm: there is no free
+    // function for this, whereas the length IS published below as norm() /
+    // norm_squared() and is NOT duplicated here -- one spelling per quantity,
+    // which is the rule the operator* and distance() notes further down state.
+    [[nodiscard]] bool is_valid() const {
+        return std::isfinite(x) && std::isfinite(y);
+    }
 };
 
 struct vc_vec3 {
     vc::float32 x;
     vc::float32 y;
     vc::float32 z;
+
+    [[nodiscard]] bool is_valid() const {
+        return std::isfinite(x) && std::isfinite(y) && std::isfinite(z);
+    }
 };
 
 // std::array rather than a C array (modernize-avoid-c-arrays): it is a proper
@@ -205,6 +218,17 @@ inline constexpr vc::float32 singular_tolerance = 1e-8f;
 // codebase is per-pixel patch distance, which belongs with the patch code, not
 // in a geometry header. No distance(a, b) either — it is norm(a - b) at the
 // call site, and one spelling of a one-line composition is enough.
+//
+// norm() DOES NOT SHARE norm_squared()'s RANGE ASSUMPTION. It is computed with
+// std::hypot, not sqrt(norm_squared(v)), so it is correct across the whole
+// float32 range at both ends. That matters outside image geometry: a gradient
+// is not a pixel coordinate and has no magnitude bound, and sqrt-of-sum-of-
+// squares fails BOTH ways on one -- components past ~1e19 square to +inf, and
+// components below ~1e-22 square to zero, so the length of a short but
+// perfectly representable vector comes back as exactly 0. An optimizer that
+// scales its stopping test by such a length then reports success without
+// moving. Use norm_squared() when ordering or thresholding (it is cheaper and
+// the comparison is unaffected); use norm() when the number is a length.
 [[nodiscard]] vc::float32 norm(const vc_vec2& v);
 [[nodiscard]] vc::float32 norm(const vc_vec3& v);
 

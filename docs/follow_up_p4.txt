@@ -75,6 +75,8 @@ return (static_cast<std::size_t>(y) * width_ + x) * channels_ + ch;
 - Benchmarks
 - Examples have a lot of redundant code
 - What structs need to be classes?
+	- for each struct check for their usage and extract out common functionalities as functions.
+	- valdiity checks/limits/math ops/properties etc
 - Create interface for feature detectors/descriptors/matchers? All algorimths get wired through this interface instead of concrete types?
 - check duplicate kernel definitions/hard coded values. We need to have just one function for every kernel that gets used. 
 - A lot of duplicate kernel work exists (blurring and derivatives for now)
@@ -166,3 +168,4 @@ return (static_cast<std::size_t>(y) * width_ + x) * channels_ + ch;
   caller, so nothing to dedupe. Test-side literals in examples/ stay
   literal on purpose -- a gate that reads the constant it is checking
   compares it against itself.
+

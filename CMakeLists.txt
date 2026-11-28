@@ -96,6 +96,7 @@ set(VC_LIB_SOURCES
     src/io/vc_io_stb.cpp
     src/io/vc_io_fs.cpp
     src/math/vc_linalg.cpp
+    src/math/vc_optimize.cpp
     src/math/vc_transform.cpp
     src/math/vc_dft.cpp
     src/math/vc_grid2d.cpp
@@ -411,6 +412,7 @@ if(VC_BUILD_EXAMPLES)
         18_edges
         19_eigen2x2
         20_harris
+        21_gradient_descent
     )
 
     foreach(example ${VC_EXAMPLE_TARGETS})
